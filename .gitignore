@@ -1,0 +1,9 @@
+/target
+.cache
+.direnv
+.spotify_access_token
+review.md
+spotify_uris.txt
+test_uris.txt
+
+docs
