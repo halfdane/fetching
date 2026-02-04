@@ -90,7 +90,7 @@ pub const TRACK_DELAY_MS: u64 = 200;
 
 /// Collect unique album covers for collage creation (up to 4 unique albums)
 pub async fn collect_album_cover(
-    session: &Session,
+    image_downloader: &dyn crate::traits::ImageDownloader,
     metadata: &dyn TrackMetadataProvider,
     unique_covers: &mut Vec<Vec<u8>>,
     seen_album_ids: &mut HashSet<String>,
@@ -106,7 +106,7 @@ pub async fn collect_album_cover(
 
     seen_album_ids.insert(album_id);
     if let Some(file_id) = metadata.get_album_cover_file_id(0).await {
-        match download_cover_image(session, &file_id).await {
+        match image_downloader.download_cover(&file_id).await {
             Ok(bytes) => unique_covers.push(bytes),
             Err(e) => warn!("Failed to fetch album cover for collage: {}", e),
         }
@@ -491,8 +491,9 @@ where
             Ok(()) => {
                 // Collect album cover for collage if needed
                 if collect_album_covers {
+                    let image_downloader = crate::traits::LibrespotImageDownloader { session };
                     if let Err(e) = collect_album_cover(
-                        session,
+                        &image_downloader,
                         &TrackRefMetadataProvider(&track),
                         &mut unique_album_covers,
                         &mut seen_album_ids,
@@ -1083,47 +1084,190 @@ mod tests {
     #[tokio::test]
     async fn test_collect_album_cover_with_covers() {
         use std::collections::HashSet;
+        use crate::traits::{ImageDownloader, MockImageDownloader};
         
         let cover_id = FileId::from_raw(&[1u8; 16]);
-        let mock = MockTrackWithMultipleCovers {
+        let cover_bytes = vec![255, 254, 253]; // Mock image data
+        
+        // Setup mock image downloader
+        let mut mock_images = MockImageDownloader::default();
+        mock_images.cover_images.insert(cover_id, cover_bytes.clone());
+        
+        let mock_metadata = MockTrackWithMultipleCovers {
             name: "Test Track".to_string(),
             artist_names: vec!["Test Artist".to_string()],
             duration_ms: 180000,
             album_cover_file_ids: vec![cover_id],
         };
 
-        let _unique_covers: Vec<Vec<u8>> = Vec::new();
-        let _seen_album_ids: HashSet<String> = HashSet::new();
+        let mut unique_covers = Vec::new();
+        let mut seen_album_ids = HashSet::new();
         
-        // Mock session - we can't actually test downloading, but we can test the logic
-        // This test would need to be an integration test with proper mocking
-        // For now, just test that the method is called correctly
-        let album_id = mock.album_id().await;
-        assert_eq!(album_id, "album");
+        // Test successful cover collection
+        let result = collect_album_cover(
+            &mock_images,
+            &mock_metadata,
+            &mut unique_covers,
+            &mut seen_album_ids,
+        ).await;
         
-        let file_id = mock.get_album_cover_file_id(0).await;
-        assert_eq!(file_id, Some(cover_id));
+        assert!(result.is_ok());
+        assert_eq!(unique_covers.len(), 1);
+        assert_eq!(unique_covers[0], cover_bytes);
+        assert_eq!(seen_album_ids.len(), 1);
+        assert!(seen_album_ids.contains("album"));
+    }
+
+    #[tokio::test]
+    async fn test_collect_album_cover_download_failure() {
+        use std::collections::HashSet;
+        use crate::traits::{ImageDownloader, MockImageDownloader};
+        
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+        
+        // Setup mock image downloader with NO images (will cause failure)
+        let mock_images = MockImageDownloader::default();
+        
+        let mock_metadata = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![cover_id],
+        };
+
+        let mut unique_covers = Vec::new();
+        let mut seen_album_ids = HashSet::new();
+        
+        // Test error handling when download fails
+        let result = collect_album_cover(
+            &mock_images,
+            &mock_metadata,
+            &mut unique_covers,
+            &mut seen_album_ids,
+        ).await;
+        
+        // Should still succeed (errors are logged, not returned)
+        assert!(result.is_ok());
+        // But no covers should be collected
+        assert_eq!(unique_covers.len(), 0);
+        // Album ID should still be marked as seen
+        assert_eq!(seen_album_ids.len(), 1);
+        assert!(seen_album_ids.contains("album"));
+    }
+
+    #[tokio::test]
+    async fn test_collect_album_cover_duplicate_album() {
+        use std::collections::HashSet;
+        use crate::traits::{ImageDownloader, MockImageDownloader};
+        
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+        let cover_bytes = vec![255, 254, 253];
+        
+        let mut mock_images = MockImageDownloader::default();
+        mock_images.cover_images.insert(cover_id, cover_bytes.clone());
+        
+        let mock_metadata = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![cover_id],
+        };
+
+        let mut unique_covers = Vec::new();
+        let mut seen_album_ids = HashSet::new();
+        
+        // First call - should collect the cover
+        let result1 = collect_album_cover(
+            &mock_images,
+            &mock_metadata,
+            &mut unique_covers,
+            &mut seen_album_ids,
+        ).await;
+        assert!(result1.is_ok());
+        assert_eq!(unique_covers.len(), 1);
+        
+        // Second call with same album - should be skipped
+        let result2 = collect_album_cover(
+            &mock_images,
+            &mock_metadata,
+            &mut unique_covers,
+            &mut seen_album_ids,
+        ).await;
+        assert!(result2.is_ok());
+        // Still only 1 cover (duplicate was skipped)
+        assert_eq!(unique_covers.len(), 1);
+        assert_eq!(seen_album_ids.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_collect_album_cover_limit_reached() {
+        use std::collections::HashSet;
+        use crate::traits::{ImageDownloader, MockImageDownloader};
+        
+        let mut mock_images = MockImageDownloader::default();
+        let mut unique_covers = Vec::new();
+        let mut seen_album_ids = HashSet::new();
+        
+        // Pre-fill with 4 covers (the limit)
+        for i in 0..4 {
+            unique_covers.push(vec![i as u8]);
+        }
+        
+        let cover_id = FileId::from_raw(&[5u8; 16]);
+        let cover_bytes = vec![5u8];
+        mock_images.cover_images.insert(cover_id, cover_bytes);
+        
+        let mock_metadata = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![cover_id],
+        };
+        
+        // Try to add 5th cover - should be rejected due to limit
+        let result = collect_album_cover(
+            &mock_images,
+            &mock_metadata,
+            &mut unique_covers,
+            &mut seen_album_ids,
+        ).await;
+        
+        assert!(result.is_ok());
+        // Should still have only 4 covers
+        assert_eq!(unique_covers.len(), 4);
+        // Album should not be marked as seen (early return)
+        assert_eq!(seen_album_ids.len(), 0);
     }
 
     #[tokio::test]
     async fn test_collect_album_cover_no_covers() {
         use std::collections::HashSet;
+        use crate::traits::{ImageDownloader, MockImageDownloader};
         
-        let mock = MockTrackWithMultipleCovers {
+        let mock_images = MockImageDownloader::default();
+        
+        let mock_metadata = MockTrackWithMultipleCovers {
             name: "Test Track".to_string(),
             artist_names: vec!["Test Artist".to_string()],
             duration_ms: 180000,
-            album_cover_file_ids: vec![], // No covers
+            album_cover_file_ids: vec![], // No covers available
         };
 
-        let _unique_covers: Vec<Vec<u8>> = Vec::new();
-        let _seen_album_ids: HashSet<String> = HashSet::new();
+        let mut unique_covers = Vec::new();
+        let mut seen_album_ids = HashSet::new();
         
-        let album_id = mock.album_id().await;
-        assert_eq!(album_id, "album");
+        let result = collect_album_cover(
+            &mock_images,
+            &mock_metadata,
+            &mut unique_covers,
+            &mut seen_album_ids,
+        ).await;
         
-        let file_id = mock.get_album_cover_file_id(0).await;
-        assert_eq!(file_id, None);
+        assert!(result.is_ok());
+        assert_eq!(unique_covers.len(), 0);
+        // Album ID should still be marked as seen
+        assert_eq!(seen_album_ids.len(), 1);
+        assert!(seen_album_ids.contains("album"));
     }
 
     #[tokio::test]

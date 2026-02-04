@@ -49,6 +49,57 @@ pub struct LibrespotTrackProvider<'a> {
     pub track: &'a librespot_metadata::track::Track,
 }
 
+/// Capability to download cover images
+#[async_trait]
+pub trait ImageDownloader: Send + Sync {
+    /// Download a cover image by its Spotify file ID
+    async fn download_cover(&self, file_id: &FileId) -> Result<Vec<u8>>;
+    
+    /// Download an image from a direct URL
+    async fn download_url(&self, url: &str) -> Result<Vec<u8>>;
+}
+
+/// Real implementation using librespot Session
+pub struct LibrespotImageDownloader<'a> {
+    pub session: &'a librespot_core::Session,
+}
+
+#[async_trait]
+impl<'a> ImageDownloader for LibrespotImageDownloader<'a> {
+    async fn download_cover(&self, file_id: &FileId) -> Result<Vec<u8>> {
+        let image_bytes = self.session.spclient().get_image(file_id).await?;
+        Ok(image_bytes.to_vec())
+    }
+    
+    async fn download_url(&self, url: &str) -> Result<Vec<u8>> {
+        let response = reqwest::get(url).await?;
+        let bytes = response.bytes().await?;
+        Ok(bytes.to_vec())
+    }
+}
+
+/// Mock implementation for testing
+#[derive(Debug, Default)]
+pub struct MockImageDownloader {
+    pub cover_images: std::collections::HashMap<FileId, Vec<u8>>,
+    pub url_images: std::collections::HashMap<String, Vec<u8>>,
+}
+
+#[async_trait]
+impl ImageDownloader for MockImageDownloader {
+    async fn download_cover(&self, file_id: &FileId) -> Result<Vec<u8>> {
+        self.cover_images.get(file_id)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Cover image not found for FileId"))
+    }
+    
+    async fn download_url(&self, url: &str) -> Result<Vec<u8>> {
+        self.url_images.get(url)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("URL image not found: {}", url))
+    }
+}
+
 #[async_trait]
 impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     async fn id(&self) -> String {
