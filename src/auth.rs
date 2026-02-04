@@ -49,13 +49,6 @@ impl TokenRefresher {
         }
     }
 
-    /// Get current access token (for future use)
-    #[allow(dead_code)]
-    pub async fn get_access_token(&self) -> Option<String> {
-        let token = self.current_token.read().await;
-        token.as_ref().map(|t| t.access_token.clone())
-    }
-
     /// Start background refresh task that monitors token expiration
     /// Checks every 5 minutes and refreshes if token expires within 10 minutes
     pub fn start_background_refresh(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
@@ -415,22 +408,4 @@ mod tests {
         assert!(SCOPES.contains(&"streaming"));
     }
 
-    #[tokio::test]
-    async fn test_token_refresher_get_access_token() {
-        let token_data = TokenData {
-            access_token: "test_access".to_string(),
-            refresh_token: "test_refresh".to_string(),
-            expires_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                + 3600,
-        };
-
-        let refresher = TokenRefresher::new("/tmp/test_token.json".to_string(), token_data);
-        let access_token = refresher.get_access_token().await;
-        
-        assert!(access_token.is_some());
-        assert_eq!(access_token.unwrap(), "test_access");
-    }
 }

@@ -20,6 +20,7 @@ use crate::stream::{stream_and_cache_track, download_cover_image, LibrespotAudio
 use crate::error::DownloadError;
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, get_artist_name, sanitize, write_ogg_tags, TrackMetadata};
+use crate::traits::LibrespotTrackProvider;
 
 pub const TRACK_DELAY_MS: u64 = 200;
 
@@ -413,7 +414,8 @@ where
         std::io::Write::flush(&mut std::io::stdout())?;
 
         let prefix = track_prefix.map(|f| f(index + 1));
-        let output_path = build_track_path(&track, base_dir, prefix)?;
+        let provider = LibrespotTrackProvider { track: &track };
+        let output_path = build_track_path(&provider, base_dir, prefix).await?;
 
         match process_track_cache(session, &track, track_uri, &output_path, &file_id).await {
             Ok(()) => {

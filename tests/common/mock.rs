@@ -6,6 +6,7 @@ use librespot_core::file_id::FileId;
 use librespot_core::SpotifyUri;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use spotify_player::traits::TrackMetadataProvider;
 
 /// Mock audio downloader for testing retry logic and error scenarios
 pub struct MockAudioDownloader {
@@ -88,5 +89,45 @@ impl AudioDownloader for MockAudioDownloader {
             .push(cache_path.to_string());
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct MockTrackMetadataProvider {
+    pub id: String,
+    pub name: String,
+    pub album_id: String,
+    pub album_name: String,
+    pub artist_names: Vec<String>,
+    pub duration_ms: u32,
+    pub year: i32,
+    pub track_number: u32,
+}
+
+#[async_trait]
+impl TrackMetadataProvider for MockTrackMetadataProvider {
+    async fn id(&self) -> String {
+        self.id.clone()
+    }
+    async fn name(&self) -> String {
+        self.name.clone()
+    }
+    async fn album_id(&self) -> String {
+        self.album_id.clone()
+    }
+    async fn album_name(&self) -> String {
+        self.album_name.clone()
+    }
+    async fn artist_names(&self) -> Vec<String> {
+        self.artist_names.clone()
+    }
+    async fn duration_ms(&self) -> u32 {
+        self.duration_ms
+    }
+    async fn year(&self) -> i32 {
+        self.year
+    }
+    async fn track_number(&self) -> u32 {
+        self.track_number
     }
 }

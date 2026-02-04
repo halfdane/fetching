@@ -18,6 +18,7 @@ use auth::create_session_with_auto_refresh;
 use collection::{cache_album, cache_playlist, process_track_cache};
 use config::Config;
 use metadata::build_track_path;
+use traits::LibrespotTrackProvider;
 
 /// Source of Spotify URIs to process
 #[derive(Debug)]
@@ -66,7 +67,8 @@ async fn process_single_uri(
             let music_dir_str = music_dir.to_str().ok_or_else(|| {
                 anyhow::anyhow!(error::DownloadError::InvalidUtf8Path(music_dir.clone()))
             })?;
-            let output_path = build_track_path(&track, music_dir_str, None)?;
+            let provider = LibrespotTrackProvider { track: &track };
+            let output_path = build_track_path(&provider, music_dir_str, None).await?;
 
             process_track_cache(session, &track, spotify_uri, &output_path, &file_id).await?;
             
