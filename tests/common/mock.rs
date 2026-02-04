@@ -106,6 +106,7 @@ pub struct MockTrackMetadataProvider {
     pub track_number: u32,
     pub files: HashMap<AudioFileFormat, FileId>,
     pub album_cover_file_ids: Vec<FileId>,
+    pub alternative_uris: Vec<String>,
 }
 
 #[async_trait]
@@ -144,5 +145,9 @@ impl TrackMetadataProvider for MockTrackMetadataProvider {
     
     async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
         self.album_cover_file_ids.get(index).copied()
+    }
+    
+    async fn alternative_uris(&self) -> Vec<String> {
+        self.alternative_uris.clone()
     }
 }

@@ -30,6 +30,10 @@ impl TrackMetadataProvider for TestTrackProvider {
             None
         }
     }
+
+    async fn alternative_uris(&self) -> Vec<String> {
+        Vec::new() // No alternatives for this test
+    }
 }
 
 #[tokio::test]

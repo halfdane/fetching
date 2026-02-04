@@ -38,6 +38,9 @@ pub trait TrackMetadataProvider: Send + Sync + Debug {
     
     // Album cover information for testability
     async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId>;
+    
+    // Alternative track URIs for different audio formats
+    async fn alternative_uris(&self) -> Vec<String>;
 }
 
 /// Real implementation for librespot_metadata::track::Track
@@ -89,5 +92,9 @@ impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     
     async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
         self.track.album.covers.get(index).map(|cover| cover.id)
+    }
+    
+    async fn alternative_uris(&self) -> Vec<String> {
+        self.track.alternatives.iter().map(|uri| uri.to_string()).collect()
     }
 }
