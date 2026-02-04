@@ -3,11 +3,12 @@
 //! Defines the `AudioDownloader` trait to decouple streaming logic from
 //! librespot implementation, enabling mocking in tests.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use librespot_core::file_id::FileId;
 use librespot_core::SpotifyUri;
 use librespot_metadata::audio::AudioFileFormat;
+use librespot_metadata::Metadata;
 
 /// Capability to stream and cache audio tracks
 #[async_trait]
@@ -75,6 +76,24 @@ impl<'a> ImageDownloader for LibrespotImageDownloader<'a> {
         let response = reqwest::get(url).await?;
         let bytes = response.bytes().await?;
         Ok(bytes.to_vec())
+    }
+}
+
+/// Capability to fetch track metadata
+#[async_trait]
+pub trait TrackFetcher: Send + Sync {
+    async fn fetch_track(&self, uri: &SpotifyUri) -> Result<librespot_metadata::track::Track>;
+}
+
+/// Real implementation using librespot Session
+pub struct LibrespotTrackFetcher<'a> {
+    pub session: &'a librespot_core::Session,
+}
+
+#[async_trait]
+impl<'a> TrackFetcher for LibrespotTrackFetcher<'a> {
+    async fn fetch_track(&self, uri: &SpotifyUri) -> Result<librespot_metadata::track::Track> {
+        librespot_metadata::track::Track::get(self.session, uri).await.map_err(anyhow::Error::from)
     }
 }
 
@@ -147,5 +166,20 @@ impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     
     async fn alternative_uris(&self) -> Vec<String> {
         self.track.alternatives.iter().map(|uri| uri.to_string()).collect()
+    }
+}
+
+/// Mock implementation for testing track fetching
+pub struct MockTrackFetcher {
+    pub tracks: std::collections::HashMap<String, librespot_metadata::track::Track>,
+}
+
+#[async_trait]
+impl TrackFetcher for MockTrackFetcher {
+    async fn fetch_track(&self, uri: &SpotifyUri) -> Result<librespot_metadata::track::Track> {
+        let uri_str = uri.to_string();
+        self.tracks.get(&uri_str)
+            .cloned()
+            .ok_or_else(|| anyhow!("Track not found: {}", uri_str))
     }
 }

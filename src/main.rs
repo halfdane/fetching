@@ -18,6 +18,7 @@ use auth::create_session_with_auto_refresh;
 use collection::{cache_album, cache_playlist, process_track_cache};
 use config::Config;
 use metadata::build_track_path;
+use traits::LibrespotTrackFetcher;
 use traits::LibrespotTrackProvider;
 
 /// Source of Spotify URIs to process
@@ -57,7 +58,8 @@ async fn process_single_uri(
         SpotifyUri::Track { .. } => {
             info!("Caching single track...");
             // Get track with OGG format, trying alternatives if needed
-            let (track, file_id) = collection::get_track_with_ogg_format(session, spotify_uri).await?;
+            let track_fetcher = LibrespotTrackFetcher { session };
+            let (track, file_id) = collection::get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
             
             let track_display = format!("Track: {}", track.name);
             print!("{}", track_display);
