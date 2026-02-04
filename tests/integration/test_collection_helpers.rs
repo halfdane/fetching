@@ -2,11 +2,6 @@ use spotify_player::collection::save_cover_art;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-// Note: Can't easily test collect_album_cover or build_m3u_entry without
-// mocking Session and constructing Track structs with librespot types.
-// These functions are still tightly coupled to external types, but are now
-// isolated and smaller, making them easier to reason about.
-
 #[test]
 fn test_save_cover_art_with_provided_bytes() {
     let temp_dir = TempDir::new().unwrap();

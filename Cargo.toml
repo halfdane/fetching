@@ -50,3 +50,7 @@ path = "tests/integration/test_error_recovery.rs"
 [[test]]
 name = "test_temp_file_cleanup"
 path = "tests/integration/test_temp_file_cleanup.rs"
+
+[[test]]
+name = "test_build_m3u_entry"
+path = "tests/integration/test_build_m3u_entry.rs"

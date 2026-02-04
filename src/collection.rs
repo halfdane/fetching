@@ -81,14 +81,15 @@ pub fn save_cover_art(
     Ok(())
 }
 
-/// Build an M3U entry from a track
-pub fn build_m3u_entry(track: &Track, output_path: PathBuf) -> M3uEntry {
-    let artist = get_artist_name(&track.artists);
+/// Build an M3U entry from track metadata
+pub async fn build_m3u_entry(metadata: &dyn TrackMetadataProvider, output_path: PathBuf) -> M3uEntry {
+    let artist_names = metadata.artist_names().await;
+    let artist = artist_names.first().cloned().unwrap_or_else(|| "Unknown Artist".to_string());
 
     M3uEntry {
-        duration: (track.duration / 1000),
+        duration: (metadata.duration_ms().await / 1000) as i32,
         artist,
-        title: track.name.clone(),
+        title: metadata.name().await,
         file_path: output_path,
     }
 }
@@ -436,7 +437,8 @@ where
                 }
 
                 // Add to M3U entries and cached paths
-                m3u_entries.push(build_m3u_entry(&track, output_path.clone()));
+                let track_provider = LibrespotTrackProvider { track: &track };
+                m3u_entries.push(build_m3u_entry(&track_provider, output_path.clone()).await);
                 cached_paths.push(output_path);
             }
             Err(_e) => {
@@ -824,5 +826,84 @@ mod tests {
 
         let result = select_best_ogg_file(&mock).await;
         assert!(result.is_none());
+    }
+
+    #[derive(Debug)]
+    struct MockTrackForM3uEntry {
+        pub name: String,
+        pub artist_names: Vec<String>,
+        pub duration_ms: u32,
+    }
+
+    #[async_trait]
+    impl TrackMetadataProvider for MockTrackForM3uEntry {
+        async fn id(&self) -> String { "test".to_string() }
+        async fn name(&self) -> String { self.name.clone() }
+        async fn album_id(&self) -> String { "album".to_string() }
+        async fn album_name(&self) -> String { "album".to_string() }
+        async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
+        async fn duration_ms(&self) -> u32 { self.duration_ms }
+        async fn year(&self) -> i32 { 2023 }
+        async fn track_number(&self) -> u32 { 1 }
+        async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
+    }
+
+    #[tokio::test]
+    async fn test_build_m3u_entry_basic() {
+        let mock_metadata = MockTrackForM3uEntry {
+            name: "Test Song".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 245000, // 4 minutes 5 seconds
+        };
+
+        let output_path = PathBuf::from("/music/test_artist/test_album/test_song.ogg");
+        let entry = build_m3u_entry(&mock_metadata, output_path.clone()).await;
+
+        assert_eq!(entry.title, "Test Song");
+        assert_eq!(entry.artist, "Test Artist");
+        assert_eq!(entry.duration, 245); // 245000ms / 1000 = 245s
+        assert_eq!(entry.file_path, output_path);
+    }
+
+    #[tokio::test]
+    async fn test_build_m3u_entry_multiple_artists() {
+        let mock_metadata = MockTrackForM3uEntry {
+            name: "Collaboration Song".to_string(),
+            artist_names: vec!["Artist One".to_string(), "Artist Two".to_string(), "Artist Three".to_string()],
+            duration_ms: 180000,
+        };
+
+        let output_path = PathBuf::from("/music/artist_one/collaboration_song.ogg");
+        let entry = build_m3u_entry(&mock_metadata, output_path).await;
+
+        assert_eq!(entry.artist, "Artist One"); // Should use first artist
+    }
+
+    #[tokio::test]
+    async fn test_build_m3u_entry_no_artists() {
+        let mock_metadata = MockTrackForM3uEntry {
+            name: "Unknown Artist Song".to_string(),
+            artist_names: vec![], // Empty artist list
+            duration_ms: 200000,
+        };
+
+        let output_path = PathBuf::from("/music/unknown_artist/unknown_artist_song.ogg");
+        let entry = build_m3u_entry(&mock_metadata, output_path).await;
+
+        assert_eq!(entry.artist, "Unknown Artist");
+    }
+
+    #[tokio::test]
+    async fn test_build_m3u_entry_duration_rounding() {
+        let mock_metadata = MockTrackForM3uEntry {
+            name: "Test Song".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 123456, // 123.456 seconds -> should round down to 123
+        };
+
+        let output_path = PathBuf::from("/music/test.ogg");
+        let entry = build_m3u_entry(&mock_metadata, output_path).await;
+
+        assert_eq!(entry.duration, 123); // Integer division truncates
     }
 }
