@@ -56,7 +56,11 @@ pub async fn build_track_path<T: TrackMetadataProvider>(
     base_music_dir: &str,
     prefix: Option<String>,
 ) -> anyhow::Result<PathBuf> {
-    let year = track.year().await;
+    let date = track.date().await;
+    let year = date.as_ref()
+        .and_then(|d| d.split('-').next())
+        .and_then(|y| y.parse::<i32>().ok())
+        .unwrap_or(0);
     let artist_names = track.artist_names().await;
     let artist_name = sanitize(&artist_names.join(" & "));
     let album_name = sanitize(&track.album_name().await);
@@ -102,7 +106,7 @@ pub struct TrackMetadata {
 
 impl TrackMetadata {
     /// Extract metadata from a librespot Track.
-    pub fn from_track(track: &Track, year: i32, cover_art: Option<Vec<u8>>) -> Self {
+    pub fn from_track(track: &Track, date: Option<String>, cover_art: Option<Vec<u8>>) -> Self {
         // Extract artists
         let artists = track.artists.iter().map(|a| a.name.clone()).collect();
 
@@ -122,17 +126,8 @@ impl TrackMetadata {
             None
         };
 
-        // Extract date (prefer full date, fallback to year)
-        let date_obj = track.album.date;
-        let month = date_obj.month() as u8;
-        let day = date_obj.day();
-        let date = if date_obj.year() > 0 && month > 0 && day > 0 {
-            Some(format!("{:04}-{:02}-{:02}", date_obj.year(), month, day))
-        } else if year > 0 {
-            Some(year.to_string())
-        } else {
-            None
-        };
+        // Date is now provided by the trait implementation
+        let date = date;
 
         // Extract genres
         let genres = track.tags.clone();
@@ -695,8 +690,12 @@ mod tests {
             "mock_album_id".to_string()
         }
 
-        async fn year(&self) -> i32 {
-            self.year
+        async fn date(&self) -> Option<String> {
+            if self.year > 0 {
+                Some(self.year.to_string())
+            } else {
+                None
+            }
         }
 
         async fn track_number(&self) -> u32 {

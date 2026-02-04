@@ -19,7 +19,7 @@ impl TrackMetadataProvider for TestTrackProvider {
     async fn album_name(&self) -> String { "album".to_string() }
     async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
     async fn duration_ms(&self) -> u32 { self.duration_ms }
-    async fn year(&self) -> i32 { 2023 }
+    async fn date(&self) -> Option<String> { Some("2023".to_string()) }
     async fn track_number(&self) -> u32 { 1 }
     async fn get_file_id(&self, _format: &librespot_metadata::audio::AudioFileFormat) -> Option<librespot_core::file_id::FileId> { None }
     

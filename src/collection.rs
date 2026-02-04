@@ -54,8 +54,19 @@ impl<'a> TrackMetadataProvider for TrackRefMetadataProvider<'a> {
         self.0.duration as u32
     }
 
-    async fn year(&self) -> i32 {
-        self.0.album.date.year()
+    async fn date(&self) -> Option<String> {
+        let date_obj = self.0.album.date;
+        let year = date_obj.year();
+        let month = date_obj.month() as u8;
+        let day = date_obj.day();
+        
+        if year > 0 && month > 0 && day > 0 {
+            Some(format!("{:04}-{:02}-{:02}", year, month, day))
+        } else if year > 0 {
+            Some(year.to_string())
+        } else {
+            None
+        }
     }
 
     async fn track_number(&self) -> u32 {
@@ -407,8 +418,8 @@ pub async fn process_track_cache(
     let cover_art = cache_track_cover_art(session, &TrackRefMetadataProvider(track)).await;
 
     // Add metadata to the temp file
-    let year = track.album.date.year();
-    let metadata = TrackMetadata::from_track(track, year, cover_art);
+    let date = TrackRefMetadataProvider(track).date().await;
+    let metadata = TrackMetadata::from_track(track, date, cover_art);
     if let Err(e) = write_metadata_to_temp(&temp_path, &metadata) {
         // Error already printed by write_metadata_to_temp
         return Err(e);
@@ -802,7 +813,7 @@ mod tests {
         async fn album_name(&self) -> String { "Mock Album".to_string() }
         async fn artist_names(&self) -> Vec<String> { vec!["Mock Artist".to_string()] }
         async fn duration_ms(&self) -> u32 { 180000 }
-        async fn year(&self) -> i32 { 2023 }
+        async fn date(&self) -> Option<String> { Some("2023".to_string()) }
         async fn track_number(&self) -> u32 { 1 }
         async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
             self.files.get(format).copied()
@@ -899,7 +910,7 @@ mod tests {
         async fn album_name(&self) -> String { "album".to_string() }
         async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
         async fn duration_ms(&self) -> u32 { self.duration_ms }
-        async fn year(&self) -> i32 { 2023 }
+        async fn date(&self) -> Option<String> { Some("2023".to_string()) }
         async fn track_number(&self) -> u32 { 1 }
         async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
         
@@ -988,7 +999,7 @@ mod tests {
         async fn album_name(&self) -> String { "album".to_string() }
         async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
         async fn duration_ms(&self) -> u32 { self.duration_ms }
-        async fn year(&self) -> i32 { 2023 }
+        async fn date(&self) -> Option<String> { Some("2023".to_string()) }
         async fn track_number(&self) -> u32 { 1 }
         async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
         

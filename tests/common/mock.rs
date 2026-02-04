@@ -128,8 +128,12 @@ impl TrackMetadataProvider for MockTrackMetadataProvider {
     async fn duration_ms(&self) -> u32 {
         self.duration_ms
     }
-    async fn year(&self) -> i32 {
-        self.year
+    async fn date(&self) -> Option<String> {
+        if self.year > 0 {
+            Some(self.year.to_string())
+        } else {
+            None
+        }
     }
     async fn track_number(&self) -> u32 {
         self.track_number

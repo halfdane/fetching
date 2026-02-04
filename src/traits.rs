@@ -32,7 +32,7 @@ pub trait TrackMetadataProvider: Send + Sync + Debug {
     async fn album_name(&self) -> String;
     async fn artist_names(&self) -> Vec<String>;
     async fn duration_ms(&self) -> u32;
-    async fn year(&self) -> i32;
+    async fn date(&self) -> Option<String>; // Formatted date: "YYYY-MM-DD", "YYYY", or None
     async fn track_number(&self) -> u32;
     async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId>;
     
@@ -66,8 +66,19 @@ impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     async fn duration_ms(&self) -> u32 {
         self.track.duration as u32
     }
-    async fn year(&self) -> i32 {
-        self.track.album.date.year()
+    async fn date(&self) -> Option<String> {
+        let date_obj = self.track.album.date;
+        let year = date_obj.year();
+        let month = date_obj.month() as u8;
+        let day = date_obj.day();
+        
+        if year > 0 && month > 0 && day > 0 {
+            Some(format!("{:04}-{:02}-{:02}", year, month, day))
+        } else if year > 0 {
+            Some(year.to_string())
+        } else {
+            None
+        }
     }
     async fn track_number(&self) -> u32 {
         self.track.number as u32
