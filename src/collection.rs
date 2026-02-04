@@ -18,7 +18,7 @@ use librespot_metadata::{album::Album, playlist::Playlist, Metadata};
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
-use crate::stream::{stream_and_cache_track, download_cover_image, LibrespotAudioDownloader};
+use crate::stream::{stream_and_cache_track, LibrespotAudioDownloader};
 use crate::error::DownloadError;
 use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider, LibrespotImageDownloader, ImageDownloader};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
@@ -638,8 +638,9 @@ pub async fn cache_album(
     let m3u_path = album_dir.join(format!("{}.m3u8", sanitize(&album_name)));
 
     // Fetch album cover art
+    let image_downloader = LibrespotImageDownloader { session };
     let cover_art = if let Some(cover) = album.covers.first() {
-        match download_cover_image(session, &cover.id).await {
+        match image_downloader.download_cover(&cover.id).await {
             Ok(bytes) => Some(bytes),
             Err(e) => {
                 warn!("Failed to fetch album cover art: {}", e);
