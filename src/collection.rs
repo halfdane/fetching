@@ -20,7 +20,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::stream::{stream_and_cache_track, download_cover_image, LibrespotAudioDownloader};
 use crate::error::DownloadError;
-use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider};
+use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider, LibrespotImageDownloader, ImageDownloader};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, get_artist_name, sanitize, write_ogg_tags, TrackMetadata};
 
@@ -299,11 +299,11 @@ pub async fn get_track_with_ogg_format(
     Ok((best_track, file_id))
 }
 
-async fn cache_track_cover_art(session: &Session, metadata: &dyn TrackMetadataProvider) -> Option<Vec<u8>> {
+async fn cache_track_cover_art(image_downloader: &dyn ImageDownloader, metadata: &dyn TrackMetadataProvider) -> Option<Vec<u8>> {
     if let Some(file_id) = metadata.get_album_cover_file_id(0).await {
         print!(" 🖼️");
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        match download_cover_image(session, &file_id).await {
+        match image_downloader.download_cover(&file_id).await {
             Ok(bytes) => Some(bytes),
             Err(e) => {
                 // Print error inline without newline to keep on same line as track
@@ -423,7 +423,8 @@ pub async fn process_track_cache(
     }
 
     // Fetch cover art
-    let cover_art = cache_track_cover_art(session, &TrackRefMetadataProvider(track)).await;
+    let image_downloader = LibrespotImageDownloader { session };
+    let cover_art = cache_track_cover_art(&image_downloader, &TrackRefMetadataProvider(track)).await;
 
     // Add metadata to the temp file
     let date = TrackRefMetadataProvider(track).date().await;
@@ -1271,32 +1272,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cache_track_cover_art_no_covers() {
-        let mock = MockTrackWithMultipleCovers {
-            name: "Test Track".to_string(),
-            artist_names: vec!["Test Artist".to_string()],
-            duration_ms: 180000,
-            album_cover_file_ids: vec![], // No covers
-        };
+    async fn test_cache_track_cover_art_success() {
+        use crate::traits::{ImageDownloader, MockImageDownloader};
 
-        // This would normally call download_cover_image, but since we can't mock that easily,
-        // we just verify the trait method returns None
-        let file_id = mock.get_album_cover_file_id(0).await;
-        assert_eq!(file_id, None);
-    }
-
-    #[tokio::test]
-    async fn test_cache_track_cover_art_with_covers() {
         let cover_id = FileId::from_raw(&[1u8; 16]);
-        let mock = MockTrackWithMultipleCovers {
+        let cover_data = vec![255u8; 100]; // Mock image data
+
+        let mut mock_downloader = MockImageDownloader::default();
+        mock_downloader.cover_images.insert(cover_id, cover_data.clone());
+
+        let mock_track = MockTrackWithMultipleCovers {
             name: "Test Track".to_string(),
             artist_names: vec!["Test Artist".to_string()],
             duration_ms: 180000,
             album_cover_file_ids: vec![cover_id],
         };
 
-        let file_id = mock.get_album_cover_file_id(0).await;
-        assert_eq!(file_id, Some(cover_id));
+        let result = cache_track_cover_art(&mock_downloader, &mock_track).await;
+        assert_eq!(result, Some(cover_data));
+    }
+
+    #[tokio::test]
+    async fn test_cache_track_cover_art_download_failure() {
+        use crate::traits::{ImageDownloader, MockImageDownloader};
+
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+
+        let mut mock_downloader = MockImageDownloader::default();
+        // Don't insert the cover_id, so download_cover will fail
+
+        let mock_track = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![cover_id],
+        };
+
+        let result = cache_track_cover_art(&mock_downloader, &mock_track).await;
+        assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn test_cache_track_cover_art_no_covers() {
+        use crate::traits::{ImageDownloader, MockImageDownloader};
+
+        let mock_downloader = MockImageDownloader::default();
+
+        let mock_track = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![], // No covers
+        };
+
+        let result = cache_track_cover_art(&mock_downloader, &mock_track).await;
+        assert_eq!(result, None);
     }
 
     // Test that existing mocks still work correctly
