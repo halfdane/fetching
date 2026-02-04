@@ -183,14 +183,6 @@ pub fn skip_header_and_copy<R: Read, W: Write>(
     Ok(total_bytes)
 }
 
-/// Fetch album cover image from Spotify.
-/// Returns the raw image bytes (JPEG or PNG format).
-pub async fn download_cover_image(session: &Session, file_id: &FileId) -> anyhow::Result<Vec<u8>> {
-    // Use the spclient get_image() method which is designed for images
-    let image_bytes = session.spclient().get_image(file_id).await?;
-    Ok(image_bytes.to_vec())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

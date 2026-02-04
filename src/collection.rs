@@ -8,18 +8,14 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use async_trait::async_trait;
 use librespot_core::SpotifyUri;
-use librespot_core::FileId;
 use librespot_metadata::audio::AudioFileFormat;
-use librespot_metadata::track::Track;
-use librespot_metadata::{playlist::Playlist};
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
 use crate::stream::stream_and_cache_track;
 use crate::error::DownloadError;
-use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider, OwnedLibrespotTrackProvider, ImageDownloader, TrackFetcher, AlbumFetcher, PlaylistFetcher, PlaylistMetadataProvider};
+use crate::traits::{TrackMetadataProvider, OwnedLibrespotTrackProvider, ImageDownloader, TrackFetcher, AlbumFetcher, PlaylistFetcher};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, sanitize, write_ogg_tags, TrackMetadata};
 
@@ -29,96 +25,6 @@ pub fn get_artist_name_from_vec(artists: &[String]) -> String {
         artists[0].clone()
     } else {
         "Unknown Artist".to_string()
-    }
-}
-
-/// Wrapper to implement TrackMetadataProvider for a Track reference
-#[derive(Debug)]
-struct TrackRefMetadataProvider<'a>(&'a Track);
-
-#[async_trait]
-impl<'a> TrackMetadataProvider for TrackRefMetadataProvider<'a> {
-    async fn id(&self) -> String {
-        self.0.id.to_string()
-    }
-
-    async fn name(&self) -> String {
-        self.0.name.clone()
-    }
-
-    async fn album_id(&self) -> String {
-        self.0.album.id.to_string()
-    }
-
-    async fn album_name(&self) -> String {
-        self.0.album.name.clone()
-    }
-
-    async fn artist_names(&self) -> Vec<String> {
-        self.0.artists.iter().map(|a| a.name.clone()).collect()
-    }
-
-    async fn duration_ms(&self) -> u32 {
-        self.0.duration as u32
-    }
-
-    async fn date(&self) -> Option<String> {
-        let date_obj = self.0.album.date;
-        let year = date_obj.year();
-        let month = date_obj.month() as u8;
-        let day = date_obj.day();
-        
-        if year > 0 && month > 0 && day > 0 {
-            Some(format!("{:04}-{:02}-{:02}", year, month, day))
-        } else if year > 0 {
-            Some(year.to_string())
-        } else {
-            None
-        }
-    }
-
-    async fn track_number(&self) -> u32 {
-        self.0.number as u32
-    }
-
-    async fn album_artist_names(&self) -> Vec<String> {
-        self.0.album.artists.iter().map(|a| a.name.clone()).collect()
-    }
-
-    async fn disc_number(&self) -> u32 {
-        self.0.disc_number as u32
-    }
-
-    async fn genres(&self) -> Vec<String> {
-        self.0.tags.clone()
-    }
-
-    async fn isrc(&self) -> Option<String> {
-        self.0
-            .external_ids
-            .iter()
-            .find(|eid| eid.external_type == "isrc")
-            .map(|eid| eid.id.clone())
-    }
-
-    async fn label(&self) -> Option<String> {
-        if !self.0.album.label.is_empty() {
-            Some(self.0.album.label.clone())
-        } else {
-            None
-        }
-    }
-
-    async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
-        self.0.files.get(format).copied()
-    }
-
-    async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
-        self.0.album.covers.get(index).map(|cover| cover.id)
-    }
-
-    async fn alternative_uris(&self) -> Vec<String> {
-        self.0.alternatives.iter().map(|uri| uri.to_string()).collect()
     }
 }
 
@@ -280,7 +186,7 @@ pub async fn get_track_with_ogg_format(
     uri: &SpotifyUri,
 ) -> anyhow::Result<(Box<dyn TrackMetadataProvider>, librespot_core::file_id::FileId)> {
     let track = track_fetcher.fetch_track(uri).await?;
-    let provider = LibrespotTrackProvider { track: &track };
+    let provider = OwnedLibrespotTrackProvider { track: track.clone() };
     
     // Collect all candidates: original track + all alternatives with their OGG format
     let mut candidates: Vec<(Box<dyn TrackMetadataProvider>, librespot_core::file_id::FileId, AudioFileFormat, String)> = Vec::new();
@@ -289,7 +195,7 @@ pub async fn get_track_with_ogg_format(
     if let Some((file_id, format)) = select_best_ogg_file(&provider).await {
         // Early termination: if original has highest quality (320), no need to check alternatives
         if format == AudioFileFormat::OGG_VORBIS_320 {
-            debug!("Track '{}' has OGG_VORBIS_320 in original, skipping alternatives", track.name);
+            debug!("Track '{}' has OGG_VORBIS_320 in original, skipping alternatives", provider.track.name);
             return Ok((Box::new(OwnedLibrespotTrackProvider { track: track.clone() }), file_id));
         }
         candidates.push((Box::new(OwnedLibrespotTrackProvider { track: track.clone() }), file_id, format, "original".to_string()));
@@ -298,13 +204,13 @@ pub async fn get_track_with_ogg_format(
     // Check all alternatives if original doesn't exist or doesn't have best quality
     let alternative_uris = provider.alternative_uris().await;
     if candidates.is_empty() || !alternative_uris.is_empty() {
-        debug!("Track '{}' checking {} alternatives for better quality", track.name, alternative_uris.len());
+        debug!("Track '{}' checking {} alternatives for better quality", provider.track.name, alternative_uris.len());
         
         for (i, alt_uri_str) in alternative_uris.iter().enumerate() {
             let alt_uri = SpotifyUri::from_uri(alt_uri_str)?;
             match track_fetcher.fetch_track(&alt_uri).await {
                 Ok(alt_track) => {
-                    let alt_provider = LibrespotTrackProvider { track: &alt_track };
+                    let alt_provider = OwnedLibrespotTrackProvider { track: alt_track.clone() };
                     if let Some((file_id, format)) = select_best_ogg_file(&alt_provider).await {
                         candidates.push((Box::new(OwnedLibrespotTrackProvider { track: alt_track.clone() }), file_id, format, format!("alternative {}", i + 1)));
                     }
@@ -709,38 +615,6 @@ pub async fn cache_album(
         false, // Don't collect album covers for albums (we have the main cover)
     )
     .await
-}
-
-/// Fetch playlist cover art from picture field or URL
-async fn fetch_playlist_cover_art(playlist: &Playlist) -> Option<Vec<u8>> {
-    if !playlist.attributes.picture.is_empty() {
-        debug!(
-            "Playlist has cover art in picture field ({} bytes)",
-            playlist.attributes.picture.len()
-        );
-        return Some(playlist.attributes.picture.clone());
-    }
-
-    if let Some(picture_size) = playlist.attributes.picture_sizes.first() {
-        debug!(
-            "Attempting to fetch cover art from URL: {}",
-            picture_size.url
-        );
-        match reqwest::get(&picture_size.url).await {
-            Ok(response) => match response.bytes().await {
-                Ok(bytes) => {
-                    debug!("Fetched cover art ({} bytes)", bytes.len());
-                    return Some(bytes.to_vec());
-                }
-                Err(e) => warn!("Failed to fetch playlist cover art: {}", e),
-            },
-            Err(e) => warn!("Failed to fetch playlist cover art: {}", e),
-        }
-    } else {
-        debug!("No cover art found in playlist attributes");
-    }
-
-    None
 }
 
 /// Prepare playlist directory and M3U file path
@@ -2184,7 +2058,7 @@ mod tests {
         let mut mock_album_fetcher = MockAlbumFetcher::default();
         mock_album_fetcher.add_album("spotify:album:4yP0hdKOZPNshxUOjY0cZj", mock_album);
 
-        let mock_track_fetcher = MockTrackFetcher {
+        let _mock_track_fetcher = MockTrackFetcher {
             tracks: HashMap::new(),
         };
 
@@ -2294,7 +2168,6 @@ mod tests {
         // This test demonstrates that cache_album now accepts trait objects,
         // enabling dependency injection for testing without Spotify API calls
         
-        use std::collections::HashMap;
         use librespot_core::FileId;
 
         // Create different mock configurations
@@ -2338,7 +2211,6 @@ mod tests {
     #[tokio::test]
     async fn test_cache_playlist_can_be_called_with_mock_playlist_fetcher() {
         use std::collections::HashMap;
-        use librespot_core::FileId;
 
         // Create mock playlist metadata
         let track_uri1 = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
@@ -2406,11 +2278,11 @@ mod tests {
         let mut mock_playlist_fetcher = MockPlaylistFetcher::default();
         mock_playlist_fetcher.add_playlist("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj", mock_playlist);
 
-        let mock_track_fetcher = MockTrackFetcher {
+        let _mock_track_fetcher = MockTrackFetcher {
             tracks: HashMap::new(),
         };
 
-        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+        let _mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
             session: &librespot_core::session::Session::new(Default::default(), None),
         };
 
@@ -2434,8 +2306,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_playlist_demonstrates_dependency_injection() {
-        use std::collections::HashMap;
-
         // Create two different mock playlists
         let track_uri1 = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
         let track_uri2 = librespot_core::SpotifyUri::from_uri("spotify:track:0VjIjW4GlUZAMYd2vXMi3b").unwrap();
@@ -2472,6 +2342,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_playlist_metadata_provider_trait_implementation() {
+        use crate::traits::PlaylistMetadataProvider;
         let track_uri = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
         let cover_bytes = vec![1u8, 2u8, 3u8];
 
