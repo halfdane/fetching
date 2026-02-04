@@ -81,6 +81,34 @@ impl<'a> TrackMetadataProvider for TrackRefMetadataProvider<'a> {
         self.0.number as u32
     }
 
+    async fn album_artist_names(&self) -> Vec<String> {
+        self.0.album.artists.iter().map(|a| a.name.clone()).collect()
+    }
+
+    async fn disc_number(&self) -> u32 {
+        self.0.disc_number as u32
+    }
+
+    async fn genres(&self) -> Vec<String> {
+        self.0.tags.clone()
+    }
+
+    async fn isrc(&self) -> Option<String> {
+        self.0
+            .external_ids
+            .iter()
+            .find(|eid| eid.external_type == "isrc")
+            .map(|eid| eid.id.clone())
+    }
+
+    async fn label(&self) -> Option<String> {
+        if !self.0.album.label.is_empty() {
+            Some(self.0.album.label.clone())
+        } else {
+            None
+        }
+    }
+
     async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
         self.0.files.get(format).copied()
     }
@@ -373,7 +401,7 @@ pub async fn process_track_cache(
     _track_fetcher: &dyn TrackFetcher,
     audio_downloader: &dyn crate::traits::AudioDownloader,
     image_downloader: &dyn ImageDownloader,
-    track: &Track,
+    track_provider: &dyn TrackMetadataProvider,
     track_uri: &SpotifyUri,
     output_path: &Path,
     file_id: &librespot_core::file_id::FileId,
@@ -432,11 +460,10 @@ pub async fn process_track_cache(
     }
 
     // Fetch cover art
-    let cover_art = cache_track_cover_art(image_downloader, &TrackRefMetadataProvider(track)).await;
+    let cover_art = cache_track_cover_art(image_downloader, track_provider).await;
 
     // Add metadata to the temp file
-    let date = TrackRefMetadataProvider(track).date().await;
-    let metadata = TrackMetadata::from_track(track, date, cover_art);
+    let metadata = TrackMetadata::from_provider(track_provider, cover_art).await;
     if let Err(e) = write_metadata_to_temp(&temp_path, &metadata) {
         // Error already printed by write_metadata_to_temp
         return Err(e);
@@ -498,7 +525,7 @@ where
         let provider = LibrespotTrackProvider { track: &track };
         let output_path = build_track_path(&provider, base_dir, prefix).await?;
 
-        match process_track_cache(track_fetcher, audio_downloader, image_downloader, &track, track_uri, &output_path, &file_id).await {
+        match process_track_cache(track_fetcher, audio_downloader, image_downloader, &provider, track_uri, &output_path, &file_id).await {
             Ok(()) => {
                 // Collect album cover for collage if needed
                 if collect_album_covers {
@@ -858,6 +885,22 @@ mod tests {
             self.files.get(format).copied()
         }
         
+        async fn album_artist_names(&self) -> Vec<String> {
+            vec!["Mock Album Artist".to_string()]
+        }
+        async fn disc_number(&self) -> u32 {
+            1
+        }
+        async fn genres(&self) -> Vec<String> {
+            vec!["Rock".to_string()]
+        }
+        async fn isrc(&self) -> Option<String> {
+            Some("US1234567890".to_string())
+        }
+        async fn label(&self) -> Option<String> {
+            Some("Mock Label".to_string())
+        }
+        
         async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
             if index == 0 {
                 Some(FileId::from_raw(&[1u8; 16]))
@@ -957,6 +1000,22 @@ mod tests {
         async fn track_number(&self) -> u32 { 1 }
         async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
         
+        async fn album_artist_names(&self) -> Vec<String> {
+            vec!["Test Album Artist".to_string()]
+        }
+        async fn disc_number(&self) -> u32 {
+            1
+        }
+        async fn genres(&self) -> Vec<String> {
+            vec!["Rock".to_string()]
+        }
+        async fn isrc(&self) -> Option<String> {
+            Some("US1234567890".to_string())
+        }
+        async fn label(&self) -> Option<String> {
+            Some("Test Label".to_string())
+        }
+        
         async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
             if index == 0 {
                 Some(FileId::from_raw(&[1u8; 16]))
@@ -1049,6 +1108,22 @@ mod tests {
         async fn date(&self) -> Option<String> { Some("2023".to_string()) }
         async fn track_number(&self) -> u32 { 1 }
         async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
+        
+        async fn album_artist_names(&self) -> Vec<String> {
+            vec!["Test Album Artist".to_string()]
+        }
+        async fn disc_number(&self) -> u32 {
+            1
+        }
+        async fn genres(&self) -> Vec<String> {
+            vec!["Rock".to_string()]
+        }
+        async fn isrc(&self) -> Option<String> {
+            Some("US1234567890".to_string())
+        }
+        async fn label(&self) -> Option<String> {
+            Some("Test Label".to_string())
+        }
         
         async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
             self.album_cover_file_ids.get(index).copied()
@@ -1408,6 +1483,22 @@ mod tests {
         async fn track_number(&self) -> u32 { 1 }
         async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
             self.files.get(format).copied()
+        }
+        
+        async fn album_artist_names(&self) -> Vec<String> {
+            vec!["Test Album Artist".to_string()]
+        }
+        async fn disc_number(&self) -> u32 {
+            1
+        }
+        async fn genres(&self) -> Vec<String> {
+            vec!["Rock".to_string()]
+        }
+        async fn isrc(&self) -> Option<String> {
+            Some("US1234567890".to_string())
+        }
+        async fn label(&self) -> Option<String> {
+            Some("Test Label".to_string())
         }
         
         async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
@@ -1805,6 +1896,22 @@ mod tests {
         async fn duration_ms(&self) -> u32 { 180000 }
         async fn date(&self) -> Option<String> { Some("2023".to_string()) }
         async fn track_number(&self) -> u32 { 1 }
+        
+        async fn album_artist_names(&self) -> Vec<String> {
+            vec!["Test Album Artist".to_string()]
+        }
+        async fn disc_number(&self) -> u32 {
+            1
+        }
+        async fn genres(&self) -> Vec<String> {
+            vec!["Rock".to_string()]
+        }
+        async fn isrc(&self) -> Option<String> {
+            Some("US1234567890".to_string())
+        }
+        async fn label(&self) -> Option<String> {
+            Some("Test Label".to_string())
+        }
         
         async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
             match (&self.data.format, format) {
@@ -2467,5 +2574,123 @@ mod tests {
 
         // Should fail because playlist doesn't exist in mock
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_process_track_cache_with_mocks() {
+        use std::collections::HashMap;
+        use tempfile::TempDir;
+        use crate::traits::{MockAudioDownloader, MockImageDownloader};
+        
+        // Define a local mock for this test
+        #[derive(Debug)]
+        struct TestTrackProvider {
+            pub id: String,
+            pub name: String,
+            pub album_id: String,
+            pub album_name: String,
+            pub artist_names: Vec<String>,
+            pub album_artist_names: Vec<String>,
+            pub duration_ms: u32,
+            pub year: i32,
+            pub track_number: u32,
+            pub disc_number: u32,
+            pub genres: Vec<String>,
+            pub isrc: Option<String>,
+            pub label: Option<String>,
+            pub files: HashMap<AudioFileFormat, FileId>,
+            pub album_cover_file_ids: Vec<FileId>,
+            pub alternative_uris: Vec<String>,
+        }
+
+        #[async_trait]
+        impl TrackMetadataProvider for TestTrackProvider {
+            async fn id(&self) -> String { self.id.clone() }
+            async fn name(&self) -> String { self.name.clone() }
+            async fn album_id(&self) -> String { self.album_id.clone() }
+            async fn album_name(&self) -> String { self.album_name.clone() }
+            async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
+            async fn album_artist_names(&self) -> Vec<String> { self.album_artist_names.clone() }
+            async fn duration_ms(&self) -> u32 { self.duration_ms }
+            async fn date(&self) -> Option<String> { 
+                if self.year > 0 { Some(self.year.to_string()) } else { None }
+            }
+            async fn track_number(&self) -> u32 { self.track_number }
+            async fn disc_number(&self) -> u32 { self.disc_number }
+            async fn genres(&self) -> Vec<String> { self.genres.clone() }
+            async fn isrc(&self) -> Option<String> { self.isrc.clone() }
+            async fn label(&self) -> Option<String> { self.label.clone() }
+            async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
+                self.files.get(format).copied()
+            }
+            async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
+                self.album_cover_file_ids.get(index).copied()
+            }
+            async fn alternative_uris(&self) -> Vec<String> { self.alternative_uris.clone() }
+        }
+
+        // Create a temporary directory for the test
+        let temp_dir = TempDir::new().unwrap();
+        let output_path = temp_dir.path().join("test_track.ogg");
+
+        // Create mock track metadata
+        let mock_track = TestTrackProvider {
+            id: "test_track_id".to_string(),
+            name: "Test Track".to_string(),
+            album_id: "test_album_id".to_string(),
+            album_name: "Test Album".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            album_artist_names: vec!["Test Album Artist".to_string()],
+            duration_ms: 180000,
+            year: 2023,
+            track_number: 1,
+            disc_number: 1,
+            genres: vec!["Rock".to_string()],
+            isrc: Some("US1234567890".to_string()),
+            label: Some("Test Label".to_string()),
+            files: HashMap::new(),
+            album_cover_file_ids: vec![],
+            alternative_uris: vec![],
+        };
+
+        // Create mock audio downloader with fake audio data
+        let file_id = librespot_core::file_id::FileId::from_raw(b"0123456789abcdef");
+        let mut mock_audio = MockAudioDownloader::default();
+        mock_audio.audio_files.insert(file_id, b"fake ogg audio data".to_vec());
+
+        // Create mock image downloader (no cover art for this test)
+        let mock_image = MockImageDownloader::default();
+
+        // Create a dummy track fetcher (not used in process_track_cache)
+        let mock_track_fetcher = MockTrackFetcher::default();
+
+        // Create track URI
+        let track_uri = SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap();
+
+        // Call process_track_cache
+        let result = process_track_cache(
+            &mock_track_fetcher,
+            &mock_audio,
+            &mock_image,
+            &mock_track,
+            &track_uri,
+            &output_path,
+            &file_id,
+        ).await;
+
+        // Should succeed
+        if let Err(e) = &result {
+            println!("Test failed with error: {}", e);
+        }
+        assert!(result.is_ok());
+        
+        // Check that the output file was created
+        assert!(output_path.exists());
+        
+        // Check that the file contains valid OGG data (not empty)
+        let content = std::fs::read(&output_path).unwrap();
+        assert!(!content.is_empty(), "Output file should contain OGG data");
+        // Verify it starts with OGG magic bytes
+        assert_eq!(&content[0..4], b"OggS", "File should be valid OGG format");
     }
 }

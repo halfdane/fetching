@@ -23,6 +23,22 @@ impl TrackMetadataProvider for TestTrackProvider {
     async fn track_number(&self) -> u32 { 1 }
     async fn get_file_id(&self, _format: &librespot_metadata::audio::AudioFileFormat) -> Option<librespot_core::file_id::FileId> { None }
     
+    async fn album_artist_names(&self) -> Vec<String> {
+        vec!["Test Album Artist".to_string()]
+    }
+    async fn disc_number(&self) -> u32 {
+        1
+    }
+    async fn genres(&self) -> Vec<String> {
+        vec!["Rock".to_string()]
+    }
+    async fn isrc(&self) -> Option<String> {
+        Some("US1234567890".to_string())
+    }
+    async fn label(&self) -> Option<String> {
+        Some("Test Label".to_string())
+    }
+    
     async fn get_album_cover_file_id(&self, index: usize) -> Option<librespot_core::file_id::FileId> {
         if index == 0 {
             Some(librespot_core::file_id::FileId::from_raw(&[1u8; 16]))

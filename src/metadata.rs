@@ -106,50 +106,42 @@ pub struct TrackMetadata {
 
 impl TrackMetadata {
     /// Extract metadata from a librespot Track.
-    pub fn from_track(track: &Track, date: Option<String>, cover_art: Option<Vec<u8>>) -> Self {
+    pub async fn from_provider<T: TrackMetadataProvider + ?Sized>(provider: &T, cover_art: Option<Vec<u8>>) -> Self {
         // Extract artists
-        let artists = track.artists.iter().map(|a| a.name.clone()).collect();
+        let artists = provider.artist_names().await;
 
         // Extract album artists
-        let album_artists = track.album.artists.iter().map(|a| a.name.clone()).collect();
+        let album_artists = provider.album_artist_names().await;
 
         // Extract track/disc numbers (skip if 0)
-        let track_number = if track.number > 0 {
-            Some(track.number as u32)
+        let track_number = if provider.track_number().await > 0 {
+            Some(provider.track_number().await)
         } else {
             None
         };
 
-        let disc_number = if track.disc_number > 0 {
-            Some(track.disc_number as u32)
+        let disc_number = if provider.disc_number().await > 0 {
+            Some(provider.disc_number().await)
         } else {
             None
         };
 
         // Date is now provided by the trait implementation
-        let date = date;
+        let date = provider.date().await;
 
         // Extract genres
-        let genres = track.tags.clone();
+        let genres = provider.genres().await;
 
         // Extract ISRC
-        let isrc = track
-            .external_ids
-            .iter()
-            .find(|eid| eid.external_type == "isrc")
-            .map(|eid| eid.id.clone());
+        let isrc = provider.isrc().await;
 
         // Extract label
-        let label = if !track.album.label.is_empty() {
-            Some(track.album.label.clone())
-        } else {
-            None
-        };
+        let label = provider.label().await;
 
         TrackMetadata {
-            title: track.name.clone(),
+            title: provider.name().await,
             artists,
-            album: track.album.name.clone(),
+            album: provider.album_name().await,
             album_artists,
             track_number,
             disc_number,
@@ -704,6 +696,22 @@ mod tests {
 
         async fn duration_ms(&self) -> u32 {
             180000 // 3 minutes
+        }
+
+        async fn album_artist_names(&self) -> Vec<String> {
+            vec!["Mock Album Artist".to_string()]
+        }
+        async fn disc_number(&self) -> u32 {
+            1
+        }
+        async fn genres(&self) -> Vec<String> {
+            vec!["Rock".to_string()]
+        }
+        async fn isrc(&self) -> Option<String> {
+            Some("US1234567890".to_string())
+        }
+        async fn label(&self) -> Option<String> {
+            Some("Mock Label".to_string())
         }
 
         async fn get_file_id(&self, _format: &librespot_metadata::audio::AudioFileFormat) -> Option<librespot_core::file_id::FileId> {

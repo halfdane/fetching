@@ -167,5 +167,7 @@ async fn test_pre_existing_temp_file_not_interfere() {
 
     // Should have new content, not old
     let content = std::fs::read(&temp_path).unwrap();
-    assert_eq!(content, b"fake ogg vorbis audio data");
+    assert!(!content.is_empty(), "Output file should contain OGG data");
+    // Verify it starts with OGG magic bytes
+    assert_eq!(&content[0..4], b"OggS", "File should be valid OGG format");
 }

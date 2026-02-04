@@ -32,9 +32,14 @@ pub trait TrackMetadataProvider: Send + Sync + Debug {
     async fn album_id(&self) -> String;
     async fn album_name(&self) -> String;
     async fn artist_names(&self) -> Vec<String>;
+    async fn album_artist_names(&self) -> Vec<String>;
     async fn duration_ms(&self) -> u32;
     async fn date(&self) -> Option<String>; // Formatted date: "YYYY-MM-DD", "YYYY", or None
     async fn track_number(&self) -> u32;
+    async fn disc_number(&self) -> u32;
+    async fn genres(&self) -> Vec<String>;
+    async fn isrc(&self) -> Option<String>;
+    async fn label(&self) -> Option<String>;
     async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId>;
     
     // Album cover information for testability
@@ -134,7 +139,54 @@ impl AudioDownloader for MockAudioDownloader {
         cache_path: &str,
     ) -> Result<()> {
         if let Some(audio_data) = self.audio_files.get(file_id) {
-            std::fs::write(cache_path, audio_data)?;
+            // If the data is the fake string, create valid OGG data instead
+            if audio_data == b"fake ogg vorbis audio data" || audio_data == b"fake ogg audio data" {
+                use std::fs;
+                let mut writer = ogg::PacketWriter::new(fs::File::create(cache_path).unwrap());
+
+                // Vorbis identification header (minimal valid header)
+                let ident_header = vec![
+                    0x01, // packet type (identification)
+                    0x76, 0x6f, 0x72, 0x62, 0x69, 0x73, // "vorbis"
+                    0x00, 0x00, 0x00, 0x00, // version
+                    0x02, // channels
+                    0x44, 0xac, 0x00, 0x00, // sample rate (44100)
+                    0x00, 0x00, 0x00, 0x00, // max bitrate
+                    0x00, 0x7d, 0x00, 0x00, // nominal bitrate (32000)
+                    0x00, 0x00, 0x00, 0x00, // min bitrate
+                    0xb8, // blocksize
+                    0x01, // framing flag
+                ];
+
+                // Vorbis comment header (empty)
+                let comment_header = vec![
+                    0x03, // packet type (comments)
+                    0x76, 0x6f, 0x72, 0x62, 0x69, 0x73, // "vorbis"
+                    0x00, 0x00, 0x00, 0x00, // vendor length (0)
+                    0x00, 0x00, 0x00, 0x00, // comment count (0)
+                    0x01, // framing flag
+                ];
+
+                // Setup header (minimal)
+                let setup_header = vec![
+                    0x05, // packet type (setup)
+                    0x76, 0x6f, 0x72, 0x62, 0x69, 0x73, // "vorbis"
+                    0x01, // framing flag
+                ];
+
+                writer
+                    .write_packet(ident_header, 0, ogg::PacketWriteEndInfo::EndPage, 0)
+                    .unwrap();
+                writer
+                    .write_packet(comment_header, 0, ogg::PacketWriteEndInfo::NormalPacket, 0)
+                    .unwrap();
+                writer
+                    .write_packet(setup_header, 0, ogg::PacketWriteEndInfo::EndStream, 0)
+                    .unwrap();
+                drop(writer);
+            } else {
+                std::fs::write(cache_path, audio_data)?;
+            }
             Ok(())
         } else {
             Err(anyhow!("Audio file not found for FileId"))
@@ -181,6 +233,30 @@ impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     }
     async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
         self.track.files.get(format).copied()
+    }
+    
+    async fn album_artist_names(&self) -> Vec<String> {
+        self.track.album.artists.iter().map(|a| a.name.clone()).collect()
+    }
+    async fn disc_number(&self) -> u32 {
+        self.track.disc_number as u32
+    }
+    async fn genres(&self) -> Vec<String> {
+        self.track.tags.clone()
+    }
+    async fn isrc(&self) -> Option<String> {
+        self.track
+            .external_ids
+            .iter()
+            .find(|eid| eid.external_type == "isrc")
+            .map(|eid| eid.id.clone())
+    }
+    async fn label(&self) -> Option<String> {
+        if !self.track.album.label.is_empty() {
+            Some(self.track.album.label.clone())
+        } else {
+            None
+        }
     }
     
     async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {

@@ -75,8 +75,9 @@ async fn process_single_uri(
             let track_fetcher = LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::traits::LibrespotImageDownloader { session };
+            let track_provider = crate::traits::LibrespotTrackProvider { track: &track };
 
-            process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &track, spotify_uri, &output_path, &file_id).await?;
+            process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &track_provider, spotify_uri, &output_path, &file_id).await?;
             
             if !no_play {
                 info!("\nStarting playback...");
