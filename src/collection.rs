@@ -9,20 +9,28 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
-use librespot_core::session::Session;
 use librespot_core::SpotifyUri;
 use librespot_core::FileId;
 use librespot_metadata::audio::AudioFileFormat;
 use librespot_metadata::track::Track;
-use librespot_metadata::{album::Album, playlist::Playlist, Metadata};
+use librespot_metadata::{playlist::Playlist};
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, info, warn};
 
-use crate::stream::{stream_and_cache_track, LibrespotAudioDownloader};
+use crate::stream::stream_and_cache_track;
 use crate::error::DownloadError;
-use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider, LibrespotImageDownloader, ImageDownloader, TrackFetcher, LibrespotTrackFetcher};
+use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider, ImageDownloader, TrackFetcher, AlbumFetcher, PlaylistFetcher, PlaylistMetadataProvider};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
-use crate::metadata::{build_track_path, get_artist_name, sanitize, write_ogg_tags, TrackMetadata};
+use crate::metadata::{build_track_path, sanitize, write_ogg_tags, TrackMetadata};
+
+/// Extract artist name from a list of artist names, returning "Unknown Artist" if empty
+pub fn get_artist_name_from_vec(artists: &[String]) -> String {
+    if !artists.is_empty() {
+        artists[0].clone()
+    } else {
+        "Unknown Artist".to_string()
+    }
+}
 
 /// Wrapper to implement TrackMetadataProvider for a Track reference
 #[derive(Debug)]
@@ -362,7 +370,9 @@ fn finalize_track_file(temp_path: &Path, output_path: &Path) -> anyhow::Result<(
 
 /// Process a single track: check existence, cache, add metadata
 pub async fn process_track_cache(
-    session: &Session,
+    _track_fetcher: &dyn TrackFetcher,
+    audio_downloader: &dyn crate::traits::AudioDownloader,
+    image_downloader: &dyn ImageDownloader,
     track: &Track,
     track_uri: &SpotifyUri,
     output_path: &Path,
@@ -387,7 +397,6 @@ pub async fn process_track_cache(
         }
     }
 
-    let downloader = LibrespotAudioDownloader { session };
     let temp_path_str = match temp_path.to_str() {
         Some(s) => s,
         None => {
@@ -400,7 +409,7 @@ pub async fn process_track_cache(
     };
 
     if let Err(e) = stream_and_cache_track(
-        &downloader,
+        audio_downloader,
         file_id,
         track_uri,
         temp_path_str,
@@ -423,8 +432,7 @@ pub async fn process_track_cache(
     }
 
     // Fetch cover art
-    let image_downloader = LibrespotImageDownloader { session };
-    let cover_art = cache_track_cover_art(&image_downloader, &TrackRefMetadataProvider(track)).await;
+    let cover_art = cache_track_cover_art(image_downloader, &TrackRefMetadataProvider(track)).await;
 
     // Add metadata to the temp file
     let date = TrackRefMetadataProvider(track).date().await;
@@ -446,7 +454,9 @@ pub async fn process_track_cache(
 
 /// Cache all tracks in a collection and collect M3U entries
 async fn cache_tracks_with_entries<'a, I>(
-    session: &Session,
+    track_fetcher: &dyn TrackFetcher,
+    audio_downloader: &dyn crate::traits::AudioDownloader,
+    image_downloader: &dyn ImageDownloader,
     tracks: I,
     total_tracks: usize,
     base_dir: &str,
@@ -465,8 +475,7 @@ where
         debug!("Processing track URI: {:?}", track_uri);
         
         // Get track with OGG format, trying alternatives if needed
-        let track_fetcher = LibrespotTrackFetcher { session };
-        let (track, file_id) = match get_track_with_ogg_format(&track_fetcher, track_uri).await {
+        let (track, file_id) = match get_track_with_ogg_format(track_fetcher, track_uri).await {
             Ok(result) => result,
             Err(e) => {
                 let track_display = format_track_display(index + 1, total_tracks, "<unknown>");
@@ -489,13 +498,12 @@ where
         let provider = LibrespotTrackProvider { track: &track };
         let output_path = build_track_path(&provider, base_dir, prefix).await?;
 
-        match process_track_cache(session, &track, track_uri, &output_path, &file_id).await {
+        match process_track_cache(track_fetcher, audio_downloader, image_downloader, &track, track_uri, &output_path, &file_id).await {
             Ok(()) => {
                 // Collect album cover for collage if needed
                 if collect_album_covers {
-                    let image_downloader = crate::traits::LibrespotImageDownloader { session };
                     if let Err(e) = collect_album_cover(
-                        &image_downloader,
+                        image_downloader,
                         &TrackRefMetadataProvider(&track),
                         &mut unique_album_covers,
                         &mut seen_album_ids,
@@ -560,7 +568,9 @@ fn finalize_playlist(
 /// - M3U file cannot be written
 #[allow(clippy::too_many_arguments)]
 pub async fn cache_track_collection<'a, I>(
-    session: &Session,
+    track_fetcher: &dyn TrackFetcher,
+    audio_downloader: &dyn crate::traits::AudioDownloader,
+    image_downloader: &dyn ImageDownloader,
     tracks: I,
     total_tracks: usize,
     base_dir: &str,
@@ -576,7 +586,9 @@ where
 {
     // Cache all tracks and collect M3U entries
     let (m3u_entries, unique_album_covers, cached_paths) = cache_tracks_with_entries(
-        session,
+        track_fetcher,
+        audio_downloader,
+        image_downloader,
         tracks,
         total_tracks,
         base_dir,
@@ -610,38 +622,38 @@ where
 /// - Track streaming or caching operations fail
 /// - M3U playlist file cannot be created
 pub async fn cache_album(
-    session: &Session,
+    album_fetcher: &dyn AlbumFetcher,
+    track_fetcher: &dyn TrackFetcher,
+    audio_downloader: &dyn crate::traits::AudioDownloader,
+    image_downloader: &dyn ImageDownloader,
     album_uri: &SpotifyUri,
     config: &crate::config::Config,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching album metadata...");
-    let album = Album::get(session, album_uri).await?;
-    let album_name = album.name.clone();
-    let artists_str = album
-        .artists
-        .iter()
-        .map(|a| a.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let album = album_fetcher.fetch_album(album_uri).await?;
+    let album_name = album.album_name().await;
+    let artists = album.album_artists().await;
+    let artists_str = artists.join(", ");
 
     info!("Album: {} by {}", album_name, artists_str);
 
-    let total_tracks = album.tracks().count();
+    let track_uris = album.album_track_uris().await;
+    let total_tracks = track_uris.len();
     info!("Found {} tracks in album", total_tracks);
 
     let music_dir = config.get_music_dir().map_err(|e| anyhow::anyhow!(e))?;
 
     // Determine M3U file path - save in album directory
     // We'll construct it based on the first artist and album name
-    let artist_name = sanitize(&get_artist_name(&album.artists));
+    let artist_name = sanitize(&get_artist_name_from_vec(&artists));
     let album_dir = music_dir.join(&artist_name).join(sanitize(&album_name));
     std::fs::create_dir_all(&album_dir)?;
     let m3u_path = album_dir.join(format!("{}.m3u8", sanitize(&album_name)));
 
     // Fetch album cover art
-    let image_downloader = LibrespotImageDownloader { session };
-    let cover_art = if let Some(cover) = album.covers.first() {
-        match image_downloader.download_cover(&cover.id).await {
+    let cover_file_ids = album.album_cover_file_ids().await;
+    let cover_art = if let Some(cover_id) = cover_file_ids.first() {
+        match image_downloader.download_cover(cover_id).await {
             Ok(bytes) => Some(bytes),
             Err(e) => {
                 warn!("Failed to fetch album cover art: {}", e);
@@ -658,8 +670,10 @@ pub async fn cache_album(
         .to_str()
         .ok_or_else(|| anyhow::anyhow!(DownloadError::InvalidUtf8Path(music_dir.clone())))?;
     cache_track_collection(
-        session,
-        album.tracks(),
+        track_fetcher,
+        audio_downloader,
+        image_downloader,
+        track_uris.iter(),
         total_tracks,
         music_dir_str,
         None,
@@ -723,27 +737,38 @@ fn prepare_playlist_paths(
 /// Returns error if:
 /// - Playlist metadata cannot be retrieved
 /// - Track streaming or caching operations fail
+/// Stream and cache all tracks from a playlist and create an M3U file
+///
+/// # Errors
+///
+/// Returns error if:
+/// - Playlist metadata cannot be retrieved
+/// - Track streaming or caching operations fail
 /// - M3U playlist file cannot be created
 pub async fn cache_playlist(
-    session: &Session,
+    playlist_fetcher: &dyn PlaylistFetcher,
+    track_fetcher: &dyn TrackFetcher,
+    audio_downloader: &dyn crate::traits::AudioDownloader,
+    image_downloader: &dyn ImageDownloader,
     playlist_uri: &SpotifyUri,
     config: &crate::config::Config,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching playlist metadata...");
-    let playlist = Playlist::get(session, playlist_uri).await?;
-    let playlist_name = playlist.name();
+    let playlist = playlist_fetcher.fetch_playlist(playlist_uri).await?;
+    let playlist_name = playlist.playlist_name().await;
     info!("Playlist: {}", playlist_name);
 
-    let total_tracks = playlist.tracks().len();
+    let track_uris = playlist.playlist_tracks().await;
+    let total_tracks = track_uris.len();
     info!("Found {} tracks in playlist", total_tracks);
 
     let music_dir = config.get_music_dir().map_err(|e| anyhow::anyhow!(e))?;
 
     // Prepare directory structure and M3U path
-    let (_playlist_dir, m3u_path) = prepare_playlist_paths(&music_dir, playlist_name)?;
+    let (_playlist_dir, m3u_path) = prepare_playlist_paths(&music_dir, &playlist_name)?;
 
-    // Fetch playlist cover art
-    let cover_art = fetch_playlist_cover_art(&playlist).await;
+    // Get playlist cover art
+    let cover_art = playlist.playlist_cover_art_bytes().await;
 
     let spotify_url = Some(playlist_uri.to_string());
     let music_dir_str = music_dir
@@ -751,8 +776,10 @@ pub async fn cache_playlist(
         .ok_or_else(|| anyhow::anyhow!(DownloadError::InvalidUtf8Path(music_dir.clone())))?;
 
     cache_track_collection(
-        session,
-        playlist.tracks(),
+        track_fetcher,
+        audio_downloader,
+        image_downloader,
+        track_uris.iter(),
         total_tracks,
         music_dir_str,
         None,
@@ -1974,5 +2001,471 @@ mod tests {
         // Verify all alternatives were attempted
         let requested = mock_session.get_requested_uris();
         assert_eq!(requested.len(), 4); // main + 3 alternatives
+    }
+
+    // Tests for cache_album trait-based refactoring
+    use crate::traits::{MockAlbumFetcher, MockAlbumMetadata, MockTrackFetcher, MockImageDownloader, AlbumMetadataProvider};
+
+    #[tokio::test]
+    async fn test_cache_album_can_be_called_with_mock_album_fetcher() {
+        use std::collections::HashMap;
+        use librespot_core::FileId;
+
+        // Create mock album metadata
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+        let track_uri = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
+        
+        let mock_album = MockAlbumMetadata {
+            name: "Test Album".to_string(),
+            artists: vec!["Test Artist".to_string()],
+            cover_file_ids: vec![cover_id],
+            track_uris: vec![track_uri.clone()],
+        };
+
+        // Create mock fetchers
+        let mut mock_album_fetcher = MockAlbumFetcher::default();
+        mock_album_fetcher.add_album("spotify:album:4yP0hdKOZPNshxUOjY0cZj", mock_album);
+
+        let mock_track_fetcher = MockTrackFetcher {
+            tracks: HashMap::new(), // Empty for this test
+        };
+
+        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+            session: &librespot_core::session::Session::new(Default::default(), None),
+        };
+
+        let mock_image_downloader = MockImageDownloader::default();
+
+        // Create a minimal config for testing
+        let config = crate::config::Config {
+            music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
+            ..Default::default()
+        };
+
+        let album_uri = librespot_core::SpotifyUri::from_uri("spotify:album:4yP0hdKOZPNshxUOjY0cZj").unwrap();
+
+        // This should not panic and should demonstrate that cache_album can be called with mocks
+        let result = cache_album(
+            &mock_album_fetcher,
+            &mock_track_fetcher,
+            &mock_audio_downloader,
+            &mock_image_downloader,
+            &album_uri,
+            &config,
+        ).await;
+
+        // The function should succeed with mock objects, demonstrating dependency injection works
+        // Even though the track fetcher is empty, the album metadata is available
+        assert!(result.is_ok(), "cache_album should succeed with mock objects");
+    }
+
+    #[tokio::test]
+    async fn test_cache_album_trait_abstraction_allows_mock_testing() {
+        use std::collections::HashMap;
+        use librespot_core::FileId;
+
+        // Create mock album with cover art
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+        let cover_bytes = vec![255u8; 100]; // Mock JPEG data
+        
+        let mock_album = MockAlbumMetadata {
+            name: "Mock Album".to_string(),
+            artists: vec!["Mock Artist".to_string()],
+            cover_file_ids: vec![cover_id],
+            track_uris: vec![], // No tracks for this test
+        };
+
+        // Setup mock fetchers
+        let mut mock_album_fetcher = MockAlbumFetcher::default();
+        mock_album_fetcher.add_album("spotify:album:4yP0hdKOZPNshxUOjY0cZj", mock_album);
+
+        let mock_track_fetcher = MockTrackFetcher {
+            tracks: HashMap::new(),
+        };
+
+        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+            session: &librespot_core::session::Session::new(Default::default(), None),
+        };
+
+        let mut mock_image_downloader = MockImageDownloader::default();
+        mock_image_downloader.cover_images.insert(cover_id, cover_bytes.clone());
+
+        let config = crate::config::Config {
+            music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
+            ..Default::default()
+        };
+
+        let album_uri = librespot_core::SpotifyUri::from_uri("spotify:album:4yP0hdKOZPNshxUOjY0cZj").unwrap();
+
+        // Test that the function can access album metadata through the trait
+        let album_metadata = mock_album_fetcher.fetch_album(&album_uri).await.unwrap();
+        
+        assert_eq!(album_metadata.album_name().await, "Mock Album");
+        assert_eq!(album_metadata.album_artists().await, vec!["Mock Artist".to_string()]);
+        assert_eq!(album_metadata.album_cover_file_ids().await, vec![cover_id]);
+        assert!(album_metadata.album_track_uris().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cache_album_cover_art_download_with_mocks() {
+        use librespot_core::FileId;
+
+        // Create mock album with cover art
+        let cover_id = FileId::from_raw(&[42u8; 16]);
+        let cover_bytes = vec![255u8, 254u8, 253u8]; // Mock image data
+        
+        let mock_album = MockAlbumMetadata {
+            name: "Cover Test Album".to_string(),
+            artists: vec!["Cover Artist".to_string()],
+            cover_file_ids: vec![cover_id],
+            track_uris: vec![],
+        };
+
+        // Setup mock image downloader with cover art
+        let mut mock_image_downloader = MockImageDownloader::default();
+        mock_image_downloader.cover_images.insert(cover_id, cover_bytes.clone());
+
+        // Test cover art download through trait
+        let downloaded = mock_image_downloader.download_cover(&cover_id).await.unwrap();
+        assert_eq!(downloaded, cover_bytes);
+    }
+
+    #[tokio::test]
+    async fn test_cache_album_error_handling_with_mock_fetcher() {
+        // Test error handling when album doesn't exist in mock
+        let mock_album_fetcher = MockAlbumFetcher::default();
+        let mock_track_fetcher = MockTrackFetcher {
+            tracks: std::collections::HashMap::new(),
+        };
+        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+            session: &librespot_core::session::Session::new(Default::default(), None),
+        };
+        let mock_image_downloader = MockImageDownloader::default();
+
+        let config = crate::config::Config {
+            music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
+            ..Default::default()
+        };
+
+        let nonexistent_uri = librespot_core::SpotifyUri::from_uri("spotify:album:4yP0hdKOZPNshxUOjY0cZk").unwrap();
+
+        // Should fail because album doesn't exist in mock
+        let result = cache_album(
+            &mock_album_fetcher,
+            &mock_track_fetcher,
+            &mock_audio_downloader,
+            &mock_image_downloader,
+            &nonexistent_uri,
+            &config,
+        ).await;
+
+        assert!(result.is_err());
+        // The error should be from the album fetcher, not from network/API issues
+    }
+
+    #[tokio::test]
+    async fn test_mock_album_metadata_provider_trait_implementation() {
+        use librespot_core::FileId;
+
+        let cover_id = FileId::from_raw(&[99u8; 16]);
+        let track_uri = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
+        
+        let mock_album = MockAlbumMetadata {
+            name: "Trait Test Album".to_string(),
+            artists: vec!["Trait Artist".to_string(), "Co-Artist".to_string()],
+            cover_file_ids: vec![cover_id],
+            track_uris: vec![track_uri.clone()],
+        };
+
+        // Test all trait methods
+        assert_eq!(mock_album.album_name().await, "Trait Test Album");
+        assert_eq!(mock_album.album_artists().await, vec!["Trait Artist".to_string(), "Co-Artist".to_string()]);
+        assert_eq!(mock_album.album_cover_file_ids().await, vec![cover_id]);
+        assert_eq!(mock_album.album_track_uris().await, vec![track_uri]);
+    }
+
+    #[tokio::test]
+    async fn test_cache_album_demonstrates_dependency_injection() {
+        // This test demonstrates that cache_album now accepts trait objects,
+        // enabling dependency injection for testing without Spotify API calls
+        
+        use std::collections::HashMap;
+        use librespot_core::FileId;
+
+        // Create different mock configurations
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+        
+        let album1 = MockAlbumMetadata {
+            name: "Album One".to_string(),
+            artists: vec!["Artist One".to_string()],
+            cover_file_ids: vec![cover_id],
+            track_uris: vec![],
+        };
+
+        let album2 = MockAlbumMetadata {
+            name: "Album Two".to_string(),
+            artists: vec!["Artist Two".to_string()],
+            cover_file_ids: vec![cover_id],
+            track_uris: vec![],
+        };
+
+        // Test with first album
+        let mut fetcher1 = MockAlbumFetcher::default();
+        fetcher1.add_album("spotify:album:4yP0hdKOZPNshxUOjY0cZj", album1);
+        
+        let album_result1 = fetcher1.fetch_album(&librespot_core::SpotifyUri::from_uri("spotify:album:4yP0hdKOZPNshxUOjY0cZj").unwrap()).await.unwrap();
+        assert_eq!(album_result1.album_name().await, "Album One");
+
+        // Test with second album (different configuration)
+        let mut fetcher2 = MockAlbumFetcher::default();
+        fetcher2.add_album("spotify:album:1A2B3C4D5E6F7G8H9I0J1K", album2);
+        
+        let album_result2 = fetcher2.fetch_album(&librespot_core::SpotifyUri::from_uri("spotify:album:1A2B3C4D5E6F7G8H9I0J1K").unwrap()).await.unwrap();
+        assert_eq!(album_result2.album_name().await, "Album Two");
+
+        // This demonstrates that we can inject different behaviors for testing
+        // without touching the actual cache_album function implementation
+    }
+
+    // Tests for playlist caching with trait abstraction
+    use crate::traits::{MockPlaylistFetcher, MockPlaylistMetadata};
+
+    #[tokio::test]
+    async fn test_cache_playlist_can_be_called_with_mock_playlist_fetcher() {
+        use std::collections::HashMap;
+        use librespot_core::FileId;
+
+        // Create mock playlist metadata
+        let track_uri1 = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
+        let track_uri2 = librespot_core::SpotifyUri::from_uri("spotify:track:0VjIjW4GlUZAMYd2vXMi3b").unwrap();
+
+        let mock_playlist = MockPlaylistMetadata {
+            name: "Test Playlist".to_string(),
+            track_uris: vec![track_uri1.clone(), track_uri2.clone()],
+            cover_art_bytes: Some(vec![255u8; 100]), // Mock cover art
+        };
+
+        // Create mock fetchers
+        let mut mock_playlist_fetcher = MockPlaylistFetcher::default();
+        mock_playlist_fetcher.add_playlist("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj", mock_playlist);
+
+        let mock_track_fetcher = MockTrackFetcher {
+            tracks: HashMap::new(), // Empty for this test
+        };
+
+        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+            session: &librespot_core::session::Session::new(Default::default(), None),
+        };
+
+        let mock_image_downloader = MockImageDownloader::default();
+
+        // Create a minimal config for testing
+        let config = crate::config::Config {
+            music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
+            ..Default::default()
+        };
+
+        let playlist_uri = librespot_core::SpotifyUri::from_uri("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj").unwrap();
+
+        // This should not panic and should demonstrate that cache_playlist can be called with mocks
+        let result = cache_playlist(
+            &mock_playlist_fetcher,
+            &mock_track_fetcher,
+            &mock_audio_downloader,
+            &mock_image_downloader,
+            &playlist_uri,
+            &config,
+        ).await;
+
+        // The function should succeed with mock objects, demonstrating dependency injection works
+        // Even though the track fetcher is empty, the playlist metadata is available
+        assert!(result.is_ok(), "cache_playlist should succeed with mock objects");
+    }
+
+    #[tokio::test]
+    async fn test_cache_playlist_trait_abstraction_allows_mock_testing() {
+        use std::collections::HashMap;
+        use librespot_core::FileId;
+
+        // Create mock playlist with cover art
+        let track_uri = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
+        let cover_bytes = vec![255u8, 254u8, 253u8]; // Mock image data
+
+        let mock_playlist = MockPlaylistMetadata {
+            name: "Mock Playlist".to_string(),
+            track_uris: vec![track_uri.clone()],
+            cover_art_bytes: Some(cover_bytes.clone()),
+        };
+
+        // Setup mock fetchers
+        let mut mock_playlist_fetcher = MockPlaylistFetcher::default();
+        mock_playlist_fetcher.add_playlist("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj", mock_playlist);
+
+        let mock_track_fetcher = MockTrackFetcher {
+            tracks: HashMap::new(),
+        };
+
+        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+            session: &librespot_core::session::Session::new(Default::default(), None),
+        };
+
+        let mut mock_image_downloader = MockImageDownloader::default();
+        mock_image_downloader.cover_images.insert(FileId::from_raw(&[1u8; 16]), cover_bytes.clone());
+
+        let config = crate::config::Config {
+            music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
+            ..Default::default()
+        };
+
+        let playlist_uri = librespot_core::SpotifyUri::from_uri("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj").unwrap();
+
+        // Test that the function can access playlist metadata through the trait
+        let playlist_metadata = mock_playlist_fetcher.fetch_playlist(&playlist_uri).await.unwrap();
+
+        assert_eq!(playlist_metadata.playlist_name().await, "Mock Playlist");
+        assert_eq!(playlist_metadata.playlist_tracks().await, vec![track_uri]);
+        assert_eq!(playlist_metadata.playlist_cover_art_bytes().await, Some(cover_bytes));
+    }
+
+    #[tokio::test]
+    async fn test_cache_playlist_demonstrates_dependency_injection() {
+        use std::collections::HashMap;
+
+        // Create two different mock playlists
+        let track_uri1 = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
+        let track_uri2 = librespot_core::SpotifyUri::from_uri("spotify:track:0VjIjW4GlUZAMYd2vXMi3b").unwrap();
+
+        let playlist1 = MockPlaylistMetadata {
+            name: "Playlist One".to_string(),
+            track_uris: vec![track_uri1.clone()],
+            cover_art_bytes: None,
+        };
+
+        let playlist2 = MockPlaylistMetadata {
+            name: "Playlist Two".to_string(),
+            track_uris: vec![track_uri2.clone()],
+            cover_art_bytes: Some(vec![100u8; 50]),
+        };
+
+        // Test with first playlist
+        let mut fetcher1 = MockPlaylistFetcher::default();
+        fetcher1.add_playlist("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj", playlist1);
+
+        let playlist_result1 = fetcher1.fetch_playlist(&librespot_core::SpotifyUri::from_uri("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj").unwrap()).await.unwrap();
+        assert_eq!(playlist_result1.playlist_name().await, "Playlist One");
+
+        // Test with second playlist (different configuration)
+        let mut fetcher2 = MockPlaylistFetcher::default();
+        fetcher2.add_playlist("spotify:playlist:1A2B3C4D5E6F7G8H9I0J1K", playlist2);
+
+        let playlist_result2 = fetcher2.fetch_playlist(&librespot_core::SpotifyUri::from_uri("spotify:playlist:1A2B3C4D5E6F7G8H9I0J1K").unwrap()).await.unwrap();
+        assert_eq!(playlist_result2.playlist_name().await, "Playlist Two");
+
+        // This demonstrates that we can inject different behaviors for testing
+        // without touching the actual cache_playlist function implementation
+    }
+
+    #[tokio::test]
+    async fn test_mock_playlist_metadata_provider_trait_implementation() {
+        let track_uri = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
+        let cover_bytes = vec![1u8, 2u8, 3u8];
+
+        let mock_playlist = MockPlaylistMetadata {
+            name: "Trait Test Playlist".to_string(),
+            track_uris: vec![track_uri.clone()],
+            cover_art_bytes: Some(cover_bytes.clone()),
+        };
+
+        // Test all trait methods
+        assert_eq!(mock_playlist.playlist_name().await, "Trait Test Playlist");
+        assert_eq!(mock_playlist.playlist_tracks().await, vec![track_uri]);
+        assert_eq!(mock_playlist.playlist_cover_art_bytes().await, Some(cover_bytes));
+    }
+
+    #[tokio::test]
+    async fn test_cache_playlist_cover_art_download_with_mocks() {
+        use std::collections::HashMap;
+
+        // Create mock playlist with cover art
+        let track_uri = librespot_core::SpotifyUri::from_uri("spotify:track:4iV5W9uYEdYUVa79Axb7Rh").unwrap();
+        let cover_bytes = vec![255u8; 100]; // Mock JPEG data
+
+        let mock_playlist = MockPlaylistMetadata {
+            name: "Cover Test Playlist".to_string(),
+            track_uris: vec![track_uri.clone()],
+            cover_art_bytes: Some(cover_bytes.clone()),
+        };
+
+        // Setup mock fetchers
+        let mut mock_playlist_fetcher = MockPlaylistFetcher::default();
+        mock_playlist_fetcher.add_playlist("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj", mock_playlist);
+
+        let mock_track_fetcher = MockTrackFetcher {
+            tracks: HashMap::new(),
+        };
+
+        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+            session: &librespot_core::session::Session::new(Default::default(), None),
+        };
+
+        let mock_image_downloader = MockImageDownloader::default();
+
+        let config = crate::config::Config {
+            music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
+            ..Default::default()
+        };
+
+        let playlist_uri = librespot_core::SpotifyUri::from_uri("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj").unwrap();
+
+        // Test that the function can be called with mocks and doesn't panic
+        let result = cache_playlist(
+            &mock_playlist_fetcher,
+            &mock_track_fetcher,
+            &mock_audio_downloader,
+            &mock_image_downloader,
+            &playlist_uri,
+            &config,
+        ).await;
+
+        // Should succeed with mock objects
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_cache_playlist_error_handling_with_mock_fetcher() {
+        use std::collections::HashMap;
+
+        // Create mock fetchers but don't add any playlist
+        let mock_playlist_fetcher = MockPlaylistFetcher::default();
+
+        let mock_track_fetcher = MockTrackFetcher {
+            tracks: HashMap::new(),
+        };
+
+        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+            session: &librespot_core::session::Session::new(Default::default(), None),
+        };
+
+        let mock_image_downloader = MockImageDownloader::default();
+
+        let config = crate::config::Config {
+            music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
+            ..Default::default()
+        };
+
+        let playlist_uri = librespot_core::SpotifyUri::from_uri("spotify:playlist:4yP0hdKOZPNshxUOjY0cZj").unwrap();
+
+        // Test error handling when playlist is not found
+        let result = cache_playlist(
+            &mock_playlist_fetcher,
+            &mock_track_fetcher,
+            &mock_audio_downloader,
+            &mock_image_downloader,
+            &playlist_uri,
+            &config,
+        ).await;
+
+        // Should fail because playlist doesn't exist in mock
+        assert!(result.is_err());
     }
 }

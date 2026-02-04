@@ -64,7 +64,7 @@ fn calculate_retry_delay(attempt: u32) -> Duration {
 /// - Track streaming fails after all retries (max 5 attempts)
 /// - Network connection times out
 /// - Cache path is not writable or disk is full
-pub async fn stream_and_cache_track<D: AudioDownloader>(
+pub async fn stream_and_cache_track<D: AudioDownloader + ?Sized>(
     downloader: &D,
     file_id: &FileId,
     track_uri: &SpotifyUri,

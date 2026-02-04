@@ -119,6 +119,29 @@ impl ImageDownloader for MockImageDownloader {
     }
 }
 
+/// Mock implementation for testing audio downloading
+#[derive(Debug, Default)]
+pub struct MockAudioDownloader {
+    pub audio_files: std::collections::HashMap<FileId, Vec<u8>>,
+}
+
+#[async_trait]
+impl AudioDownloader for MockAudioDownloader {
+    async fn stream_track(
+        &self,
+        file_id: &FileId,
+        _track_uri: &SpotifyUri,
+        cache_path: &str,
+    ) -> Result<()> {
+        if let Some(audio_data) = self.audio_files.get(file_id) {
+            std::fs::write(cache_path, audio_data)?;
+            Ok(())
+        } else {
+            Err(anyhow!("Audio file not found for FileId"))
+        }
+    }
+}
+
 #[async_trait]
 impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     async fn id(&self) -> String {
@@ -170,6 +193,7 @@ impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
 }
 
 /// Mock implementation for testing track fetching
+#[derive(Debug, Default)]
 pub struct MockTrackFetcher {
     pub tracks: std::collections::HashMap<String, librespot_metadata::track::Track>,
 }
@@ -181,5 +205,216 @@ impl TrackFetcher for MockTrackFetcher {
         self.tracks.get(&uri_str)
             .cloned()
             .ok_or_else(|| anyhow!("Track not found: {}", uri_str))
+    }
+}
+
+/// Provides access to album metadata in a testable way
+#[async_trait]
+pub trait AlbumMetadataProvider: Send + Sync + Debug {
+    /// Get the album name
+    async fn album_name(&self) -> String;
+
+    /// Get the album artists
+    async fn album_artists(&self) -> Vec<String>;
+
+    /// Get the album cover file IDs (for downloading cover art)
+    async fn album_cover_file_ids(&self) -> Vec<librespot_core::FileId>;
+
+    /// Get the track URIs in this album
+    async fn album_track_uris(&self) -> Vec<librespot_core::SpotifyUri>;
+}
+
+/// Fetches album metadata from Spotify
+#[async_trait]
+pub trait AlbumFetcher: Send + Sync {
+    /// Fetch album metadata by URI
+    async fn fetch_album(&self, uri: &librespot_core::SpotifyUri) -> Result<Box<dyn AlbumMetadataProvider>>;
+}
+
+/// Librespot implementation for fetching album metadata
+pub struct LibrespotAlbumFetcher<'a> {
+    pub session: &'a librespot_core::session::Session,
+}
+
+#[async_trait]
+impl<'a> AlbumFetcher for LibrespotAlbumFetcher<'a> {
+    async fn fetch_album(&self, uri: &librespot_core::SpotifyUri) -> Result<Box<dyn AlbumMetadataProvider>> {
+        let album = librespot_metadata::album::Album::get(self.session, uri).await?;
+        Ok(Box::new(LibrespotAlbumProvider { album }))
+    }
+}
+
+/// Wrapper to implement AlbumMetadataProvider for librespot Album
+#[derive(Debug)]
+pub struct LibrespotAlbumProvider {
+    pub album: librespot_metadata::album::Album,
+}
+
+#[async_trait]
+impl AlbumMetadataProvider for LibrespotAlbumProvider {
+    async fn album_name(&self) -> String {
+        self.album.name.clone()
+    }
+
+    async fn album_artists(&self) -> Vec<String> {
+        self.album.artists.iter().map(|a| a.name.clone()).collect()
+    }
+
+    async fn album_cover_file_ids(&self) -> Vec<librespot_core::FileId> {
+        self.album.covers.iter().map(|cover| cover.id).collect()
+    }
+
+    async fn album_track_uris(&self) -> Vec<librespot_core::SpotifyUri> {
+        self.album.tracks().cloned().collect()
+    }
+}
+
+/// Mock implementation for testing album fetching
+pub struct MockAlbumFetcher {
+    pub albums: std::collections::HashMap<String, std::sync::Arc<dyn AlbumMetadataProvider>>,
+}
+
+impl Default for MockAlbumFetcher {
+    fn default() -> Self {
+        Self {
+            albums: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl MockAlbumFetcher {
+    /// Add an album to the mock
+    pub fn add_album<P: AlbumMetadataProvider + 'static>(&mut self, uri: &str, album: P) {
+        self.albums.insert(uri.to_string(), std::sync::Arc::new(album));
+    }
+}
+
+#[async_trait]
+impl AlbumFetcher for MockAlbumFetcher {
+    async fn fetch_album(&self, uri: &librespot_core::SpotifyUri) -> Result<Box<dyn AlbumMetadataProvider>> {
+        let uri_str = uri.to_string();
+        self.albums.get(&uri_str)
+            .map(|album| Box::new(ArcAlbumProvider(album.clone())) as Box<dyn AlbumMetadataProvider>)
+            .ok_or_else(|| anyhow!("Album not found: {}", uri_str))
+    }
+}
+
+/// Wrapper to make Arc<dyn AlbumMetadataProvider> implement AlbumMetadataProvider
+#[derive(Clone, Debug)]
+struct ArcAlbumProvider(std::sync::Arc<dyn AlbumMetadataProvider>);
+
+#[async_trait]
+impl AlbumMetadataProvider for ArcAlbumProvider {
+    async fn album_name(&self) -> String {
+        self.0.album_name().await
+    }
+
+    async fn album_artists(&self) -> Vec<String> {
+        self.0.album_artists().await
+    }
+
+    async fn album_cover_file_ids(&self) -> Vec<librespot_core::FileId> {
+        self.0.album_cover_file_ids().await
+    }
+
+    async fn album_track_uris(&self) -> Vec<librespot_core::SpotifyUri> {
+        self.0.album_track_uris().await
+    }
+}
+
+/// Mock album metadata for testing
+#[derive(Debug, Clone)]
+pub struct MockAlbumMetadata {
+    pub name: String,
+    pub artists: Vec<String>,
+    pub cover_file_ids: Vec<librespot_core::FileId>,
+    pub track_uris: Vec<librespot_core::SpotifyUri>,
+}
+
+#[async_trait]
+impl AlbumMetadataProvider for MockAlbumMetadata {
+    async fn album_name(&self) -> String {
+        self.name.clone()
+    }
+
+    async fn album_artists(&self) -> Vec<String> {
+        self.artists.clone()
+    }
+
+    async fn album_cover_file_ids(&self) -> Vec<librespot_core::FileId> {
+        self.cover_file_ids.clone()
+    }
+
+    async fn album_track_uris(&self) -> Vec<librespot_core::SpotifyUri> {
+        self.track_uris.clone()
+    }
+}
+
+/// Provides metadata for a playlist
+#[async_trait]
+pub trait PlaylistMetadataProvider: Send + Sync + Debug {
+    async fn playlist_name(&self) -> String;
+    async fn playlist_tracks(&self) -> Vec<librespot_core::SpotifyUri>;
+    async fn playlist_cover_art_bytes(&self) -> Option<Vec<u8>>;
+}
+
+/// Fetches playlist metadata from Spotify
+#[async_trait]
+pub trait PlaylistFetcher: Send + Sync + Debug {
+    async fn fetch_playlist(&self, uri: &librespot_core::SpotifyUri) -> anyhow::Result<Box<dyn PlaylistMetadataProvider>>;
+}
+
+/// Mock playlist metadata for testing
+#[derive(Debug, Clone)]
+pub struct MockPlaylistMetadata {
+    pub name: String,
+    pub track_uris: Vec<librespot_core::SpotifyUri>,
+    pub cover_art_bytes: Option<Vec<u8>>,
+}
+
+#[async_trait]
+impl PlaylistMetadataProvider for MockPlaylistMetadata {
+    async fn playlist_name(&self) -> String {
+        self.name.clone()
+    }
+
+    async fn playlist_tracks(&self) -> Vec<librespot_core::SpotifyUri> {
+        self.track_uris.clone()
+    }
+
+    async fn playlist_cover_art_bytes(&self) -> Option<Vec<u8>> {
+        self.cover_art_bytes.clone()
+    }
+}
+
+/// Mock playlist fetcher for testing
+#[derive(Debug)]
+pub struct MockPlaylistFetcher {
+    playlists: std::collections::HashMap<String, MockPlaylistMetadata>,
+}
+
+impl Default for MockPlaylistFetcher {
+    fn default() -> Self {
+        Self {
+            playlists: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl MockPlaylistFetcher {
+    /// Add a playlist to the mock
+    pub fn add_playlist(&mut self, uri: &str, playlist: MockPlaylistMetadata) {
+        self.playlists.insert(uri.to_string(), playlist);
+    }
+}
+
+#[async_trait]
+impl PlaylistFetcher for MockPlaylistFetcher {
+    async fn fetch_playlist(&self, uri: &librespot_core::SpotifyUri) -> anyhow::Result<Box<dyn PlaylistMetadataProvider>> {
+        let uri_str = uri.to_string();
+        match self.playlists.get(&uri_str) {
+            Some(playlist) => Ok(Box::new(playlist.clone())),
+            None => anyhow::bail!("Playlist not found: {}", uri_str),
+        }
     }
 }

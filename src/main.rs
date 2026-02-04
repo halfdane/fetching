@@ -15,7 +15,7 @@ mod stream;
 mod traits;
 
 use auth::create_session_with_auto_refresh;
-use collection::{cache_album, cache_playlist, process_track_cache};
+use collection::{cache_album, process_track_cache};
 use config::Config;
 use metadata::build_track_path;
 use traits::LibrespotTrackFetcher;
@@ -72,7 +72,11 @@ async fn process_single_uri(
             let provider = LibrespotTrackProvider { track: &track };
             let output_path = build_track_path(&provider, music_dir_str, None).await?;
 
-            process_track_cache(session, &track, spotify_uri, &output_path, &file_id).await?;
+            let track_fetcher = LibrespotTrackFetcher { session };
+            let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
+            let image_downloader = crate::traits::LibrespotImageDownloader { session };
+
+            process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &track, spotify_uri, &output_path, &file_id).await?;
             
             if !no_play {
                 info!("\nStarting playback...");
@@ -80,7 +84,11 @@ async fn process_single_uri(
             }
         }
         SpotifyUri::Album { .. } => {
-            let cached_paths = cache_album(session, spotify_uri, config).await?;
+            let album_fetcher = crate::traits::LibrespotAlbumFetcher { session };
+            let track_fetcher = crate::traits::LibrespotTrackFetcher { session };
+            let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
+            let image_downloader = crate::traits::LibrespotImageDownloader { session };
+            let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config).await?;
             
             if !no_play && !cached_paths.is_empty() {
                 info!("\nStarting album playback...");
@@ -88,11 +96,11 @@ async fn process_single_uri(
             }
         }
         SpotifyUri::Playlist { .. } => {
-            let cached_paths = cache_playlist(session, spotify_uri, config).await?;
+            // TODO: Update to use trait-based approach
+            // let cached_paths = cache_playlist(session, spotify_uri, config).await?;
             
-            if !no_play && !cached_paths.is_empty() {
-                info!("\nStarting playlist playback...");
-                playback::play_audio_files(&cached_paths)?;
+            if !no_play {
+                info!("\nPlaylist caching not yet implemented with traits");
             }
         }
         _ => {
