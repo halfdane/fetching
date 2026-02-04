@@ -19,7 +19,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::stream::stream_and_cache_track;
 use crate::error::DownloadError;
-use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider, ImageDownloader, TrackFetcher, AlbumFetcher, PlaylistFetcher, PlaylistMetadataProvider};
+use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider, OwnedLibrespotTrackProvider, ImageDownloader, TrackFetcher, AlbumFetcher, PlaylistFetcher, PlaylistMetadataProvider};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, sanitize, write_ogg_tags, TrackMetadata};
 
@@ -278,21 +278,21 @@ async fn select_best_ogg_file<T: TrackMetadataProvider>(
 pub async fn get_track_with_ogg_format(
     track_fetcher: &dyn TrackFetcher,
     uri: &SpotifyUri,
-) -> anyhow::Result<(Track, librespot_core::file_id::FileId)> {
+) -> anyhow::Result<(Box<dyn TrackMetadataProvider>, librespot_core::file_id::FileId)> {
     let track = track_fetcher.fetch_track(uri).await?;
     let provider = LibrespotTrackProvider { track: &track };
     
     // Collect all candidates: original track + all alternatives with their OGG format
-    let mut candidates: Vec<(Track, librespot_core::file_id::FileId, AudioFileFormat, String)> = Vec::new();
+    let mut candidates: Vec<(Box<dyn TrackMetadataProvider>, librespot_core::file_id::FileId, AudioFileFormat, String)> = Vec::new();
     
     // Check original track
     if let Some((file_id, format)) = select_best_ogg_file(&provider).await {
         // Early termination: if original has highest quality (320), no need to check alternatives
         if format == AudioFileFormat::OGG_VORBIS_320 {
             debug!("Track '{}' has OGG_VORBIS_320 in original, skipping alternatives", track.name);
-            return Ok((track, file_id));
+            return Ok((Box::new(OwnedLibrespotTrackProvider { track: track.clone() }), file_id));
         }
-        candidates.push((track.clone(), file_id, format, "original".to_string()));
+        candidates.push((Box::new(OwnedLibrespotTrackProvider { track: track.clone() }), file_id, format, "original".to_string()));
     }
     
     // Check all alternatives if original doesn't exist or doesn't have best quality
@@ -306,7 +306,7 @@ pub async fn get_track_with_ogg_format(
                 Ok(alt_track) => {
                     let alt_provider = LibrespotTrackProvider { track: &alt_track };
                     if let Some((file_id, format)) = select_best_ogg_file(&alt_provider).await {
-                        candidates.push((alt_track, file_id, format, format!("alternative {}", i + 1)));
+                        candidates.push((Box::new(OwnedLibrespotTrackProvider { track: alt_track.clone() }), file_id, format, format!("alternative {}", i + 1)));
                     }
                 }
                 Err(e) => {
@@ -330,7 +330,7 @@ pub async fn get_track_with_ogg_format(
     });
     
     let (best_track, file_id, format, source) = candidates.into_iter().next().unwrap();
-    info!("Selected {:?} from {} for track '{}'", format, source, best_track.name);
+    info!("Selected {:?} from {} for track '{}'", format, source, best_track.name().await);
     
     Ok((best_track, file_id))
 }
@@ -502,7 +502,7 @@ where
         debug!("Processing track URI: {:?}", track_uri);
         
         // Get track with OGG format, trying alternatives if needed
-        let (track, file_id) = match get_track_with_ogg_format(track_fetcher, track_uri).await {
+        let (track_provider, file_id) = match get_track_with_ogg_format(track_fetcher, track_uri).await {
             Ok(result) => result,
             Err(e) => {
                 let track_display = format_track_display(index + 1, total_tracks, "<unknown>");
@@ -517,21 +517,20 @@ where
             }
         };
         
-        let track_display = format_track_display(index + 1, total_tracks, &track.name);
+        let track_display = format_track_display(index + 1, total_tracks, &track_provider.name().await);
         print!("{}", track_display);
         std::io::Write::flush(&mut std::io::stdout())?;
 
         let prefix = track_prefix.map(|f| f(index + 1));
-        let provider = LibrespotTrackProvider { track: &track };
-        let output_path = build_track_path(&provider, base_dir, prefix).await?;
+        let output_path = build_track_path(&*track_provider, base_dir, prefix).await?;
 
-        match process_track_cache(track_fetcher, audio_downloader, image_downloader, &provider, track_uri, &output_path, &file_id).await {
+        match process_track_cache(track_fetcher, audio_downloader, image_downloader, &*track_provider, track_uri, &output_path, &file_id).await {
             Ok(()) => {
                 // Collect album cover for collage if needed
                 if collect_album_covers {
                     if let Err(e) = collect_album_cover(
                         image_downloader,
-                        &TrackRefMetadataProvider(&track),
+                        &*track_provider,
                         &mut unique_album_covers,
                         &mut seen_album_ids,
                     )
@@ -542,8 +541,7 @@ where
                 }
 
                 // Add to M3U entries and cached paths
-                let track_provider = LibrespotTrackProvider { track: &track };
-                m3u_entries.push(build_m3u_entry(&track_provider, output_path.clone()).await);
+                m3u_entries.push(build_m3u_entry(&*track_provider, output_path.clone()).await);
                 cached_paths.push(output_path);
             }
             Err(_e) => {

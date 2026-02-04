@@ -19,7 +19,6 @@ use collection::{cache_album, process_track_cache};
 use config::Config;
 use metadata::build_track_path;
 use traits::LibrespotTrackFetcher;
-use traits::LibrespotTrackProvider;
 
 /// Source of Spotify URIs to process
 #[derive(Debug)]
@@ -57,11 +56,10 @@ async fn process_single_uri(
     match spotify_uri {
         SpotifyUri::Track { .. } => {
             info!("Caching single track...");
-            // Get track with OGG format, trying alternatives if needed
             let track_fetcher = LibrespotTrackFetcher { session };
-            let (track, file_id) = collection::get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
+            let (track_provider, file_id) = collection::get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
             
-            let track_display = format!("Track: {}", track.name);
+            let track_display = format!("Track: {}", track_provider.name().await);
             print!("{}", track_display);
             std::io::Write::flush(&mut std::io::stdout())?;
 
@@ -69,15 +67,13 @@ async fn process_single_uri(
             let music_dir_str = music_dir.to_str().ok_or_else(|| {
                 anyhow::anyhow!(error::DownloadError::InvalidUtf8Path(music_dir.clone()))
             })?;
-            let provider = LibrespotTrackProvider { track: &track };
-            let output_path = build_track_path(&provider, music_dir_str, None).await?;
+            let output_path = build_track_path(&*track_provider, music_dir_str, None).await?;
 
             let track_fetcher = LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::traits::LibrespotImageDownloader { session };
-            let track_provider = crate::traits::LibrespotTrackProvider { track: &track };
 
-            process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &track_provider, spotify_uri, &output_path, &file_id).await?;
+            process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &*track_provider, spotify_uri, &output_path, &file_id).await?;
             
             if !no_play {
                 info!("\nStarting playback...");

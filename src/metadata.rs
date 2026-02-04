@@ -6,7 +6,6 @@
 
 use std::path::PathBuf;
 
-use librespot_metadata::track::Track;
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::*;
 use lofty::tag::{Accessor, ItemKey, Tag, TagExt};
@@ -51,7 +50,7 @@ pub fn sanitize(s: &str) -> String {
 /// # Errors
 ///
 /// Returns error if directory creation fails or path cannot be constructed.
-pub async fn build_track_path<T: TrackMetadataProvider>(
+pub async fn build_track_path<T: TrackMetadataProvider + ?Sized>(
     track: &T,
     base_music_dir: &str,
     prefix: Option<String>,
