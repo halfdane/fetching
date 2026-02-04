@@ -710,6 +710,14 @@ mod tests {
         async fn get_file_id(&self, _format: &librespot_metadata::audio::AudioFileFormat) -> Option<librespot_core::file_id::FileId> {
             None
         }
+        
+        async fn get_album_cover_file_id(&self, index: usize) -> Option<librespot_core::file_id::FileId> {
+            if index == 0 {
+                Some(librespot_core::file_id::FileId::from_raw(&[1u8; 16]))
+            } else {
+                None
+            }
+        }
     }
 
     #[tokio::test]

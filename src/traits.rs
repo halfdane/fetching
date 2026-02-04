@@ -35,6 +35,9 @@ pub trait TrackMetadataProvider: Send + Sync + Debug {
     async fn year(&self) -> i32;
     async fn track_number(&self) -> u32;
     async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId>;
+    
+    // Album cover information for testability
+    async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId>;
 }
 
 /// Real implementation for librespot_metadata::track::Track
@@ -71,5 +74,9 @@ impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     }
     async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
         self.track.files.get(format).copied()
+    }
+    
+    async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
+        self.track.album.covers.get(index).map(|cover| cover.id)
     }
 }

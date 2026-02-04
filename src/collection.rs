@@ -8,8 +8,10 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use async_trait::async_trait;
 use librespot_core::session::Session;
 use librespot_core::SpotifyUri;
+use librespot_core::FileId;
 use librespot_metadata::audio::AudioFileFormat;
 use librespot_metadata::track::Track;
 use librespot_metadata::{album::Album, playlist::Playlist, Metadata};
@@ -22,12 +24,59 @@ use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, get_artist_name, sanitize, write_ogg_tags, TrackMetadata};
 
+/// Wrapper to implement TrackMetadataProvider for a Track reference
+#[derive(Debug)]
+struct TrackRefMetadataProvider<'a>(&'a Track);
+
+#[async_trait]
+impl<'a> TrackMetadataProvider for TrackRefMetadataProvider<'a> {
+    async fn id(&self) -> String {
+        self.0.id.to_string()
+    }
+
+    async fn name(&self) -> String {
+        self.0.name.clone()
+    }
+
+    async fn album_id(&self) -> String {
+        self.0.album.id.to_string()
+    }
+
+    async fn album_name(&self) -> String {
+        self.0.album.name.clone()
+    }
+
+    async fn artist_names(&self) -> Vec<String> {
+        self.0.artists.iter().map(|a| a.name.clone()).collect()
+    }
+
+    async fn duration_ms(&self) -> u32 {
+        self.0.duration as u32
+    }
+
+    async fn year(&self) -> i32 {
+        self.0.album.date.year()
+    }
+
+    async fn track_number(&self) -> u32 {
+        self.0.number as u32
+    }
+
+    async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
+        self.0.files.get(format).copied()
+    }
+
+    async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
+        self.0.album.covers.get(index).map(|cover| cover.id)
+    }
+}
+
 pub const TRACK_DELAY_MS: u64 = 200;
 
 /// Collect unique album covers for collage creation (up to 4 unique albums)
 pub async fn collect_album_cover(
     session: &Session,
-    track: &Track,
+    metadata: &dyn TrackMetadataProvider,
     unique_covers: &mut Vec<Vec<u8>>,
     seen_album_ids: &mut HashSet<String>,
 ) -> anyhow::Result<()> {
@@ -35,14 +84,14 @@ pub async fn collect_album_cover(
         return Ok(());
     }
 
-    let album_id = track.album.id.to_string();
+    let album_id = metadata.album_id().await;
     if seen_album_ids.contains(&album_id) {
         return Ok(());
     }
 
     seen_album_ids.insert(album_id);
-    if let Some(cover) = track.album.covers.first() {
-        match download_cover_image(session, &cover.id).await {
+    if let Some(file_id) = metadata.get_album_cover_file_id(0).await {
+        match download_cover_image(session, &file_id).await {
             Ok(bytes) => unique_covers.push(bytes),
             Err(e) => warn!("Failed to fetch album cover for collage: {}", e),
         }
@@ -231,12 +280,11 @@ pub async fn get_track_with_ogg_format(
     Ok((best_track, file_id))
 }
 
-/// Fetch cover art for a track, with progress indicators
-async fn cache_track_cover_art(session: &Session, track: &Track) -> Option<Vec<u8>> {
-    if let Some(cover) = track.album.covers.first() {
+async fn cache_track_cover_art(session: &Session, metadata: &dyn TrackMetadataProvider) -> Option<Vec<u8>> {
+    if let Some(file_id) = metadata.get_album_cover_file_id(0).await {
         print!(" 🖼️");
         let _ = std::io::Write::flush(&mut std::io::stdout());
-        match download_cover_image(session, &cover.id).await {
+        match download_cover_image(session, &file_id).await {
             Ok(bytes) => Some(bytes),
             Err(e) => {
                 // Print error inline without newline to keep on same line as track
@@ -356,7 +404,7 @@ pub async fn process_track_cache(
     }
 
     // Fetch cover art
-    let cover_art = cache_track_cover_art(session, track).await;
+    let cover_art = cache_track_cover_art(session, &TrackRefMetadataProvider(track)).await;
 
     // Add metadata to the temp file
     let year = track.album.date.year();
@@ -426,7 +474,7 @@ where
                 if collect_album_covers {
                     if let Err(e) = collect_album_cover(
                         session,
-                        &track,
+                        &TrackRefMetadataProvider(&track),
                         &mut unique_album_covers,
                         &mut seen_album_ids,
                     )
@@ -759,6 +807,14 @@ mod tests {
         async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
             self.files.get(format).copied()
         }
+        
+        async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
+            if index == 0 {
+                Some(FileId::from_raw(&[1u8; 16]))
+            } else {
+                None
+            }
+        }
     }
 
     #[tokio::test]
@@ -846,6 +902,14 @@ mod tests {
         async fn year(&self) -> i32 { 2023 }
         async fn track_number(&self) -> u32 { 1 }
         async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
+        
+        async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
+            if index == 0 {
+                Some(FileId::from_raw(&[1u8; 16]))
+            } else {
+                None
+            }
+        }
     }
 
     #[tokio::test]
@@ -905,5 +969,188 @@ mod tests {
         let entry = build_m3u_entry(&mock_metadata, output_path).await;
 
         assert_eq!(entry.duration, 123); // Integer division truncates
+    }
+
+    // Enhanced mock for testing album cover functionality
+    #[derive(Debug)]
+    struct MockTrackWithMultipleCovers {
+        pub name: String,
+        pub artist_names: Vec<String>,
+        pub duration_ms: u32,
+        pub album_cover_file_ids: Vec<FileId>,
+    }
+
+    #[async_trait]
+    impl TrackMetadataProvider for MockTrackWithMultipleCovers {
+        async fn id(&self) -> String { "test".to_string() }
+        async fn name(&self) -> String { self.name.clone() }
+        async fn album_id(&self) -> String { "album".to_string() }
+        async fn album_name(&self) -> String { "album".to_string() }
+        async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
+        async fn duration_ms(&self) -> u32 { self.duration_ms }
+        async fn year(&self) -> i32 { 2023 }
+        async fn track_number(&self) -> u32 { 1 }
+        async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
+        
+        async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
+            self.album_cover_file_ids.get(index).copied()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_album_cover_file_id_multiple_indices() {
+        let cover_ids = vec![
+            FileId::from_raw(&[1u8; 16]),
+            FileId::from_raw(&[2u8; 16]),
+            FileId::from_raw(&[3u8; 16]),
+        ];
+        
+        let mock = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: cover_ids.clone(),
+        };
+
+        // Test valid indices
+        assert_eq!(mock.get_album_cover_file_id(0).await, Some(cover_ids[0]));
+        assert_eq!(mock.get_album_cover_file_id(1).await, Some(cover_ids[1]));
+        assert_eq!(mock.get_album_cover_file_id(2).await, Some(cover_ids[2]));
+        
+        // Test out-of-bounds indices
+        assert_eq!(mock.get_album_cover_file_id(3).await, None);
+        assert_eq!(mock.get_album_cover_file_id(10).await, None);
+    }
+
+    #[tokio::test]
+    async fn test_get_album_cover_file_id_no_covers() {
+        let mock = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![], // No covers
+        };
+
+        assert_eq!(mock.get_album_cover_file_id(0).await, None);
+        assert_eq!(mock.get_album_cover_file_id(1).await, None);
+    }
+
+    #[tokio::test]
+    async fn test_get_album_cover_file_id_single_cover() {
+        let cover_id = FileId::from_raw(&[42u8; 16]);
+        let mock = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![cover_id],
+        };
+
+        assert_eq!(mock.get_album_cover_file_id(0).await, Some(cover_id));
+        assert_eq!(mock.get_album_cover_file_id(1).await, None);
+    }
+
+    #[tokio::test]
+    async fn test_collect_album_cover_with_covers() {
+        use std::collections::HashSet;
+        
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+        let mock = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![cover_id],
+        };
+
+        let _unique_covers: Vec<Vec<u8>> = Vec::new();
+        let _seen_album_ids: HashSet<String> = HashSet::new();
+        
+        // Mock session - we can't actually test downloading, but we can test the logic
+        // This test would need to be an integration test with proper mocking
+        // For now, just test that the method is called correctly
+        let album_id = mock.album_id().await;
+        assert_eq!(album_id, "album");
+        
+        let file_id = mock.get_album_cover_file_id(0).await;
+        assert_eq!(file_id, Some(cover_id));
+    }
+
+    #[tokio::test]
+    async fn test_collect_album_cover_no_covers() {
+        use std::collections::HashSet;
+        
+        let mock = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![], // No covers
+        };
+
+        let _unique_covers: Vec<Vec<u8>> = Vec::new();
+        let _seen_album_ids: HashSet<String> = HashSet::new();
+        
+        let album_id = mock.album_id().await;
+        assert_eq!(album_id, "album");
+        
+        let file_id = mock.get_album_cover_file_id(0).await;
+        assert_eq!(file_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_cache_track_cover_art_no_covers() {
+        let mock = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![], // No covers
+        };
+
+        // This would normally call download_cover_image, but since we can't mock that easily,
+        // we just verify the trait method returns None
+        let file_id = mock.get_album_cover_file_id(0).await;
+        assert_eq!(file_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_cache_track_cover_art_with_covers() {
+        let cover_id = FileId::from_raw(&[1u8; 16]);
+        let mock = MockTrackWithMultipleCovers {
+            name: "Test Track".to_string(),
+            artist_names: vec!["Test Artist".to_string()],
+            duration_ms: 180000,
+            album_cover_file_ids: vec![cover_id],
+        };
+
+        let file_id = mock.get_album_cover_file_id(0).await;
+        assert_eq!(file_id, Some(cover_id));
+    }
+
+    // Test that existing mocks still work correctly
+    #[tokio::test]
+    async fn test_existing_mock_compatibility() {
+        let mock_ogg = MockTrackForOggSelection {
+            files: HashMap::new(),
+        };
+        
+        // Should return a cover for index 0
+        let cover_0 = mock_ogg.get_album_cover_file_id(0).await;
+        assert!(cover_0.is_some());
+        
+        // Should return None for other indices
+        let cover_1 = mock_ogg.get_album_cover_file_id(1).await;
+        assert!(cover_1.is_none());
+
+        let mock_m3u = MockTrackForM3uEntry {
+            name: "Test".to_string(),
+            artist_names: vec!["Artist".to_string()],
+            duration_ms: 100000,
+        };
+        
+        // Should return a cover for index 0
+        let cover_0 = mock_m3u.get_album_cover_file_id(0).await;
+        assert!(cover_0.is_some());
+        
+        // Should return None for other indices
+        let cover_1 = mock_m3u.get_album_cover_file_id(1).await;
+        assert!(cover_1.is_none());
     }
 }

@@ -105,6 +105,7 @@ pub struct MockTrackMetadataProvider {
     pub year: i32,
     pub track_number: u32,
     pub files: HashMap<AudioFileFormat, FileId>,
+    pub album_cover_file_ids: Vec<FileId>,
 }
 
 #[async_trait]
@@ -135,5 +136,9 @@ impl TrackMetadataProvider for MockTrackMetadataProvider {
     }
     async fn get_file_id(&self, format: &librespot_metadata::audio::AudioFileFormat) -> Option<FileId> {
         self.files.get(format).copied()
+    }
+    
+    async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
+        self.album_cover_file_ids.get(index).copied()
     }
 }
