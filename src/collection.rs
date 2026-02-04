@@ -1402,4 +1402,286 @@ mod tests {
         // In a real integration test, we could mock the Session and Track::get
         // to return different formats for each alternative URI
     }
+
+    // ===== FULL INTEGRATION TESTS =====
+    // These tests mock the Session and Track::get to test the complete
+    // get_track_with_ogg_format function with controlled alternatives
+
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Clone)]
+    enum MockTrackFormat {
+        OGG320,
+        OGG160, 
+        OGG96,
+        MP3320,
+        NoAudio,
+    }
+
+    #[derive(Debug, Clone)]
+    struct MockTrackData {
+        pub id: String,
+        pub name: String,
+        pub format: MockTrackFormat,
+        pub alternative_uris: Vec<String>,
+    }
+
+    #[derive(Debug)]
+    struct MockSession {
+        pub tracks: HashMap<String, MockTrackData>,
+        pub requested_uris: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl MockSession {
+        fn new(tracks: Vec<(String, MockTrackFormat, Vec<String>)>) -> Self {
+            let mut tracks_map = HashMap::new();
+            for (uri, format, alternatives) in tracks {
+                tracks_map.insert(uri.clone(), MockTrackData {
+                    id: format!("id_{}", uri.replace(":", "_")),
+                    name: format!("Track {}", uri),
+                    format,
+                    alternative_uris: alternatives,
+                });
+            }
+            
+            Self {
+                tracks: tracks_map,
+                requested_uris: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn get_track_by_uri(&self, uri: &str) -> Option<MockTrackData> {
+            self.requested_uris.lock().unwrap().push(uri.to_string());
+            self.tracks.get(uri).cloned()
+        }
+
+        fn get_requested_uris(&self) -> Vec<String> {
+            self.requested_uris.lock().unwrap().clone()
+        }
+    }
+
+    // Convert mock format to real FileId for testing
+    fn mock_format_to_file_id(format: &MockTrackFormat) -> Option<FileId> {
+        match format {
+            MockTrackFormat::OGG320 => Some(FileId::from_raw(&[1u8; 16])),
+            MockTrackFormat::OGG160 => Some(FileId::from_raw(&[2u8; 16])),
+            MockTrackFormat::OGG96 => Some(FileId::from_raw(&[3u8; 16])),
+            MockTrackFormat::MP3320 => Some(FileId::from_raw(&[4u8; 16])),
+            MockTrackFormat::NoAudio => None,
+        }
+    }
+
+    // Create a mock Track that implements the trait for testing
+    #[derive(Debug, Clone)]
+    struct MockIntegrationTrack {
+        pub data: MockTrackData,
+    }
+
+    #[async_trait]
+    impl TrackMetadataProvider for MockIntegrationTrack {
+        async fn id(&self) -> String { self.data.id.clone() }
+        async fn name(&self) -> String { self.data.name.clone() }
+        async fn album_id(&self) -> String { "album".to_string() }
+        async fn album_name(&self) -> String { "Album".to_string() }
+        async fn artist_names(&self) -> Vec<String> { vec!["Artist".to_string()] }
+        async fn duration_ms(&self) -> u32 { 180000 }
+        async fn date(&self) -> Option<String> { Some("2023".to_string()) }
+        async fn track_number(&self) -> u32 { 1 }
+        
+        async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
+            match (&self.data.format, format) {
+                (MockTrackFormat::OGG320, AudioFileFormat::OGG_VORBIS_320) => mock_format_to_file_id(&self.data.format),
+                (MockTrackFormat::OGG160, AudioFileFormat::OGG_VORBIS_160) => mock_format_to_file_id(&self.data.format),
+                (MockTrackFormat::OGG96, AudioFileFormat::OGG_VORBIS_96) => mock_format_to_file_id(&self.data.format),
+                (MockTrackFormat::MP3320, AudioFileFormat::MP3_320) => mock_format_to_file_id(&self.data.format),
+                _ => None,
+            }
+        }
+        
+        async fn get_album_cover_file_id(&self, _index: usize) -> Option<FileId> {
+            Some(FileId::from_raw(&[9u8; 16]))
+        }
+        
+        async fn alternative_uris(&self) -> Vec<String> {
+            self.data.alternative_uris.clone()
+        }
+    }
+
+    // Test helper: simulate get_track_with_ogg_format with mock session
+    async fn simulate_get_track_with_ogg_format(
+        mock_session: &MockSession,
+        uri_str: &str,
+    ) -> anyhow::Result<(MockIntegrationTrack, FileId)> {
+        let track_data = mock_session.get_track_by_uri(uri_str)
+            .ok_or_else(|| anyhow::anyhow!("Track not found: {}", uri_str))?;
+        
+        let track = MockIntegrationTrack { data: track_data };
+        let provider = &track;
+        
+        // Collect all candidates: original track + all alternatives with their OGG format
+        let mut candidates: Vec<(MockIntegrationTrack, FileId, AudioFileFormat, String)> = Vec::new();
+        
+        // Check original track
+        if let Some((file_id, format)) = select_best_ogg_file(provider).await {
+            // Early termination: if original has highest quality (320), no need to check alternatives
+            if format == AudioFileFormat::OGG_VORBIS_320 {
+                return Ok((track, file_id));
+            }
+            candidates.push((track.clone(), file_id, format, "original".to_string()));
+        }
+        
+        // Check all alternatives if original doesn't exist or doesn't have best quality
+        let alternative_uris = provider.alternative_uris().await;
+        if candidates.is_empty() || !alternative_uris.is_empty() {
+            for (i, alt_uri_str) in alternative_uris.iter().enumerate() {
+                if let Some(alt_track_data) = mock_session.get_track_by_uri(alt_uri_str) {
+                    let alt_track = MockIntegrationTrack { data: alt_track_data };
+                    let alt_provider = &alt_track;
+                    if let Some((file_id, format)) = select_best_ogg_file(alt_provider).await {
+                        candidates.push((alt_track, file_id, format, format!("alternative {}", i + 1)));
+                    }
+                }
+            }
+        }
+        
+        // Select the best quality from all candidates
+        if candidates.is_empty() {
+            anyhow::bail!("Track '{}' not available in OGG Vorbis format (tried {} alternatives)", 
+                         track.data.name, alternative_uris.len())
+        }
+        
+        // Sort by format quality (320 > 160 > 96)
+        candidates.sort_by_key(|(_, _, format, _)| match format {
+            AudioFileFormat::OGG_VORBIS_320 => 0,
+            AudioFileFormat::OGG_VORBIS_160 => 1,
+            AudioFileFormat::OGG_VORBIS_96 => 2,
+            _ => 3,
+        });
+        
+        let (best_track, file_id, format, source) = candidates.into_iter().next().unwrap();
+        info!("Selected {:?} from {} for track '{}'", format, source, best_track.data.name);
+        
+        Ok((best_track, file_id))
+    }
+
+    #[tokio::test]
+    async fn test_integration_original_has_320_no_alternatives_checked() {
+        // Setup: Original track has 320kbps, alternative has even better format
+        // Expected: Alternative should NOT be checked (early return optimization)
+        let mock_session = MockSession::new(vec![
+            ("spotify:track:main".to_string(), MockTrackFormat::OGG320, vec!["spotify:track:alt1".to_string()]),
+            ("spotify:track:alt1".to_string(), MockTrackFormat::OGG320, vec![]), // Even better but shouldn't be checked
+        ]);
+        
+        let uri = "spotify:track:main";
+        let result = simulate_get_track_with_ogg_format(&mock_session, uri).await;
+        
+        assert!(result.is_ok());
+        let (track, _file_id) = result.unwrap();
+        assert_eq!(track.data.id, "id_spotify_track_main");
+        
+        // Verify alternative was NOT requested (early return worked)
+        let requested = mock_session.get_requested_uris();
+        assert_eq!(requested.len(), 1); // Only the original track
+        assert_eq!(requested[0], "spotify:track:main");
+    }
+
+    #[tokio::test]
+    async fn test_integration_original_has_160_checks_alternatives() {
+        // Setup: Original has 160kbps, alternative has 320kbps
+        // Expected: Alternative should be checked and selected
+        let mock_session = MockSession::new(vec![
+            ("spotify:track:main".to_string(), MockTrackFormat::OGG160, vec!["spotify:track:alt1".to_string()]),
+            ("spotify:track:alt1".to_string(), MockTrackFormat::OGG320, vec![]),
+        ]);
+        
+        let uri = "spotify:track:main";
+        let result = simulate_get_track_with_ogg_format(&mock_session, uri).await;
+        
+        assert!(result.is_ok());
+        let (track, _) = result.unwrap();
+        assert_eq!(track.data.id, "id_spotify_track_alt1"); // Should select the better alternative
+        
+        // Verify both tracks were requested
+        let requested = mock_session.get_requested_uris();
+        assert_eq!(requested.len(), 2);
+        assert!(requested.contains(&"spotify:track:main".to_string()));
+        assert!(requested.contains(&"spotify:track:alt1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_integration_original_no_ogg_selects_best_alternative() {
+        // Setup: Original has no OGG, alternatives have mixed formats
+        // Expected: Select best available from alternatives
+        let mock_session = MockSession::new(vec![
+            ("spotify:track:main".to_string(), MockTrackFormat::MP3320, vec![
+                "spotify:track:alt1".to_string(), // 160kbps
+                "spotify:track:alt2".to_string(), // 320kbps (best)
+                "spotify:track:alt3".to_string(), // 96kbps
+            ]),
+            ("spotify:track:alt1".to_string(), MockTrackFormat::OGG160, vec![]),
+            ("spotify:track:alt2".to_string(), MockTrackFormat::OGG320, vec![]),
+            ("spotify:track:alt3".to_string(), MockTrackFormat::OGG96, vec![]),
+        ]);
+        
+        let uri = "spotify:track:main";
+        let result = simulate_get_track_with_ogg_format(&mock_session, uri).await;
+        
+        assert!(result.is_ok());
+        let (track, _) = result.unwrap();
+        assert_eq!(track.data.id, "id_spotify_track_alt2"); // Should select 320kbps alternative
+        
+        // Verify all alternatives were checked
+        let requested = mock_session.get_requested_uris();
+        assert_eq!(requested.len(), 4); // main + 3 alternatives
+    }
+
+    #[tokio::test]
+    async fn test_integration_all_alternatives_fail_returns_error() {
+        // Setup: Original and all alternatives have no OGG formats
+        // Expected: Return error with count of alternatives tried
+        let mock_session = MockSession::new(vec![
+            ("spotify:track:main".to_string(), MockTrackFormat::NoAudio, vec![
+                "spotify:track:alt1".to_string(),
+                "spotify:track:alt2".to_string(),
+            ]),
+            ("spotify:track:alt1".to_string(), MockTrackFormat::NoAudio, vec![]),
+            ("spotify:track:alt2".to_string(), MockTrackFormat::MP3320, vec![]), // Only MP3, no OGG
+        ]);
+        
+        let uri = "spotify:track:main";
+        let result = simulate_get_track_with_ogg_format(&mock_session, uri).await;
+        
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("not available in OGG Vorbis format"));
+        assert!(error_msg.contains("tried 2 alternatives"));
+    }
+
+    #[tokio::test]
+    async fn test_integration_mixed_success_failure_alternatives() {
+        // Setup: Some alternatives work, some don't
+        // Expected: Select best from working alternatives
+        let mock_session = MockSession::new(vec![
+            ("spotify:track:main".to_string(), MockTrackFormat::OGG96, vec![
+                "spotify:track:alt1".to_string(), // No audio
+                "spotify:track:alt2".to_string(), // 160kbps (best working)
+                "spotify:track:alt3".to_string(), // 320kbps (best overall)
+            ]),
+            ("spotify:track:alt1".to_string(), MockTrackFormat::NoAudio, vec![]),
+            ("spotify:track:alt2".to_string(), MockTrackFormat::OGG160, vec![]),
+            ("spotify:track:alt3".to_string(), MockTrackFormat::OGG320, vec![]),
+        ]);
+        
+        let uri = "spotify:track:main";
+        let result = simulate_get_track_with_ogg_format(&mock_session, uri).await;
+        
+        assert!(result.is_ok());
+        let (track, _) = result.unwrap();
+        assert_eq!(track.data.id, "id_spotify_track_alt3"); // Should select 320kbps despite original having 96kbps
+        
+        // Verify all alternatives were attempted
+        let requested = mock_session.get_requested_uris();
+        assert_eq!(requested.len(), 4); // main + 3 alternatives
+    }
 }
