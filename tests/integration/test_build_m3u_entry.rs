@@ -13,7 +13,6 @@ struct TestTrackProvider {
 
 #[async_trait::async_trait]
 impl TrackMetadataProvider for TestTrackProvider {
-    async fn id(&self) -> String { "test".to_string() }
     async fn name(&self) -> String { self.name.clone() }
     async fn album_id(&self) -> String { "album".to_string() }
     async fn album_name(&self) -> String { "album".to_string() }

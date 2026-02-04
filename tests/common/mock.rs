@@ -158,9 +158,6 @@ pub struct MockTrackMetadataProvider {
 
 #[async_trait]
 impl TrackMetadataProvider for MockTrackMetadataProvider {
-    async fn id(&self) -> String {
-        self.id.clone()
-    }
     async fn name(&self) -> String {
         self.name.clone()
     }

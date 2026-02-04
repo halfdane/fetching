@@ -745,7 +745,6 @@ mod tests {
 
     #[async_trait]
     impl TrackMetadataProvider for MockTrackForOggSelection {
-        async fn id(&self) -> String { "mock".to_string() }
         async fn name(&self) -> String { "Mock Track".to_string() }
         async fn album_id(&self) -> String { "mock_album".to_string() }
         async fn album_name(&self) -> String { "Mock Album".to_string() }
@@ -862,7 +861,6 @@ mod tests {
 
     #[async_trait]
     impl TrackMetadataProvider for MockTrackForM3uEntry {
-        async fn id(&self) -> String { "test".to_string() }
         async fn name(&self) -> String { self.name.clone() }
         async fn album_id(&self) -> String { "album".to_string() }
         async fn album_name(&self) -> String { "album".to_string() }
@@ -971,7 +969,6 @@ mod tests {
 
     #[async_trait]
     impl TrackMetadataProvider for MockTrackWithMultipleCovers {
-        async fn id(&self) -> String { "test".to_string() }
         async fn name(&self) -> String { self.name.clone() }
         async fn album_id(&self) -> String { "album".to_string() }
         async fn album_name(&self) -> String { "album".to_string() }
@@ -1345,7 +1342,6 @@ mod tests {
 
     #[async_trait]
     impl TrackMetadataProvider for MockTrackWithAlternatives {
-        async fn id(&self) -> String { "test".to_string() }
         async fn name(&self) -> String { self.name.clone() }
         async fn album_id(&self) -> String { "album".to_string() }
         async fn album_name(&self) -> String { "album".to_string() }
@@ -1760,7 +1756,6 @@ mod tests {
 
     #[async_trait]
     impl TrackMetadataProvider for MockIntegrationTrack {
-        async fn id(&self) -> String { self.data.id.clone() }
         async fn name(&self) -> String { self.data.name.clone() }
         async fn album_id(&self) -> String { "album".to_string() }
         async fn album_name(&self) -> String { "Album".to_string() }
@@ -2062,14 +2057,14 @@ mod tests {
             tracks: HashMap::new(),
         };
 
-        let mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
+        let _mock_audio_downloader = crate::stream::LibrespotAudioDownloader {
             session: &librespot_core::session::Session::new(Default::default(), None),
         };
 
         let mut mock_image_downloader = MockImageDownloader::default();
         mock_image_downloader.cover_images.insert(cover_id, cover_bytes.clone());
 
-        let config = crate::config::Config {
+        let _config = crate::config::Config {
             music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
             ..Default::default()
         };
@@ -2093,7 +2088,7 @@ mod tests {
         let cover_id = FileId::from_raw(&[42u8; 16]);
         let cover_bytes = vec![255u8, 254u8, 253u8]; // Mock image data
         
-        let mock_album = MockAlbumMetadata {
+        let _mock_album = MockAlbumMetadata {
             name: "Cover Test Album".to_string(),
             artists: vec!["Cover Artist".to_string()],
             cover_file_ids: vec![cover_id],
@@ -2289,7 +2284,7 @@ mod tests {
         let mut mock_image_downloader = MockImageDownloader::default();
         mock_image_downloader.cover_images.insert(FileId::from_raw(&[1u8; 16]), cover_bytes.clone());
 
-        let config = crate::config::Config {
+        let _config = crate::config::Config {
             music_dir: Some(std::path::PathBuf::from("/tmp/test_music")),
             ..Default::default()
         };
@@ -2474,7 +2469,6 @@ mod tests {
 
         #[async_trait]
         impl TrackMetadataProvider for TestTrackProvider {
-            async fn id(&self) -> String { self.id.clone() }
             async fn name(&self) -> String { self.name.clone() }
             async fn album_id(&self) -> String { self.album_id.clone() }
             async fn album_name(&self) -> String { self.album_name.clone() }

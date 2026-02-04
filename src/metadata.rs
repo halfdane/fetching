@@ -12,15 +12,6 @@ use lofty::tag::{Accessor, ItemKey, Tag, TagExt};
 
 use crate::traits::TrackMetadataProvider;
 
-/// Extract artist name from a list of artists, returning "Unknown Artist" if empty
-pub fn get_artist_name(artists: &[librespot_metadata::artist::Artist]) -> String {
-    if !artists.is_empty() {
-        artists[0].name.clone()
-    } else {
-        "Unknown Artist".to_string()
-    }
-}
-
 /// Sanitize a string for use in filenames by replacing uncommon characters with underscores.
 /// Keeps: alphanumeric and periods (common in filenames).
 /// Replaces everything else (including spaces and dashes) with underscores.
@@ -661,10 +652,6 @@ mod tests {
 
     #[async_trait]
     impl TrackMetadataProvider for MockTrack {
-        async fn id(&self) -> String {
-            "mock_id".to_string()
-        }
-
         async fn name(&self) -> String {
             self.name.clone()
         }
