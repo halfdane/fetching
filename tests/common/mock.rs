@@ -3,9 +3,11 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use spotify_player::traits::AudioDownloader;
 use librespot_core::file_id::FileId;
-use librespot_core::SpotifyUri;
+use std::collections::HashMap;
+use librespot_metadata::audio::AudioFileFormat;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use librespot_core::SpotifyUri;
 use spotify_player::traits::TrackMetadataProvider;
 
 /// Mock audio downloader for testing retry logic and error scenarios
@@ -102,6 +104,7 @@ pub struct MockTrackMetadataProvider {
     pub duration_ms: u32,
     pub year: i32,
     pub track_number: u32,
+    pub files: HashMap<AudioFileFormat, FileId>,
 }
 
 #[async_trait]
@@ -129,5 +132,8 @@ impl TrackMetadataProvider for MockTrackMetadataProvider {
     }
     async fn track_number(&self) -> u32 {
         self.track_number
+    }
+    async fn get_file_id(&self, format: &librespot_metadata::audio::AudioFileFormat) -> Option<FileId> {
+        self.files.get(format).copied()
     }
 }

@@ -706,6 +706,10 @@ mod tests {
         async fn duration_ms(&self) -> u32 {
             180000 // 3 minutes
         }
+
+        async fn get_file_id(&self, _format: &librespot_metadata::audio::AudioFileFormat) -> Option<librespot_core::file_id::FileId> {
+            None
+        }
     }
 
     #[tokio::test]

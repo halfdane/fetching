@@ -7,6 +7,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use librespot_core::file_id::FileId;
 use librespot_core::SpotifyUri;
+use librespot_metadata::audio::AudioFileFormat;
 
 /// Capability to stream and cache audio tracks
 #[async_trait]
@@ -33,6 +34,7 @@ pub trait TrackMetadataProvider: Send + Sync + Debug {
     async fn duration_ms(&self) -> u32;
     async fn year(&self) -> i32;
     async fn track_number(&self) -> u32;
+    async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId>;
 }
 
 /// Real implementation for librespot_metadata::track::Track
@@ -66,5 +68,8 @@ impl<'a> TrackMetadataProvider for LibrespotTrackProvider<'a> {
     }
     async fn track_number(&self) -> u32 {
         self.track.number as u32
+    }
+    async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
+        self.track.files.get(format).copied()
     }
 }

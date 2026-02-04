@@ -18,9 +18,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::stream::{stream_and_cache_track, download_cover_image, LibrespotAudioDownloader};
 use crate::error::DownloadError;
+use crate::traits::{TrackMetadataProvider, LibrespotTrackProvider};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, get_artist_name, sanitize, write_ogg_tags, TrackMetadata};
-use crate::traits::LibrespotTrackProvider;
 
 pub const TRACK_DELAY_MS: u64 = 200;
 
@@ -156,16 +156,18 @@ pub fn format_track_display(index: usize, total: usize, track_name: &str) -> Str
 
 /// Get the best quality OGG Vorbis file ID and format for a track
 /// Returns (FileId, AudioFileFormat) if found
-fn select_best_ogg_file(track: &Track) -> Option<(librespot_core::file_id::FileId, AudioFileFormat)> {
+async fn select_best_ogg_file<T: TrackMetadataProvider>(
+    track: &T,
+) -> Option<(librespot_core::file_id::FileId, AudioFileFormat)> {
     // Try formats in order of quality (highest to lowest)
-    if let Some(file_id) = track.files.get(&AudioFileFormat::OGG_VORBIS_320) {
-        return Some((*file_id, AudioFileFormat::OGG_VORBIS_320));
+    if let Some(file_id) = track.get_file_id(&AudioFileFormat::OGG_VORBIS_320).await {
+        return Some((file_id, AudioFileFormat::OGG_VORBIS_320));
     }
-    if let Some(file_id) = track.files.get(&AudioFileFormat::OGG_VORBIS_160) {
-        return Some((*file_id, AudioFileFormat::OGG_VORBIS_160));
+    if let Some(file_id) = track.get_file_id(&AudioFileFormat::OGG_VORBIS_160).await {
+        return Some((file_id, AudioFileFormat::OGG_VORBIS_160));
     }
-    if let Some(file_id) = track.files.get(&AudioFileFormat::OGG_VORBIS_96) {
-        return Some((*file_id, AudioFileFormat::OGG_VORBIS_96));
+    if let Some(file_id) = track.get_file_id(&AudioFileFormat::OGG_VORBIS_96).await {
+        return Some((file_id, AudioFileFormat::OGG_VORBIS_96));
     }
     None
 }
@@ -182,7 +184,7 @@ pub async fn get_track_with_ogg_format(
     let mut candidates: Vec<(Track, librespot_core::file_id::FileId, AudioFileFormat, String)> = Vec::new();
     
     // Check original track
-    if let Some((file_id, format)) = select_best_ogg_file(&track) {
+    if let Some((file_id, format)) = select_best_ogg_file(&LibrespotTrackProvider { track: &track }).await {
         // Early termination: if original has highest quality (320), no need to check alternatives
         if format == AudioFileFormat::OGG_VORBIS_320 {
             debug!("Track '{}' has OGG_VORBIS_320 in original, skipping alternatives", track.name);
@@ -198,7 +200,7 @@ pub async fn get_track_with_ogg_format(
         for (i, alt_uri) in track.alternatives.iter().enumerate() {
             match Track::get(session, alt_uri).await {
                 Ok(alt_track) => {
-                    if let Some((file_id, format)) = select_best_ogg_file(&alt_track) {
+                    if let Some((file_id, format)) = select_best_ogg_file(&LibrespotTrackProvider { track: &alt_track }).await {
                         candidates.push((alt_track, file_id, format, format!("alternative {}", i + 1)));
                     }
                 }
@@ -730,5 +732,97 @@ mod tests {
     fn test_track_delay_constant() {
         const { assert!(TRACK_DELAY_MS > 0) };
         const { assert!(TRACK_DELAY_MS < 10000) }; // Reasonable delay
+    }
+
+    // Tests for select_best_ogg_file
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use librespot_core::file_id::FileId;
+
+    #[derive(Debug)]
+    struct MockTrackForOggSelection {
+        files: HashMap<AudioFileFormat, FileId>,
+    }
+
+    #[async_trait]
+    impl TrackMetadataProvider for MockTrackForOggSelection {
+        async fn id(&self) -> String { "mock".to_string() }
+        async fn name(&self) -> String { "Mock Track".to_string() }
+        async fn album_id(&self) -> String { "mock_album".to_string() }
+        async fn album_name(&self) -> String { "Mock Album".to_string() }
+        async fn artist_names(&self) -> Vec<String> { vec!["Mock Artist".to_string()] }
+        async fn duration_ms(&self) -> u32 { 180000 }
+        async fn year(&self) -> i32 { 2023 }
+        async fn track_number(&self) -> u32 { 1 }
+        async fn get_file_id(&self, format: &AudioFileFormat) -> Option<FileId> {
+            self.files.get(format).copied()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_select_best_ogg_file_prefers_320() {
+        let mut files = HashMap::new();
+        files.insert(AudioFileFormat::OGG_VORBIS_320, FileId::from_raw(&[1u8; 16]));
+        files.insert(AudioFileFormat::OGG_VORBIS_160, FileId::from_raw(&[2u8; 16]));
+
+        let mock = MockTrackForOggSelection { files };
+
+        let result = select_best_ogg_file(&mock).await;
+        assert!(result.is_some());
+        let (file_id, format) = result.unwrap();
+        assert_eq!(format, AudioFileFormat::OGG_VORBIS_320);
+        assert_eq!(file_id, FileId::from_raw(&[1u8; 16]));
+    }
+
+    #[tokio::test]
+    async fn test_select_best_ogg_file_falls_back_to_160() {
+        let mut files = HashMap::new();
+        files.insert(AudioFileFormat::OGG_VORBIS_160, FileId::from_raw(&[2u8; 16]));
+        files.insert(AudioFileFormat::OGG_VORBIS_96, FileId::from_raw(&[3u8; 16]));
+
+        let mock = MockTrackForOggSelection { files };
+
+        let result = select_best_ogg_file(&mock).await;
+        assert!(result.is_some());
+        let (file_id, format) = result.unwrap();
+        assert_eq!(format, AudioFileFormat::OGG_VORBIS_160);
+        assert_eq!(file_id, FileId::from_raw(&[2u8; 16]));
+    }
+
+    #[tokio::test]
+    async fn test_select_best_ogg_file_falls_back_to_96() {
+        let mut files = HashMap::new();
+        files.insert(AudioFileFormat::OGG_VORBIS_96, FileId::from_raw(&[3u8; 16]));
+
+        let mock = MockTrackForOggSelection { files };
+
+        let result = select_best_ogg_file(&mock).await;
+        assert!(result.is_some());
+        let (file_id, format) = result.unwrap();
+        assert_eq!(format, AudioFileFormat::OGG_VORBIS_96);
+        assert_eq!(file_id, FileId::from_raw(&[3u8; 16]));
+    }
+
+    #[tokio::test]
+    async fn test_select_best_ogg_file_no_ogg_formats() {
+        let files = HashMap::new(); // No OGG formats available
+
+        let mock = MockTrackForOggSelection { files };
+
+        let result = select_best_ogg_file(&mock).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_select_best_ogg_file_only_non_ogg_formats() {
+        let mut files = HashMap::new();
+        // Add some non-OGG formats - using available variants
+        files.insert(AudioFileFormat::MP3_320, FileId::from_raw(&[4u8; 16]));
+        files.insert(AudioFileFormat::MP3_256, FileId::from_raw(&[5u8; 16]));
+
+        let mock = MockTrackForOggSelection { files };
+
+        let result = select_best_ogg_file(&mock).await;
+        assert!(result.is_none());
     }
 }
