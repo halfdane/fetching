@@ -1,7 +1,6 @@
-use spotify_player::{cache::*, traits::*};
+use spotify_player::{m3u::build_m3u_entry, traits::*};
 use librespot_core::file_id::FileId;
 use librespot_metadata::audio::AudioFileFormat;
-use tokio::test;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
