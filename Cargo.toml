@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-librespot-core = { path = "../librespot/core" }
-librespot-metadata = { path = "../librespot/metadata" }
-librespot-audio = { path = "../librespot/audio" }
-librespot-oauth = { path = "../librespot/oauth" }
+librespot-core = "0.8.0"
+librespot-metadata = "0.8.0"
+librespot-audio = "0.8.0"
+librespot-oauth = "0.8.0"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 thiserror = "1.0"
