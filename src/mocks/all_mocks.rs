@@ -123,6 +123,7 @@ impl Default for MockAlbumFetcher {
     }
 }
 
+#[allow(dead_code)]
 impl MockAlbumFetcher {
     /// Add an album to the mock
     pub fn add_album<P: crate::traits::AlbumMetadataProvider + 'static>(&mut self, uri: &str, album: P) {
@@ -229,6 +230,7 @@ impl Default for MockPlaylistFetcher {
     }
 }
 
+#[allow(dead_code)]
 impl MockPlaylistFetcher {
     /// Add a playlist to the mock
     pub fn add_playlist(&mut self, uri: &str, playlist: MockPlaylistMetadata) {
