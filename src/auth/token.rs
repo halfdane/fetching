@@ -165,4 +165,24 @@ mod tests {
             + 240;
         assert!(is_token_expired(soon));
     }
+
+    #[tokio::test]
+    async fn test_token_refresher_creation() {
+        let temp_file = "/tmp/test_refresher_token.json";
+        let token_data = crate::auth::oauth::TokenData {
+            access_token: "test_token".to_string(),
+            refresh_token: "refresh_token".to_string(),
+            expires_at: 1234567890,
+        };
+
+        let refresher = TokenRefresher::new(temp_file.to_string(), token_data.clone());
+
+        // Verify the refresher was created with correct data
+        // We can't easily test the background task without complex mocking,
+        // but we can test the basic structure
+        assert_eq!(refresher.token_path, temp_file);
+
+        // Cleanup
+        std::fs::remove_file(temp_file).ok();
+    }
 }

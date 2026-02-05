@@ -76,3 +76,35 @@ pub async fn get_credentials(
         ),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn test_get_credentials_with_valid_token_file() {
+        // Create a temporary token file with valid token
+        let temp_file = NamedTempFile::new().unwrap();
+        let token_path = temp_file.path().to_str().unwrap();
+
+        let token_data = oauth::TokenData {
+            access_token: "valid_token".to_string(),
+            refresh_token: "refresh_token".to_string(),
+            expires_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs() + 3600, // Expires in 1 hour
+        };
+
+        token::save_token_data(token_path, &token_data).unwrap();
+
+        // Should return credentials from the token file
+        let result = get_credentials(token_path).await;
+        assert!(result.is_ok());
+
+        // We successfully got credentials (don't need to inspect the exact type)
+        let _creds = result.unwrap();
+    }
+}
