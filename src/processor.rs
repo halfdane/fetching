@@ -21,13 +21,13 @@ async fn process_single_uri(
 ) -> anyhow::Result<()> {
     match spotify_uri {
         librespot_core::SpotifyUri::Track { .. } => {
-            info!("Caching single track...");
             let track_fetcher = LibrespotTrackFetcher { session };
             let (track_provider, file_id) = get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
 
-            let track_display = format!("Track: {}", track_provider.name().await);
-            print!("{}", track_display);
-            std::io::Write::flush(&mut std::io::stdout())?;
+            let track_name = track_provider.name().await;
+            let _track_span = tracing::info_span!("process_track", track = %track_name).entered();
+
+            info!("Caching single track...");
 
             let music_dir = config.get_music_dir().map_err(|e| anyhow::anyhow!(e))?;
             let music_dir_str = music_dir.to_str().ok_or_else(|| {
@@ -42,7 +42,7 @@ async fn process_single_uri(
             process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &*track_provider, spotify_uri, &output_path, &file_id).await?;
 
             if !no_play {
-                info!("\nStarting playback...");
+                info!("Starting playback...");
                 crate::playback::play_audio_file(&output_path)?;
             }
         }
@@ -81,6 +81,7 @@ async fn process_single_uri(
 }
 
 /// Process multiple Spotify URIs with error handling and summary
+#[tracing::instrument(name = "process_uris", fields(total_uris = uris.len()), skip_all)]
 pub async fn process_uris(
     session: &librespot_core::session::Session,
     uris: &[String],
@@ -90,14 +91,16 @@ pub async fn process_uris(
     let mut successful = 0;
     let mut failed: Vec<(String, String)> = Vec::new();
 
-    let show_progress = uris.len() > 1;
-
     for (index, uri_arg) in uris.iter().enumerate() {
-        if show_progress {
-            let current = index + 1;
-            let total = uris.len();
-            info!("Processing {} of {}: {}", current, total, uri_arg);
-        }
+        let current = index + 1;
+        let total = uris.len();
+
+        // Create a span for each URI processing
+        let _uri_span = tracing::info_span!("process_uri",
+            uri = %uri_arg,
+            current = current,
+            total = total
+        ).entered();
 
         let spotify_uri = match crate::input::parse_spotify_uri(uri_arg) {
             Ok(uri) => uri,
