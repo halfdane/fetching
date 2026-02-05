@@ -5,7 +5,7 @@ use librespot_core::SpotifyUri;
 use tracing::{error, info};
 
 mod auth;
-mod collection;
+mod cache;
 mod config;
 mod error;
 mod m3u;
@@ -16,7 +16,7 @@ mod traits;
 mod implementations;
 
 use auth::create_session_with_auto_refresh;
-use collection::{cache_album, cache_playlist, process_track_cache};
+use cache::{cache_album, cache_playlist, process_track_cache};
 use config::Config;
 use metadata::build_track_path;
 use implementations::LibrespotTrackFetcher;
@@ -58,7 +58,7 @@ async fn process_single_uri(
         SpotifyUri::Track { .. } => {
             info!("Caching single track...");
             let track_fetcher = LibrespotTrackFetcher { session };
-            let (track_provider, file_id) = collection::get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
+            let (track_provider, file_id) = cache::get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
             
             let track_display = format!("Track: {}", track_provider.name().await);
             print!("{}", track_display);

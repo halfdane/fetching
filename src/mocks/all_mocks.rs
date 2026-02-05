@@ -3,11 +3,10 @@
 //! All mock structs are marked with #[allow(dead_code)] to suppress warnings
 //! since they are only used in tests.
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use librespot_core::file_id::FileId;
 use librespot_core::SpotifyUri;
-use librespot_metadata::audio::AudioFileFormat;
 use std::sync::Arc;
 
 #[allow(dead_code)]

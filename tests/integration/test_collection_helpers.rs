@@ -1,4 +1,4 @@
-use spotify_player::collection::save_cover_art;
+use spotify_player::cache::save_cover_art;
 use std::path::PathBuf;
 use tempfile::TempDir;
 

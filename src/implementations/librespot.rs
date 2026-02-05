@@ -1,6 +1,6 @@
 //! Librespot-based implementations of traits.
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use librespot_core::file_id::FileId;
 use librespot_core::SpotifyUri;

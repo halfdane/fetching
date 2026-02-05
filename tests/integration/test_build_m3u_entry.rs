@@ -1,4 +1,4 @@
-use spotify_player::collection::build_m3u_entry;
+use spotify_player::cache::build_m3u_entry;
 use spotify_player::m3u::write_m3u_playlist;
 use spotify_player::traits::TrackMetadataProvider;
 use std::path::PathBuf;

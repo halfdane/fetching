@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use librespot_core::file_id::FileId;
-use librespot_core::SpotifyUri;
 use librespot_metadata::audio::AudioFileFormat;
 use std::fmt::Debug;
 
