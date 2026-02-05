@@ -8,3 +8,5 @@ pub mod error;
 pub mod m3u;
 pub mod metadata;
 pub mod traits;
+pub mod implementations;
+pub mod mocks;

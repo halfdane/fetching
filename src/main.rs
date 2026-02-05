@@ -13,12 +13,13 @@ mod metadata;
 mod playback;
 mod stream;
 mod traits;
+mod implementations;
 
 use auth::create_session_with_auto_refresh;
 use collection::{cache_album, cache_playlist, process_track_cache};
 use config::Config;
 use metadata::build_track_path;
-use traits::LibrespotTrackFetcher;
+use implementations::LibrespotTrackFetcher;
 
 /// Source of Spotify URIs to process
 #[derive(Debug)]
@@ -71,7 +72,7 @@ async fn process_single_uri(
 
             let track_fetcher = LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
-            let image_downloader = crate::traits::LibrespotImageDownloader { session };
+            let image_downloader = implementations::LibrespotImageDownloader { session };
 
             process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &*track_provider, spotify_uri, &output_path, &file_id).await?;
             
@@ -81,10 +82,10 @@ async fn process_single_uri(
             }
         }
         SpotifyUri::Album { .. } => {
-            let album_fetcher = crate::traits::LibrespotAlbumFetcher { session };
-            let track_fetcher = crate::traits::LibrespotTrackFetcher { session };
+            let album_fetcher = implementations::LibrespotAlbumFetcher { session };
+            let track_fetcher = implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
-            let image_downloader = crate::traits::LibrespotImageDownloader { session };
+            let image_downloader = implementations::LibrespotImageDownloader { session };
             let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config).await?;
             
             if !no_play && !cached_paths.is_empty() {
@@ -93,10 +94,10 @@ async fn process_single_uri(
             }
         }
         SpotifyUri::Playlist { .. } => {
-            let playlist_fetcher = crate::traits::LibrespotPlaylistFetcher { session };
-            let track_fetcher = crate::traits::LibrespotTrackFetcher { session };
+            let playlist_fetcher = implementations::LibrespotPlaylistFetcher { session };
+            let track_fetcher = implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
-            let image_downloader = crate::traits::LibrespotImageDownloader { session };
+            let image_downloader = implementations::LibrespotImageDownloader { session };
             let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config).await?;
             
             if !no_play && !cached_paths.is_empty() {

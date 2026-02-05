@@ -15,7 +15,8 @@ use tracing::{debug, error, info, warn};
 
 use crate::stream::stream_and_cache_track;
 use crate::error::DownloadError;
-use crate::traits::{TrackMetadataProvider, OwnedLibrespotTrackProvider, ImageDownloader, TrackFetcher, AlbumFetcher, PlaylistFetcher};
+use crate::traits::{TrackMetadataProvider, AlbumMetadataProvider, PlaylistMetadataProvider, ImageDownloader, TrackFetcher, AlbumFetcher, PlaylistFetcher};
+use crate::implementations::OwnedLibrespotTrackProvider;
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, sanitize, write_ogg_tags, TrackMetadata};
 
@@ -1058,7 +1059,7 @@ mod tests {
     #[tokio::test]
     async fn test_collect_album_cover_with_covers() {
         use std::collections::HashSet;
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
         
         let cover_id = FileId::from_raw(&[1u8; 16]);
         let cover_bytes = vec![255, 254, 253]; // Mock image data
@@ -1095,7 +1096,7 @@ mod tests {
     #[tokio::test]
     async fn test_collect_album_cover_download_failure() {
         use std::collections::HashSet;
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
         
         let cover_id = FileId::from_raw(&[1u8; 16]);
         
@@ -1132,7 +1133,7 @@ mod tests {
     #[tokio::test]
     async fn test_collect_album_cover_duplicate_album() {
         use std::collections::HashSet;
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
         
         let cover_id = FileId::from_raw(&[1u8; 16]);
         let cover_bytes = vec![255, 254, 253];
@@ -1176,7 +1177,7 @@ mod tests {
     #[tokio::test]
     async fn test_collect_album_cover_limit_reached() {
         use std::collections::HashSet;
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
         
         let mut mock_images = MockImageDownloader::default();
         let mut unique_covers = Vec::new();
@@ -1216,7 +1217,7 @@ mod tests {
     #[tokio::test]
     async fn test_collect_album_cover_no_covers() {
         use std::collections::HashSet;
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
         
         let mock_images = MockImageDownloader::default();
         
@@ -1246,7 +1247,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_track_cover_art_success() {
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
 
         let cover_id = FileId::from_raw(&[1u8; 16]);
         let cover_data = vec![255u8; 100]; // Mock image data
@@ -1267,7 +1268,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_track_cover_art_download_failure() {
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
 
         let cover_id = FileId::from_raw(&[1u8; 16]);
 
@@ -1287,7 +1288,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_track_cover_art_no_covers() {
-        use crate::traits::MockImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
 
         let mock_downloader = MockImageDownloader::default();
 
@@ -1557,7 +1558,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_track_with_ogg_format_can_be_called_with_mock() {
-        use crate::traits::MockTrackFetcher;
+        use spotify_player::mocks::MockTrackFetcher;
 
         let uri = SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap();
         let mock_fetcher = MockTrackFetcher {
@@ -1575,7 +1576,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_track_with_ogg_format_trait_abstraction_works() {
-        use crate::traits::MockTrackFetcher;
+        use spotify_player::mocks::MockTrackFetcher;
 
         // Test that we can call the function with different mock configurations
         let uri = SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap();
@@ -1604,7 +1605,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_album_cover_download_failure_resilience() {
-        use crate::traits::{ImageDownloader, MockImageDownloader};
+        use crate::traits::ImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
 
         let mock_downloader = MockImageDownloader::default();
         // Simulate download failure by not adding any cover images to the mock
@@ -1620,7 +1622,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_album_cover_successful_download() {
-        use crate::traits::{ImageDownloader, MockImageDownloader};
+        use crate::traits::ImageDownloader;
+        use spotify_player::mocks::MockImageDownloader;
 
         let mut mock_downloader = MockImageDownloader::default();
         let file_id = FileId::from_raw(&[1u8; 16]);
@@ -1637,7 +1640,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_track_with_ogg_format_error_handling() {
-        use crate::traits::MockTrackFetcher;
+        use spotify_player::mocks::MockTrackFetcher;
 
         let uri = SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap();
 
@@ -1660,7 +1663,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_track_with_ogg_format_uri_handling() {
-        use crate::traits::MockTrackFetcher;
+        use spotify_player::mocks::MockTrackFetcher;
 
         // Test that the function accepts various URI formats without compilation issues
         let uris = vec![
@@ -1978,7 +1981,8 @@ mod tests {
     }
 
     // Tests for cache_album trait-based refactoring
-    use crate::traits::{MockAlbumFetcher, MockAlbumMetadata, MockTrackFetcher, MockImageDownloader, AlbumMetadataProvider};
+    use spotify_player::mocks::{MockAlbumFetcher, MockAlbumMetadata, MockTrackFetcher, MockImageDownloader};
+    use crate::traits::AlbumMetadataProvider;
 
     #[tokio::test]
     async fn test_cache_album_can_be_called_with_mock_album_fetcher() {
@@ -2201,7 +2205,7 @@ mod tests {
     }
 
     // Tests for playlist caching with trait abstraction
-    use crate::traits::{MockPlaylistFetcher, MockPlaylistMetadata};
+    use spotify_player::mocks::{MockPlaylistFetcher, MockPlaylistMetadata};
 
     #[tokio::test]
     async fn test_cache_playlist_can_be_called_with_mock_playlist_fetcher() {
@@ -2444,7 +2448,7 @@ mod tests {
     async fn test_process_track_cache_with_mocks() {
         use std::collections::HashMap;
         use tempfile::TempDir;
-        use crate::traits::{MockAudioDownloader, MockImageDownloader};
+        use spotify_player::mocks::{MockAudioDownloader, MockImageDownloader};
         
         // Define a local mock for this test
         #[derive(Debug)]
