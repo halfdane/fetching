@@ -9,6 +9,7 @@ use librespot_core::file_id::FileId;
 use librespot_core::SpotifyUri;
 use librespot_metadata::audio::AudioFileFormat;
 use librespot_metadata::Metadata;
+use reqwest;
 
 /// Capability to stream and cache audio tracks
 #[async_trait]
@@ -322,6 +323,64 @@ impl AlbumMetadataProvider for LibrespotAlbumProvider {
 
     async fn album_track_uris(&self) -> Vec<librespot_core::SpotifyUri> {
         self.album.tracks().cloned().collect()
+    }
+}
+
+/// Librespot implementation for fetching playlist metadata
+pub struct LibrespotPlaylistFetcher<'a> {
+    pub session: &'a librespot_core::session::Session,
+}
+
+impl<'a> std::fmt::Debug for LibrespotPlaylistFetcher<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LibrespotPlaylistFetcher")
+            .field("session", &"<Session>")
+            .finish()
+    }
+}
+
+#[async_trait]
+impl<'a> PlaylistFetcher for LibrespotPlaylistFetcher<'a> {
+    async fn fetch_playlist(&self, uri: &librespot_core::SpotifyUri) -> Result<Box<dyn PlaylistMetadataProvider>> {
+        let playlist = librespot_metadata::playlist::Playlist::get(self.session, uri).await?;
+        Ok(Box::new(LibrespotPlaylistProvider { playlist }))
+    }
+}
+
+/// Wrapper to implement PlaylistMetadataProvider for librespot Playlist
+#[derive(Debug)]
+pub struct LibrespotPlaylistProvider {
+    pub playlist: librespot_metadata::playlist::Playlist,
+}
+
+#[async_trait]
+impl PlaylistMetadataProvider for LibrespotPlaylistProvider {
+    async fn playlist_name(&self) -> String {
+        self.playlist.name().to_string()
+    }
+
+    async fn playlist_tracks(&self) -> Vec<librespot_core::SpotifyUri> {
+        self.playlist.tracks().cloned().collect()
+    }
+
+    async fn playlist_cover_art_bytes(&self) -> Option<Vec<u8>> {
+        // Check if playlist has embedded cover art
+        if !self.playlist.attributes.picture.is_empty() {
+            return Some(self.playlist.attributes.picture.clone());
+        }
+
+        // Try to fetch from picture_sizes URLs
+        if let Some(picture_size) = self.playlist.attributes.picture_sizes.first() {
+            match reqwest::get(&picture_size.url).await {
+                Ok(response) => match response.bytes().await {
+                    Ok(bytes) => return Some(bytes.to_vec()),
+                    Err(_) => {}
+                },
+                Err(_) => {}
+            }
+        }
+
+        None
     }
 }
 
