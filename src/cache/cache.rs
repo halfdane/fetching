@@ -31,10 +31,16 @@ async fn cache_tracks_with_entries<'a, I>(
 where
     I: Iterator<Item = &'a SpotifyUri>,
 {
+    let _progress_span = tracing::info_span!("cache_track_collection", 
+        total_tracks = total_tracks,
+        processed_tracks = tracing::field::Empty
+    ).entered();
+
     let mut m3u_entries = Vec::new();
     let mut unique_album_covers: Vec<Vec<u8>> = Vec::new();
     let mut seen_album_ids: HashSet<String> = HashSet::new();
     let mut cached_paths = Vec::new();
+    let mut processed_count = 0;
 
     for (index, track_uri) in tracks.enumerate() {
         tracing::debug!("Processing track URI: {:?}", track_uri);
@@ -53,9 +59,13 @@ where
         };
 
         let track_name = track_provider.name().await;
-        let _track_span = tracing::info_span!("process_track", track = %track_name).entered();
+        let _track_span = tracing::info_span!("process_track", 
+            track = %track_name,
+            position = index + 1,
+            total = total_tracks
+        ).entered();
 
-        info!("Starting track processing");
+        info!("Processing track {} of {}: {}", index + 1, total_tracks, track_name);
 
         let prefix = track_prefix.map(|f| f(index + 1));
         let output_path = build_track_path(&*track_provider, base_dir, prefix).await?;
@@ -79,6 +89,10 @@ where
                 // Add to M3U entries and cached paths
                 m3u_entries.push(crate::m3u::build_m3u_entry(&*track_provider, output_path.clone()).await);
                 cached_paths.push(output_path);
+                
+                // Update progress
+                processed_count += 1;
+                tracing::Span::current().record("processed_tracks", processed_count);
             }
             Err(_e) => {
                 // Error already logged by process_track_cache
@@ -90,6 +104,8 @@ where
             sleep(Duration::from_millis(TRACK_DELAY_MS)).await;
         }
     }
+
+    info!("Completed processing {} tracks", processed_count);
 
     Ok((m3u_entries, unique_album_covers, cached_paths))
 }
@@ -232,7 +248,10 @@ pub async fn cache_album(
         .to_str()
         .ok_or_else(|| anyhow::anyhow!(crate::error::DownloadError::InvalidUtf8Path(music_dir.clone())))?;
 
-    let _tracks_span = tracing::info_span!("process_album_tracks", total_tracks = total_tracks).entered();
+    let _tracks_span = tracing::info_span!("process_album_tracks", 
+        total_tracks = total_tracks,
+        current_track = 0
+    ).entered();
 
     cache_track_collection(
         track_fetcher,
