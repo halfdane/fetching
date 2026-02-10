@@ -4,9 +4,10 @@
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
   outputs = { self, nixpkgs, rust-overlay }:
     let
-      pkgs = import nixpkgs { system = "aarch64-linux"; overlays = [ rust-overlay.overlays.default ]; };
-    in {
-      devShells.aarch64-linux.default = pkgs.mkShell {
+      systems = [ "aarch64-linux" "x86_64-linux" ];
+      mkDevShell = system: let
+        pkgs = import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
+      in pkgs.mkShell {
         buildInputs = [
           (pkgs.rust-bin.stable.latest.default)
           pkgs.pkg-config
@@ -23,5 +24,10 @@
           export RUST_BACKTRACE=1
         '';
       };
+    in {
+      devShells = builtins.listToAttrs (map (system: {
+        name = system;
+        value = { default = mkDevShell system; };
+      }) systems);
     };
 }
