@@ -14,17 +14,35 @@ use crate::config::Config;
 use crate::metadata::build_track_path;
 use crate::implementations::LibrespotTrackFetcher;
 
-/// Process a single Spotify URI (track, album, or playlist)
+/// Process a single Spotify URI (track, album, or playlist) with a given task_id
+pub async fn process_url(
+    session: &librespot_core::session::Session,
+    task_id: Uuid,
+    url: &str,
+    config: &Config,
+    tx: mpsc::Sender<crate::ProgressUpdate>,
+) -> anyhow::Result<()> {
+    let spotify_uri = match crate::input::parse_spotify_uri(url) {
+        Ok(uri) => uri,
+        Err(e) => {
+            error!("❌ Failed to parse URI: {}", e);
+            anyhow::bail!("Failed to parse URI: {}", e);
+        }
+    };
+    process_single_uri(session, &spotify_uri, config, tx, url, task_id).await
+}
+
+// Internal: process a single Spotify URI with a given task_id
 async fn process_single_uri(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
     tx: mpsc::Sender<crate::ProgressUpdate>,
     uri_arg: &str,
+    task_id: Uuid,
 ) -> anyhow::Result<()> {
     match spotify_uri {
         librespot_core::SpotifyUri::Track { .. } => {
-            let task_id = Uuid::new_v4();
             tx.send(crate::ProgressUpdate {
                 task_id,
                 scope: crate::ProgressScope::Track,
@@ -72,7 +90,6 @@ async fn process_single_uri(
             }).await?;
         }
         librespot_core::SpotifyUri::Album { .. } => {
-            let task_id = Uuid::new_v4();
             tx.send(crate::ProgressUpdate {
                 task_id,
                 scope: crate::ProgressScope::Album,
@@ -96,7 +113,6 @@ async fn process_single_uri(
             }).await?;
         }
         librespot_core::SpotifyUri::Playlist { .. } => {
-            let task_id = Uuid::new_v4();
             tx.send(crate::ProgressUpdate {
                 task_id,
                 scope: crate::ProgressScope::Playlist,
@@ -148,16 +164,8 @@ pub async fn process_uris(
             info!("Processing {} of {}: {}", current, total, uri_arg);
         }
 
-        let spotify_uri = match crate::input::parse_spotify_uri(uri_arg) {
-            Ok(uri) => uri,
-            Err(e) => {
-                error!("❌ Failed to parse URI: {}", e);
-                failed.push((uri_arg.clone(), e.to_string()));
-                continue;
-            }
-        };
-
-        match process_single_uri(session, &spotify_uri, config, tx.clone(), uri_arg).await {
+        let task_id = Uuid::new_v4();
+        match process_url(session, task_id, uri_arg, config, tx.clone()).await {
             Ok(_) => successful += 1,
             Err(e) => {
                 error!("❌ Failed to process: {}", e);
