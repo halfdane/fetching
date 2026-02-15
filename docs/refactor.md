@@ -1,122 +1,184 @@
-# ⚠️ Strict Adherence Required
+# Web GUI Implementation Plan
 
-**The plan below is part of an intricate multi-step refactoring. You must strictly adhere to every step and instruction. Method signatures and code structure *must* be accurate and not deviate from what is specified.**
+**Project:** `spotify-player` (Rust-based Spotify downloader with CLI and web interface)
 
-# Refactoring Plan: Moving Core Logic to lib.rs
+**Goal:** Build a web application with real-time progress updates, using the existing core library.
 
-This guide will help you refactor the project to move core logic from `main.rs` to `lib.rs`, making the codebase more modular and testable. Each step is explained for a novice Rust developer.
+## Overall Architecture
 
+- **`core` library crate**: Existing Spotify logic (auth, URL processing, downloads, progress reporting).
+- **`server` binary crate**: Axum HTTP server exposing REST API and SSE for progress.
+- **Frontend**: Simple static HTML/JS served by Axum, with live updates via SSE.
 
-## 0. Test Inventory and Preservation
+**Key Technologies:**
+- **Axum**: Modern Rust web framework (async, Tokio-based).
+- **SSE (Server-Sent Events)**: For real-time progress updates (simpler than WebSockets for this use case).
+- **Workspace**: Clean separation between core logic and web server.
 
-**Current test count:**  
-There are a lot unit and integration tests in the codebase, found in both src/ and tests/ directories. These include tests using #[test] and #[tokio::test] attributes.
+## Testing Guidelines
+
+**Current test count:** 79+ unit tests + integration tests.
 
 - Run `cargo test -q` after each major change to ensure nothing breaks.
-- Run `cargo test` if you need additional output from tests.
+- Run `cargo test` for full output if needed.
+- Never delete tests; move them with refactored code.
+- Use `cargo test -- --list` to verify all tests are discovered.
 
+## Implementation Steps
 
-**Test locations:**  
-- Integration tests: tests/integration/, tests/cache_integration_tests.rs, tests/integration/test_temp_file_cleanup.rs, etc.
-- Unit tests: Scattered throughout modules such as src/stream.rs, src/auth/token.rs, src/auth/session.rs, src/auth/oauth.rs, src/auth/mod.rs, src/input.rs, src/cli/mod.rs, src/metadata/builders.rs, src/m3u.rs, src/metadata/validation.rs, src/metadata/tags.rs, and more.
+### 1. Rename Workspace Member (src → core)
 
-**Preservation steps:**  
-- When moving production code (functions, modules, structs) from one file to another, always move the corresponding mod tests { ... } or any #[cfg(test)] blocks along with it.
-- If a test covers code that is being split across modules, move the test to the module that now contains the logic it covers, or refactor the test to import the new location.
-- After each move, run `cargo test -q` to ensure all tests are still present and passing.
-- If a test fails to compile due to a missing import or path, update the test to use the new path, but no other changes to the test logic are allowed!
-- Never delete a test unless you are certain it is obsolete and covered elsewhere.
+**Current:** Workspace members = ["src"]  
+**Target:** members = ["core", "server"]
 
-**Tip:**  
-If you are unsure whether a test is still being run, use `cargo test -- --list` to see all discovered tests.
+- Rename `src/` directory to `core/`.
+- Update root `Cargo.toml`: `members = ["core", "server"]`
+- Update `core/Cargo.toml` paths if needed (should be relative).
+- Run `cargo check` to verify.
 
+### 2. Enhance Progress Reporting in Core
 
-## 1. Overview
-- Move Spotify authentication, URL processing, and API logic from `main.rs` to `lib.rs`.
-- Expose these as public functions/modules in `lib.rs`.
-- Refactor `main.rs` to use the new library interface.
-- Run `cargo test -q` after each major change to ensure nothing breaks.
-- Run `cargo test` if you need additional output from tests.
+**Current:** `ProgressUpdate` struct exists with basic fields.  
+**Enhance to:**
+```rust
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProgressUpdate {
+    pub task_id: uuid::Uuid,
+    pub scope: ProgressScope,       // Track, Album, Playlist, Global
+    pub status: String,             // Human-readable status
+    pub current: u32,               // current item index
+    pub total: u32,                 // total items, if known
+    pub item: String,               // track/album name
+}
 
-## 2. Preparation
-- Ensure your working directory is clean (no uncommitted changes).
-- Run `cargo test -q` to confirm the current state is working.
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum ProgressScope {
+    Track,
+    Album,
+    Playlist,
+    Global,
+}
+```
 
-## 3. Create/Update `lib.rs`
-- If not present, create `src/lib.rs`.
-- Add public module declarations for all core components:
-  ```rust
-  pub mod auth;
-  pub mod playback;
-  pub mod processor;
-  pub mod stream;
-  pub mod config;
-  pub mod error;
-  pub mod input;
-  pub mod m3u;
-  pub mod cache;
-  pub mod implementations;
-  pub mod metadata;
-  pub mod traits;
+- Update `core/src/lib.rs` to include `scope` and `current/total` fields.
+- Ensure `serde` features include `derive`.
+- Update existing `tx.send()` calls to use new fields.
+
+### 3. Update Core API Signature
+
+**Current:** `process_uris(uris: &[String], tx: Sender<ProgressUpdate>)`  
+**Update to:** Support task_id per URL.
+
+- Modify `process_uris` to handle multiple URLs with individual task_ids.
+- Or create `process_url(task_id: Uuid, url: String, tx: Sender<ProgressUpdate>)` and call it per URL.
+
+### 4. Create Server Crate
+
+- `cargo new server --bin`
+- Add to workspace members: `["core", "server"]`
+- In `server/Cargo.toml`:
+  ```toml
+  [dependencies]
+  axum = "0.7"
+  tokio = { version = "1", features = ["full"] }
+  serde = { version = "1", features = ["derive"] }
+  serde_json = "1"
+  tower = "0.4"
+  tower-http = { version = "0.5", features = ["fs"] }
+  uuid = { version = "1", features = ["v4"] }
+  spotify-player-core = { path = "../core" }
   ```
-- Add a public async function for URL processing:
-  ```rust
-  use std::error::Error;
-  pub async fn process_url(url: &str) -> Result<(), Box<dyn Error>> {
-      // Implementation will be moved from main.rs
-      Ok(())
-  }
-  ```
-- Re-export any helpers needed by `main.rs` (e.g., authentication/session helpers):
-  ```rust
-  pub use crate::auth::session::{create_session_with_auto_refresh, create_authenticated_session};
-  pub use crate::auth::get_credentials;
-  pub use crate::auth::token::{TokenRefresher, read_token_data, save_token_data, is_token_expired};
-  ```
 
-## 4. Move Authentication Logic
-- In `main.rs`, find all code related to Spotify authentication (e.g., session creation, token refresh).
-- Move the logic to appropriate modules in `lib.rs` (usually `auth/session.rs` or `processor.rs`).
-- If a function is only used for authentication/session, move it to `auth/session.rs`.
-- If a function is a general helper, move it to a relevant module and make it `pub` if needed.
-- Remove the moved code from `main.rs`.
-- Update `lib.rs` to re-export these functions if `main.rs` or tests need them.
-- Run `cargo test -q` to ensure everything still works.
-- Run `cargo test` if you need additional output from tests.
+### 5. Implement Axum Server Skeleton
+
+**AppState:**
+```rust
+#[derive(Clone)]
+struct AppState {
+    task_tx: mpsc::Sender<Task>,
+    progress_tx: broadcast::Sender<ProgressUpdate>,
+    auth_token: String,
+}
+```
+
+**Routes:**
+- `GET /`: Serve static HTML
+- `POST /api/queue`: Queue URL
+- `GET /api/status`: Get task statuses
+- `GET /events`: SSE stream
+
+**Worker Loop:**
+- Receive tasks from mpsc channel
+- Call `core::process_url()` with progress forwarding
+- Forward progress updates to broadcast channel
+
+### 6. Add Authentication
+
+- Require `X-Auth-Token` header for `/api/*` and `/events`
+- Read token from env var at startup
+- Return 401 for invalid/missing tokens
+
+### 7. Implement Frontend
+
+**Static files:** `server/static/index.html`
+- Form to submit Spotify URLs
+- Table for task status
+- JavaScript EventSource for SSE updates
+
+### 7a. Testing on Dev Machine
+
+- run server locally
+- make user download tracks, albums, playlists
+- ask him about every feature on its own, he'll forget them otherwise!
+
+### 8. Deployment Considerations
+
+- For ada (NixOS): Package as systemd service
+- Use agenix for auth token secrets
+- Bind to 0.0.0.0:8080
+
+## Key Choices & Rationale
+
+- **Axum over Actix/Rocket**: Modern, excellent Tokio integration, strong community.
+- **SSE over WebSockets**: Sufficient for server→client progress; simpler implementation.
+- **Broadcast channels**: Efficient fan-out of progress to multiple clients.
+- **Static HTML/JS**: Lightweight, no build step required.
+
+## Validation Steps
+
+- After each step: `cargo check`, `cargo test -q`
+- Test web server: `cargo run --bin server`, access http://localhost:8080
+- Verify progress updates in browser console
+
+This plan builds on the existing progress infrastructure and provides a scalable web interface.
 
 
-## 5. Move process_url and Related Logic
-- Identify the `process_url` function and any helpers it uses in `main.rs`.
-- Move these to `lib.rs` (or a submodule if appropriate).
-- Make sure all dependencies are imported and visible.
-- Update `lib.rs` to export `process_url` as `pub async fn process_url(url: &str) -> Result<(), Box<dyn Error>>`.
-- Run `cargo test -q` or `cargo test`.
 
-## 6. Move FETCH and API Functions
-- Find any functions in `main.rs` that handle HTTP requests, Spotify API calls, or data fetching.
-- Move these to `lib.rs` or a relevant submodule.
-- Make them `pub` if they need to be accessed from outside.
-- Run `cargo test -q` or `cargo test`.
+# MUCH LATER: Implement retry 
 
-## 7. Refactor main.rs
-- Remove all logic that has been moved to `lib.rs`.
-- Import the new functions from `lib.rs`:
-  ```rust
-  use spotify_player::process_url;
-  ```
-- Update the main entry point to call `process_url` as needed.
-- Run `cargo test -q` or `cargo test`.
+1. **Enhance Progress Updates for Failures**:
+   - Send `ProgressUpdate` with `status: "Failed: <error>"` when individual tracks fail.
+   - For total failures, mark the task as failed in the server's state.
 
-## 8. Final Checks
-- Ensure all moved functions have correct `pub`/`async` signatures and error handling.
-- Update module visibility and `use` statements as needed for compilation.
-- Run `cargo test -q` or `cargo test` one last time to confirm everything works.
+2. **Update Status Endpoint**:
+   - Modify `GET /api/status` to return failure details per task/URL.
+   - Include fields like `failed_tracks: Vec<String>`, `error_message: Option<String>`.
 
-## 9. Troubleshooting
-- If you get a file not found or module not found error, check your `mod` declarations and file paths.
-- If a function is not visible, ensure it is marked `pub` and the module is also `pub`.
-- If tests fail, review the error messages and check for missing imports or logic.
+3. **GUI Retry Button**:
+   - Display failed tasks with a "Retry" button.
+   - On click, POST to `/api/queue` with the original URL.
+   - The server treats it as a new task (new `task_id`).
 
----
+4. **Server-Side Handling**:
+   - No changes needed to the queue/worker loop - it already processes tasks sequentially.
+   - Optionally, add deduplication if you want to prevent duplicate concurrent retries.
 
-This plan will help you modularize your Rust project and make it easier to test and maintain. If you get stuck, review the error messages and check the module structure.
+## Example Flow
+
+1. User submits album URL → Task created, progress updates sent via SSE.
+2. Track 3 fails → SSE sends `{"task_id": "...", "status": "Failed: Download error", "current": 3, "total": 10}`
+3. GUI shows "Retry" button for the album.
+4. User clicks retry → POST `/api/queue` with same URL → New task created.
+5. Process repeats, hopefully succeeding this time.
+
+This keeps the architecture simple: SSE for updates, HTTP for actions. No need for WebSockets or bidirectional communication. The retry just re-queues the URL, leveraging the existing queue system.
