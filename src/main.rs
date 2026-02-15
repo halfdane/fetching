@@ -2,27 +2,11 @@ use std::env;
 
 use tracing::info;
 
-mod auth;
-mod cache;
-mod cli;
-mod config;
-mod error;
-mod implementations;
-mod input;
-mod m3u;
-mod metadata;
-mod mocks;
-mod playback;
-mod processor;
-mod stream;
-mod traits;
-
-
 use spotify_player::create_session;
-use cli::{validate_args, print_usage_and_exit, InputSource};
-use config::Config;
-use input::read_uris_from_file;
-use processor::process_uris;
+use spotify_player::cli::{validate_args, print_usage_and_exit, InputSource};
+use spotify_player::config::Config;
+use spotify_player::input::read_uris_from_file;
+use spotify_player::process_uris;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -35,33 +19,40 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    // Load configuration from environment variables
-    let config = Config::from_env();
-
     let args: Vec<String> = env::args().collect();
-
-    let (input_source, no_play) = match validate_args(&args) {
+    let input_source = match validate_args(&args) {
         Ok(result) => result,
         Err(_) => print_usage_and_exit(&args),
     };
 
-    let token_path = ".spotify_access_token";
-
-    // Create session with automatic background token refresh
-    let (session, _refresher, _refresh_handle) = create_session(token_path).await?;
-
+    let mut any_error = false;
     match input_source {
         InputSource::SingleUri(uri_arg) => {
             let uris = vec![uri_arg];
-            process_uris(&session, &uris, &config, no_play).await?;
+            if let Err(e) = process_uris(&uris).await {
+                eprintln!("Error: {e}");
+                any_error = true;
+            }
         }
         InputSource::File(path) => {
-            let uris = read_uris_from_file(&path)?;
-            info!("Loaded {} URIs from file", uris.len());
-            process_uris(&session, &uris, &config, no_play).await?;
+            match read_uris_from_file(&path) {
+                Ok(uris) => {
+                    info!("Loaded {} URIs from file", uris.len());
+                    if let Err(e) = process_uris(&uris).await {
+                        eprintln!("Error: {e}");
+                        any_error = true;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to read URIs from file: {e}");
+                    any_error = true;
+                }
+            }
         }
     }
-
+    if any_error {
+        std::process::exit(1);
+    }
     Ok(())
 }
 

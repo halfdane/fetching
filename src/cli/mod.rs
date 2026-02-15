@@ -11,15 +11,12 @@ pub enum InputSource {
 }
 
 /// Validate command line arguments
-pub fn validate_args(args: &[String]) -> anyhow::Result<(InputSource, bool)> {
+pub fn validate_args(args: &[String]) -> anyhow::Result<InputSource> {
     let mut input_source = None;
-    let mut no_play = false;
     let mut iter = args.iter().skip(1).peekable();
 
     while let Some(arg) = iter.next() {
-        if arg == "--no-play" {
-            no_play = true;
-        } else if arg == "--file" {
+        if arg == "--file" {
             if input_source.is_some() {
                 anyhow::bail!("Cannot specify both --file and a URI");
             }
@@ -34,23 +31,22 @@ pub fn validate_args(args: &[String]) -> anyhow::Result<(InputSource, bool)> {
     }
 
     match input_source {
-        Some(source) => Ok((source, no_play)),
+        Some(source) => Ok(source),
         None => anyhow::bail!("Expected either a Spotify URI or --file <path>"),
     }
 }
 
 /// Print usage information and exit
 pub fn print_usage_and_exit(args: &[String]) -> ! {
-    eprintln!("Usage: {} [--no-play] <spotify_uri>", args[0]);
-    eprintln!("       {} [--no-play] --file <path>", args[0]);
+    eprintln!("Usage: {} <spotify_uri>", args[0]);
+    eprintln!("       {} --file <path>", args[0]);
     eprintln!("Options:");
-    eprintln!("  --no-play    Cache tracks without playing them");
     eprintln!("  --file       Read URIs from file (one per line, # for comments)");
     eprintln!();
     eprintln!("Examples:");
     eprintln!("  {} spotify:track:4uLU6hMCjMI75M1A2tKUQC", args[0]);
     eprintln!("  {} spotify:album:1A2GTWGtFfWp7KSQTwWOyo", args[0]);
-    eprintln!("  {} --no-play spotify:playlist:37i9dQZF1DX0XUsuxWHRQd", args[0]);
+    eprintln!("  {} spotify:playlist:37i9dQZF1DX0XUsuxWHRQd", args[0]);
     eprintln!("  {} 4uLU6hMCjMI75M1A2tKUQC  (assumes track)", args[0]);
     eprintln!("  {} --file my_uris.txt", args[0]);
     std::process::exit(1);
@@ -65,25 +61,11 @@ mod tests {
         let args = vec!["program".to_string(), "spotify:track:123".to_string()];
         let result = validate_args(&args);
         assert!(result.is_ok());
-        let (input_source, no_play) = result.unwrap();
+        let input_source = result.unwrap();
         match input_source {
             InputSource::SingleUri(uri) => assert_eq!(uri, "spotify:track:123"),
             _ => panic!("Expected SingleUri"),
         }
-        assert!(!no_play);
-    }
-
-    #[test]
-    fn test_validate_args_with_no_play() {
-        let args = vec!["program".to_string(), "--no-play".to_string(), "spotify:track:123".to_string()];
-        let result = validate_args(&args);
-        assert!(result.is_ok());
-        let (input_source, no_play) = result.unwrap();
-        match input_source {
-            InputSource::SingleUri(uri) => assert_eq!(uri, "spotify:track:123"),
-            _ => panic!("Expected SingleUri"),
-        }
-        assert!(no_play);
     }
 
     #[test]
@@ -109,30 +91,11 @@ mod tests {
         let args = vec!["program".to_string(), "--file".to_string(), "uris.txt".to_string()];
         let result = validate_args(&args);
         assert!(result.is_ok());
-        let (input_source, no_play) = result.unwrap();
+        let input_source = result.unwrap();
         match input_source {
             InputSource::File(path) => assert_eq!(path.to_str().unwrap(), "uris.txt"),
             _ => panic!("Expected File"),
         }
-        assert!(!no_play);
-    }
-
-    #[test]
-    fn test_validate_args_with_file_and_no_play() {
-        let args = vec![
-            "program".to_string(),
-            "--no-play".to_string(),
-            "--file".to_string(),
-            "uris.txt".to_string(),
-        ];
-        let result = validate_args(&args);
-        assert!(result.is_ok());
-        let (input_source, no_play) = result.unwrap();
-        match input_source {
-            InputSource::File(path) => assert_eq!(path.to_str().unwrap(), "uris.txt"),
-            _ => panic!("Expected File"),
-        }
-        assert!(no_play);
     }
 
     #[test]

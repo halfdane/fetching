@@ -10,7 +10,11 @@ This guide will help you refactor the project to move core logic from `main.rs` 
 ## 0. Test Inventory and Preservation
 
 **Current test count:**  
-There are around 207 unit and integration tests in the codebase, found in both src/ and tests/ directories. These include tests using #[test] and #[tokio::test] attributes.
+There are a lot unit and integration tests in the codebase, found in both src/ and tests/ directories. These include tests using #[test] and #[tokio::test] attributes.
+
+- Run `cargo test -q` after each major change to ensure nothing breaks.
+- Run `cargo test` if you need additional output from tests.
+
 
 **Test locations:**  
 - Integration tests: tests/integration/, tests/cache_integration_tests.rs, tests/integration/test_temp_file_cleanup.rs, etc.
@@ -19,7 +23,7 @@ There are around 207 unit and integration tests in the codebase, found in both s
 **Preservation steps:**  
 - When moving production code (functions, modules, structs) from one file to another, always move the corresponding mod tests { ... } or any #[cfg(test)] blocks along with it.
 - If a test covers code that is being split across modules, move the test to the module that now contains the logic it covers, or refactor the test to import the new location.
-- After each move, run `cargo test` to ensure all tests are still present and passing.
+- After each move, run `cargo test -q` to ensure all tests are still present and passing.
 - If a test fails to compile due to a missing import or path, update the test to use the new path, but no other changes to the test logic are allowed!
 - Never delete a test unless you are certain it is obsolete and covered elsewhere.
 
@@ -31,11 +35,12 @@ If you are unsure whether a test is still being run, use `cargo test -- --list` 
 - Move Spotify authentication, URL processing, and API logic from `main.rs` to `lib.rs`.
 - Expose these as public functions/modules in `lib.rs`.
 - Refactor `main.rs` to use the new library interface.
-- Run `cargo test` after each major change to ensure nothing breaks.
+- Run `cargo test -q` after each major change to ensure nothing breaks.
+- Run `cargo test` if you need additional output from tests.
 
 ## 2. Preparation
 - Ensure your working directory is clean (no uncommitted changes).
-- Run `cargo test` to confirm the current state is working.
+- Run `cargo test -q` to confirm the current state is working.
 
 ## 3. Create/Update `lib.rs`
 - If not present, create `src/lib.rs`.
@@ -76,20 +81,22 @@ If you are unsure whether a test is still being run, use `cargo test -- --list` 
 - If a function is a general helper, move it to a relevant module and make it `pub` if needed.
 - Remove the moved code from `main.rs`.
 - Update `lib.rs` to re-export these functions if `main.rs` or tests need them.
-- Run `cargo test` to ensure everything still works.
+- Run `cargo test -q` to ensure everything still works.
+- Run `cargo test` if you need additional output from tests.
+
 
 ## 5. Move process_url and Related Logic
 - Identify the `process_url` function and any helpers it uses in `main.rs`.
 - Move these to `lib.rs` (or a submodule if appropriate).
 - Make sure all dependencies are imported and visible.
 - Update `lib.rs` to export `process_url` as `pub async fn process_url(url: &str) -> Result<(), Box<dyn Error>>`.
-- Run `cargo test`.
+- Run `cargo test -q` or `cargo test`.
 
 ## 6. Move FETCH and API Functions
 - Find any functions in `main.rs` that handle HTTP requests, Spotify API calls, or data fetching.
 - Move these to `lib.rs` or a relevant submodule.
 - Make them `pub` if they need to be accessed from outside.
-- Run `cargo test`.
+- Run `cargo test -q` or `cargo test`.
 
 ## 7. Refactor main.rs
 - Remove all logic that has been moved to `lib.rs`.
@@ -98,12 +105,12 @@ If you are unsure whether a test is still being run, use `cargo test -- --list` 
   use spotify_player::process_url;
   ```
 - Update the main entry point to call `process_url` as needed.
-- Run `cargo test`.
+- Run `cargo test -q` or `cargo test`.
 
 ## 8. Final Checks
 - Ensure all moved functions have correct `pub`/`async` signatures and error handling.
 - Update module visibility and `use` statements as needed for compilation.
-- Run `cargo test` one last time to confirm everything works.
+- Run `cargo test -q` or `cargo test` one last time to confirm everything works.
 
 ## 9. Troubleshooting
 - If you get a file not found or module not found error, check your `mod` declarations and file paths.

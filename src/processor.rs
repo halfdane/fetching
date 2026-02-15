@@ -17,7 +17,6 @@ async fn process_single_uri(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
-    no_play: bool,
 ) -> anyhow::Result<()> {
     match spotify_uri {
         librespot_core::SpotifyUri::Track { .. } => {
@@ -40,11 +39,6 @@ async fn process_single_uri(
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
 
             process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &*track_provider, spotify_uri, &output_path, &file_id).await?;
-
-            if !no_play {
-                info!("\nStarting playback...");
-                crate::playback::play_audio_file(&output_path)?;
-            }
         }
         librespot_core::SpotifyUri::Album { .. } => {
             let album_fetcher = crate::implementations::LibrespotAlbumFetcher { session };
@@ -52,11 +46,6 @@ async fn process_single_uri(
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
             let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config).await?;
-
-            if !no_play && !cached_paths.is_empty() {
-                info!("\nStarting album playback...");
-                crate::playback::play_audio_files(&cached_paths)?;
-            }
         }
         librespot_core::SpotifyUri::Playlist { .. } => {
             let playlist_fetcher = crate::implementations::LibrespotPlaylistFetcher { session };
@@ -64,11 +53,6 @@ async fn process_single_uri(
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
             let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config).await?;
-
-            if !no_play && !cached_paths.is_empty() {
-                info!("\nStarting playlist playback...");
-                crate::playback::play_audio_files(&cached_paths)?;
-            }
         }
         _ => {
             anyhow::bail!(
@@ -85,7 +69,6 @@ pub async fn process_uris(
     session: &librespot_core::session::Session,
     uris: &[String],
     config: &Config,
-    no_play: bool,
 ) -> anyhow::Result<()> {
     let mut successful = 0;
     let mut failed: Vec<(String, String)> = Vec::new();
@@ -108,7 +91,7 @@ pub async fn process_uris(
             }
         };
 
-        match process_single_uri(session, &spotify_uri, config, no_play).await {
+        match process_single_uri(session, &spotify_uri, config).await {
             Ok(_) => successful += 1,
             Err(e) => {
                 error!("❌ Failed to process: {}", e);
