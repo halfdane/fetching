@@ -93,34 +93,20 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-#[tokio::main]
-async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
-
-    // Channel setup (no logic yet)
-    let (task_tx, _task_rx) = mpsc::channel::<Task>(100);
+fn create_channels_and_spawn_worker() -> (mpsc::Sender<Task>, broadcast::Sender<ProgressUpdate>) {
+    let (task_tx, task_rx) = mpsc::channel::<Task>(100);
     let (progress_tx, _progress_rx) = broadcast::channel::<ProgressUpdate>(100);
-    let auth_token = "devtoken".to_string();
-    let state = Arc::new(AppState {
-        task_tx,
-        progress_tx: progress_tx.clone(),
-        auth_token,
-    });
+
     // Spawn worker
+    let progress_tx_clone = progress_tx.clone();
     tokio::spawn(async move {
-        let mut task_rx = _task_rx;
+        let mut task_rx = task_rx;
         while let Some(task) = task_rx.recv().await {
             let (tx, mut rx) = mpsc::channel(100);
-            let progress_tx_clone = progress_tx.clone();
+            let progress_tx_clone_for_forward = progress_tx_clone.clone();
             let forward_task = tokio::spawn(async move {
                 while let Some(update) = rx.recv().await {
-                    let _ = progress_tx_clone.send(update);
+                    let _ = progress_tx_clone_for_forward.send(update);
                 }
             });
             if let Err(_e) = process_url(task.task_id, task.url.clone(), tx).await {
@@ -133,15 +119,42 @@ async fn main() {
                     item: "".to_string(),
                     url: Some(task.url),
                 };
-                let _ = progress_tx.send(error_update);
+                let _ = progress_tx_clone.send(error_update);
             }
             let _ = forward_task.await;
         }
     });
+
+    (task_tx, progress_tx)
+}
+
+async fn setup_and_run_server(task_tx: mpsc::Sender<Task>, progress_tx: broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
+    let auth_token = "devtoken".to_string();
+    let state = Arc::new(AppState {
+        task_tx,
+        progress_tx: progress_tx.clone(),
+        auth_token,
+    });
+
     let app = app(state);
     println!("Server running on http://127.0.0.1:8080");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+    let (task_tx, progress_tx) = create_channels_and_spawn_worker();
+    setup_and_run_server(task_tx, progress_tx).await?;
+    Ok(())
 }
 
 #[cfg(test)]
