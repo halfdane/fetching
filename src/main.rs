@@ -17,6 +17,8 @@ mod processor;
 mod stream;
 mod traits;
 
+
+use spotify_player::create_session;
 use cli::{validate_args, print_usage_and_exit, InputSource};
 use config::Config;
 use input::read_uris_from_file;
@@ -46,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     let token_path = ".spotify_access_token";
 
     // Create session with automatic background token refresh
-    let (session, _refresher, _refresh_handle) = processor::create_session(token_path).await?;
+    let (session, _refresher, _refresh_handle) = create_session(token_path).await?;
 
     match input_source {
         InputSource::SingleUri(uri_arg) => {

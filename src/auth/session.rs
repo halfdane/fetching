@@ -9,6 +9,21 @@ use tracing::info;
 
 use super::token::TokenRefresher;
 
+/// Create a Spotify session with automatic token refresh and retry on bad credentials
+pub async fn create_session(token_path: &str) -> anyhow::Result<(librespot_core::session::Session, std::sync::Arc<TokenRefresher>, tokio::task::JoinHandle<()>)> {
+    use anyhow::Context;
+    loop {
+        match create_session_with_auto_refresh(token_path).await {
+            Ok(result) => break Ok(result),
+            Err(e) if e.to_string().contains("Bad credentials") => {
+                std::fs::remove_file(token_path).context("Failed to remove invalid token file")?;
+                // Retry will trigger new OAuth flow
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Handles session creation and authentication, including re-auth if needed
 pub async fn create_authenticated_session(
     credentials: librespot_core::authentication::Credentials,

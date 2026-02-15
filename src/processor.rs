@@ -141,17 +141,3 @@ pub async fn process_uris(
 
     Ok(())
 }
-
-/// Create a Spotify session with automatic token refresh
-pub async fn create_session(token_path: &str) -> anyhow::Result<(librespot_core::session::Session, std::sync::Arc<TokenRefresher>, tokio::task::JoinHandle<()>)> {
-    loop {
-        match create_session_with_auto_refresh(token_path).await {
-            Ok(result) => break Ok(result),
-            Err(e) if e.to_string().contains("Bad credentials") => {
-                std::fs::remove_file(token_path).context("Failed to remove invalid token file")?;
-                // Retry will trigger new OAuth flow
-            }
-            Err(e) => return Err(e),
-        }
-    }
-}
