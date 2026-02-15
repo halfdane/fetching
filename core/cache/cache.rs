@@ -89,8 +89,10 @@ where
                 let percent = ((index + 1) * 100) / total_tracks;
                 let _ = tx.send(crate::ProgressUpdate {
                     task_id,
+                    scope: crate::ProgressScope::Track,
                     status: format!("Processing track {}/{}", index + 1, total_tracks),
-                    percent: percent as u8,
+                    current: (index + 1) as u32,
+                    total: total_tracks as u32,
                     item: track_provider.name().await,
                 }).await;
             }

@@ -22,12 +22,23 @@ pub mod playback;
 // Re-export create_session if needed
 pub use auth::session::create_session;
 
-#[derive(Serialize)]
+
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ProgressUpdate {
     pub task_id: Uuid,
+    pub scope: ProgressScope,
     pub status: String,
-    pub percent: u8,
+    pub current: u32,
+    pub total: u32,
     pub item: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum ProgressScope {
+    Track,
+    Album,
+    Playlist,
+    Global,
 }
 
 pub async fn process_uris(uris: &[String], tx: tokio::sync::mpsc::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {

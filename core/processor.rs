@@ -27,9 +27,11 @@ async fn process_single_uri(
             let task_id = Uuid::new_v4();
             tx.send(crate::ProgressUpdate {
                 task_id,
+                scope: crate::ProgressScope::Track,
                 status: "Fetching track".to_string(),
-                percent: 0,
-                item: uri_arg.to_string(), // wait, uri_arg is not in scope here. Wait, in process_single_uri, uri_arg is not available.
+                current: 0,
+                total: 1,
+                item: uri_arg.to_string(),
             }).await?;
             info!("Caching single track...");
             let track_fetcher = LibrespotTrackFetcher { session };
@@ -41,8 +43,10 @@ async fn process_single_uri(
 
             tx.send(crate::ProgressUpdate {
                 task_id,
+                scope: crate::ProgressScope::Track,
                 status: "Downloading".to_string(),
-                percent: 50,
+                current: 1,
+                total: 1,
                 item: track_display.clone(),
             }).await?;
 
@@ -60,8 +64,10 @@ async fn process_single_uri(
 
             tx.send(crate::ProgressUpdate {
                 task_id,
+                scope: crate::ProgressScope::Track,
                 status: "Completed".to_string(),
-                percent: 100,
+                current: 1,
+                total: 1,
                 item: track_display,
             }).await?;
         }
@@ -69,8 +75,10 @@ async fn process_single_uri(
             let task_id = Uuid::new_v4();
             tx.send(crate::ProgressUpdate {
                 task_id,
+                scope: crate::ProgressScope::Album,
                 status: "Fetching album".to_string(),
-                percent: 0,
+                current: 0,
+                total: 1,
                 item: uri_arg.to_string(),
             }).await?;
             let album_fetcher = crate::implementations::LibrespotAlbumFetcher { session };
@@ -80,8 +88,10 @@ async fn process_single_uri(
             let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, &tx, task_id).await?;
             tx.send(crate::ProgressUpdate {
                 task_id,
+                scope: crate::ProgressScope::Album,
                 status: "Completed".to_string(),
-                percent: 100,
+                current: 1,
+                total: 1,
                 item: uri_arg.to_string(),
             }).await?;
         }
@@ -89,8 +99,10 @@ async fn process_single_uri(
             let task_id = Uuid::new_v4();
             tx.send(crate::ProgressUpdate {
                 task_id,
+                scope: crate::ProgressScope::Playlist,
                 status: "Fetching playlist".to_string(),
-                percent: 0,
+                current: 0,
+                total: 1,
                 item: uri_arg.to_string(),
             }).await?;
             let playlist_fetcher = crate::implementations::LibrespotPlaylistFetcher { session };
@@ -100,8 +112,10 @@ async fn process_single_uri(
             let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, &tx, task_id).await?;
             tx.send(crate::ProgressUpdate {
                 task_id,
+                scope: crate::ProgressScope::Playlist,
                 status: "Completed".to_string(),
-                percent: 100,
+                current: 1,
+                total: 1,
                 item: uri_arg.to_string(),
             }).await?;
         }
