@@ -20,7 +20,7 @@ pub const SPOTIFY_OGG_HEADER_END: usize = 0xa7; // 167 bytes
 /// Buffer size hint for streaming in kbps
 pub const STREAMING_BUFFER_HINT_KBPS: u32 = 160; // Buffer size hint for AudioFile::open
 pub const AUDIO_BUFFER_SIZE: usize = 8192;
-const MAX_RETRIES: u32 = 3;
+const MAX_RETRIES: u32 = 5;
 const RETRY_BASE_DELAY_MS: u64 = 5000;
 
 /// Production implementation of AudioDownloader using librespot Session
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(AUDIO_BUFFER_SIZE, 8192);
 
         // Verify retry settings
-        assert_eq!(MAX_RETRIES, 3);
+        assert_eq!(MAX_RETRIES, 5);
         assert_eq!(RETRY_BASE_DELAY_MS, 5000);
     }
 

@@ -116,9 +116,9 @@ async fn main() {
     tokio::spawn(async move {
         let mut task_rx = _task_rx;
         while let Some(task) = task_rx.recv().await {
-            let (tx, mut rx) = mpsc::channel(32);
+            let (tx, mut rx) = mpsc::channel(100);
             let progress_tx_clone = progress_tx.clone();
-            tokio::spawn(async move {
+            let forward_task = tokio::spawn(async move {
                 while let Some(update) = rx.recv().await {
                     let _ = progress_tx_clone.send(update);
                 }
@@ -135,6 +135,7 @@ async fn main() {
                 };
                 let _ = progress_tx.send(error_update);
             }
+            let _ = forward_task.await;
         }
     });
     let app = app(state);

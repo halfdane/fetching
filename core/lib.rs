@@ -4,6 +4,7 @@
 // Library interface for integration tests
 use uuid::Uuid;
 use serde::Serialize;
+use librespot_core::Session;
 pub mod auth;
 pub mod cache;
 pub mod cli;
