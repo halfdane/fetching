@@ -1,31 +1,26 @@
-# Web API Authentication Security
 
-## Approach: Static Token Authentication (X-Auth-Token)
+# Web API Security Guidance
 
-### What
-- All API and SSE endpoints require an `X-Auth-Token` HTTP header.
-- The token value is set via an environment variable at server startup.
-- Requests without the correct token receive a 401 Unauthorized response.
+## No Built-in Authentication
 
-### Why
-- **Simplicity:** No need for user accounts, session management, or token rotation.
-- **Security:** As strong as the secrecy of the token; suitable for single-user/admin or trusted LAN environments.
-- **Automation:** Easy to use with scripts, curl, or browser extensions.
-- **Best Practice:** Common for internal tools, admin panels, and single-user web UIs where public access is not required.
+This service does **not** implement any built-in authentication or authorization. All API and SSE endpoints are open to anyone who can reach the server.
 
-### When to Use
-- Single-user or admin-only web interfaces.
-- Trusted local networks or VPNs.
-- No need for user logins or public access.
+## Critical Warning
 
-### When Not to Use
-- Multi-user, public, or untrusted environments.
-- When you need user tracking, session expiry, or token revocation.
-- In those cases, consider JWT, OAuth, or session-based authentication.
+**Do NOT expose this service to the public internet!**
 
-### Future-Proofing
-- The codebase can be refactored later to support dynamic/session tokens if requirements change.
+Anyone with network access to the server can queue downloads, view status, and access all features. There are no passwords, tokens, or user accounts.
+
+## Recommended Deployment
+
+- Only run the server on trusted networks (e.g., LAN, VPN, Tailscale, or localhost).
+- Use network-level controls (firewalls, VPNs, allow-lists) to restrict access to authorized users/devices.
+- If you ever need to expose the service more broadly, add authentication (see below).
+
+## Future-Proofing
+
+The codebase can be refactored later to support authentication (e.g., static token, JWT, OAuth) if requirements change.
 
 ---
 **Summary:**
-A static token is simple, robust, and secure for private/internal use. For public or multi-user deployments, upgrade to a more advanced authentication scheme.
+This service is designed for private/internal use only. Always restrict access at the network level. For public or multi-user deployments, add authentication before exposing the service.
