@@ -1,12 +1,18 @@
 
 use axum::{Router, routing::get, response::IntoResponse, extract::{State, Json}};
-use serde::Deserialize;
-use tower_http::services::ServeDir;
-use std::sync::Arc;
-use tokio::sync::{mpsc, broadcast};
+use axum::response::sse::{self, Sse, Event};
+use futures_util::stream::{Stream, StreamExt};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-
+use tokio::sync::{mpsc, broadcast};
+use std::sync::Arc;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProgressUpdate {
+    task_id: Uuid,
+    status: String, // e.g. "started", "progress", "finished"
+    progress: Option<u8>,
+    message: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 struct Task {
@@ -15,36 +21,10 @@ struct Task {
 }
 
 #[derive(Clone)]
-struct AppState {
+pub(crate) struct AppState {
     task_tx: mpsc::Sender<Task>,
     progress_tx: broadcast::Sender<String>, // Placeholder type for now
     auth_token: String,
-}
-
-pub fn app(state: Arc<AppState>) -> Router {
-    Router::new()
-        .nest_service("/", ServeDir::new("server/static").not_found_service(axum::routing::get(|| async { axum::http::StatusCode::NOT_FOUND })))
-        .route("/api/queue", axum::routing::post(queue_url))
-        .route("/api/status", get(get_status))
-        .route("/events", get(events))
-        .with_state(state)
-}
-
-#[tokio::main]
-async fn main() {
-    // Channel setup (no logic yet)
-    let (task_tx, _task_rx) = mpsc::channel::<Task>(100);
-    let (progress_tx, _progress_rx) = broadcast::channel::<String>(100);
-    let auth_token = "devtoken".to_string();
-    let state = Arc::new(AppState {
-        task_tx,
-        progress_tx,
-        auth_token,
-    });
-    let app = app(state);
-    println!("Server running on http://127.0.0.1:8080");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
 }
 
 
@@ -75,17 +55,152 @@ async fn get_status(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     axum::response::Html("<pre>Status: TODO</pre>")
 }
 
-async fn events(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // TODO: implement SSE
-    axum::response::Html("<pre>SSE: TODO</pre>")
+async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut rx = state.progress_tx.subscribe();
+    let stream = async_stream::stream! {
+        loop {
+            match rx.recv().await {
+                Ok(json) => {
+                    if let Ok(update) = serde_json::from_str::<ProgressUpdate>(&json) {
+                        if update.status == "end" {
+                            break;
+                        }
+                    }
+                    yield Ok::<_, std::convert::Infallible>(Event::default().data(json));
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            }
+        }
+    };
+    Sse::new(stream)
 }
 
 #[cfg(test)]
 mod tests {
+        use axum::response::sse::{Event, Sse};
+        use futures_util::StreamExt;
+        use serde_json;
+        #[tokio::test]
+        async fn post_queue_triggers_progress_sse() {
+            // Setup app and channels
+            let (task_tx, mut task_rx) = mpsc::channel(8);
+            let (progress_tx, _progress_rx) = broadcast::channel(8);
+            // Only clone task_tx for AppState after drop
+            let app_state_task_tx = task_tx.clone();
+            let state = StdArc::new(AppState {
+                task_tx: app_state_task_tx,
+                progress_tx: progress_tx.clone(),
+                auth_token: "devtoken".to_string(),
+            });
+            // Spawn worker loop (no shutdown channel needed)
+            let worker = tokio::spawn({
+                let progress_tx = progress_tx.clone();
+                async move {
+                    while let Some(task) = task_rx.recv().await {
+                        println!("[worker] got task: {}", task.url);
+                        let started = ProgressUpdate {
+                            task_id: task.task_id,
+                            status: "started".to_string(),
+                            progress: Some(0),
+                            message: Some(format!("Started task: {}", task.url)),
+                        };
+                        let _ = progress_tx.send(serde_json::to_string(&started).unwrap());
+                        for pct in [25, 50, 75, 100] {
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                            let update = ProgressUpdate {
+                                task_id: task.task_id,
+                                status: "progress".to_string(),
+                                progress: Some(pct),
+                                message: None,
+                            };
+                            let _ = progress_tx.send(serde_json::to_string(&update).unwrap());
+                        }
+                        let finished = ProgressUpdate {
+                            task_id: task.task_id,
+                            status: "finished".to_string(),
+                            progress: Some(100),
+                            message: Some("Task finished".to_string()),
+                        };
+                        let _ = progress_tx.send(serde_json::to_string(&finished).unwrap());
+                        let end = ProgressUpdate {
+                            task_id: task.task_id,
+                            status: "end".to_string(),
+                            progress: None,
+                            message: None,
+                        };
+                        let _ = progress_tx.send(serde_json::to_string(&end).unwrap());
+                    }
+                    println!("[worker] task_rx closed, worker exiting");
+                }
+            });
+            let app = axum::Router::new()
+                .route("/api/queue", axum::routing::post(queue_url))
+                .route("/events", axum::routing::get(events))
+                .with_state(state.clone());
+
+            // Queue a task
+            let body = serde_json::json!({"url": "spotify:track:abc"}).to_string();
+            let post_response = app.clone().oneshot(Request::builder()
+                .method("POST")
+                .uri("/api/queue")
+                .header("content-type", "application/json")
+                .body(axum::body::Body::from(body)).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(post_response.status(), StatusCode::ACCEPTED);
+
+            // Drop task_tx after queuing the task
+            drop(task_tx);
+            println!("[test] dropped all task_tx clones");
+
+            let sse_response = app.clone().oneshot(Request::builder()
+                .uri("/events")
+                .body(axum::body::Body::empty()).unwrap())
+                .await
+                .unwrap();
+
+            // Fully poll the SSE response body stream to completion
+            use axum::body::Body;
+            let body = sse_response.into_body();
+            let mut stream = body.into_data_stream();
+            let mut buf = Vec::new();
+            let mut found_started = false;
+            let mut found_finished = false;
+            while let Some(chunk_result) = stream.next().await {
+                let chunk = chunk_result.expect("SSE body chunk error");
+                buf.extend_from_slice(&chunk);
+                let text = String::from_utf8_lossy(&buf);
+                for line in text.lines() {
+                    if let Some(json) = line.strip_prefix("data:") {
+                        if let Ok(update) = serde_json::from_str::<ProgressUpdate>(json.trim()) {
+                            if update.status == "started" { found_started = true; }
+                            if update.status == "finished" { found_finished = true; }
+                            if update.status == "end" { break; }
+                        }
+                    }
+                }
+            }
+            // Explicitly drop the stream to ensure the SSE handler task is cleaned up
+            drop(stream);
+            assert!(found_started, "Did not receive started event");
+            assert!(found_finished, "Did not receive finished event");
+
+            // Explicitly drop responses before dropping app/state
+            drop(post_response);
+
+            drop(app);
+            drop(state);
+
+            // Wait for worker to finish (optionally with timeout)
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), worker).await;
+            println!("[test] worker join complete");
+        }
     use super::*;
     use tower::util::ServiceExt; // for `oneshot`
     use hyper::http::{Request, StatusCode};
     use axum::body::to_bytes;
+    use uuid::Uuid;
 
     use std::sync::Arc as StdArc;
     use tokio::sync::{mpsc, broadcast};
@@ -178,15 +293,4 @@ mod tests {
         assert!(body_str.contains("Status: TODO"));
     }
 
-    #[tokio::test]
-    async fn get_events_returns_html() {
-        let app = test_app();
-        let response = app
-            .oneshot(Request::builder().uri("/events").body(axum::body::Body::empty()).unwrap())
-            .await
-            .unwrap();
-        let body = to_bytes(response.into_body(), 1024).await.unwrap();
-        let body_str = std::str::from_utf8(&body).unwrap();
-        assert!(body_str.contains("SSE: TODO"));
-    }
 }

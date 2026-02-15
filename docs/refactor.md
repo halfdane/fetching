@@ -112,20 +112,14 @@ struct AppState {
 - Call `core::process_url()` with progress forwarding
 - Forward progress updates to broadcast channel
 
-### 6. Add Authentication
-
-- Require `X-Auth-Token` header for `/api/*` and `/events`
-- Read token from env var at startup
-- Return 401 for invalid/missing tokens
-
-### 7. Implement Frontend
+### 6. Implement Frontend
 
 **Static files:** `server/static/index.html`
 - Form to submit Spotify URLs
 - Table for task status
 - JavaScript EventSource for SSE updates
 
-### 7a. Testing on Dev Machine
+### 7. Testing on Dev Machine
 
 - run server locally
 - make user download tracks, albums, playlists
@@ -182,4 +176,3 @@ This plan builds on the existing progress infrastructure and provides a scalable
 5. Process repeats, hopefully succeeding this time.
 
 This keeps the architecture simple: SSE for updates, HTTP for actions. No need for WebSockets or bidirectional communication. The retry just re-queues the URL, leveraging the existing queue system.
-
