@@ -1,4 +1,29 @@
 
+[package]
+name = "spotify-player"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "fetching"
+path = "main.rs"
+
+[dependencies]
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tokio = { version = "1", features = ["full"] }
+spotify-player-core = { path = "core" }
+librespot-core = "0.8.0"
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs"] }
+uuid = { version = "1", features = ["v4"] }
+futures-util = "0.3.32"
+async-stream = "0.3.6"
+
 [workspace]
 resolver = "2"
 members = ["core", "server"]

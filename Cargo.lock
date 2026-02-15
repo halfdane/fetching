@@ -3226,6 +3226,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "spotify-player"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "axum",
+ "futures-util",
+ "librespot-core",
+ "serde",
+ "serde_json",
+ "spotify-player-core",
+ "tokio",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "spotify-player-core"
 version = "0.1.0"
 dependencies = [
