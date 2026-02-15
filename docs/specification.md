@@ -1,5 +1,8 @@
 # Project Specification: spotify-player (Architecture & Testability)
 
+In the end, I'd like to have a sexy, yet functional frontend that helps users understand what's going on without overwhelming them with minute details.
+It's not an expert tool, but experts might value being able to see more details if they wish.
+
 ## Logical Compartmentalization
 
 - **Authentication & Session Management**

@@ -1,5 +1,6 @@
 
 use axum::{Router, routing::get, response::IntoResponse, extract::State};
+use tower_http::services::ServeDir;
 use std::sync::Arc;
 use tokio::sync::{mpsc, broadcast};
 use uuid::Uuid;
@@ -21,7 +22,7 @@ struct AppState {
 
 pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/", get(root))
+        .nest_service("/", ServeDir::new("server/static").not_found_service(axum::routing::get(|| async { axum::http::StatusCode::NOT_FOUND })))
         .route("/api/queue", axum::routing::post(queue_url))
         .route("/api/status", get(get_status))
         .route("/events", get(events))
@@ -46,9 +47,8 @@ async fn main() {
 }
 
 
-async fn root() -> impl IntoResponse {
-    "OK"
-}
+
+// No longer needed: static files are served by ServeDir
 
 async fn queue_url(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // TODO: parse body, queue task, return 202
