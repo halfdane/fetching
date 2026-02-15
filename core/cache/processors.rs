@@ -105,7 +105,7 @@ async fn cache_track_cover_art(image_downloader: &dyn crate::traits::ImageDownlo
             Ok(bytes) => Some(bytes),
             Err(e) => {
                 // Print error inline without newline to keep on same line as track
-                print!(" ❌[cover]");
+                println!(" ❌[cover]");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
                 warn!("Failed to fetch cover art: {}", e);
                 None
@@ -131,7 +131,7 @@ fn write_metadata_to_temp(temp_path: &Path, metadata: &TrackMetadata) -> anyhow:
                 );
             }
         }
-        print!(" ❌");
+        println!(" ❌");
         std::io::Write::flush(&mut std::io::stdout()).ok();
         error!("Failed to write metadata: {}", e);
         return Err(e);
@@ -150,7 +150,7 @@ fn finalize_track_file(temp_path: &Path, output_path: &Path) -> anyhow::Result<(
                 );
             }
         }
-        print!(" ❌");
+        println!(" ❌");
         std::io::Write::flush(&mut std::io::stdout()).ok();
         error!("Failed to finalize file: {}", e);
         return Err(e.into());
@@ -175,7 +175,7 @@ pub async fn process_track_cache(
         return Ok(());
     }
 
-    print!(" 📥");
+    println!(" 📥");
     std::io::Write::flush(&mut std::io::stdout())?;
 
     let temp_path = build_temp_path(output_path);
@@ -190,7 +190,7 @@ pub async fn process_track_cache(
     let temp_path_str = match temp_path.to_str() {
         Some(s) => s,
         None => {
-            print!(" ❌");
+            println!(" ❌");
             std::io::Write::flush(&mut std::io::stdout()).ok();
             let err = anyhow::anyhow!(DownloadError::InvalidUtf8Path(temp_path.clone()));
             error!("Invalid UTF-8 path: {}", err);
@@ -215,7 +215,7 @@ pub async fn process_track_cache(
                 );
             }
         }
-        print!(" ❌");
+        println!(" ❌");
         std::io::Write::flush(&mut std::io::stdout()).ok();
         error!("Failed to stream track: {}", e);
         return Err(e);

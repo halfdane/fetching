@@ -16,3 +16,4 @@ spotify-player-core = { path = "../core" }
 hyper = "1"
 futures-util = "0.3.32"
 async-stream = "0.3.6"
+tracing-subscriber = "0.3"

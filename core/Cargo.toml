@@ -34,6 +34,10 @@ vorbis_rs = "0.5.5"
 name = "spotify_player"
 path = "lib.rs"
 
+[[bin]]
+name = "spotify-player"
+path = "main.rs"
+
 [[test]]
 name = "test_m3u_generation"
 path = "tests/integration/test_m3u_generation.rs"
