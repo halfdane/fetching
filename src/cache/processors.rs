@@ -170,12 +170,13 @@ pub async fn process_track_cache(
 ) -> anyhow::Result<()> {
     // Check if file already exists
     if output_path.exists() {
-        info!("Track already cached");
+        println!(" ✅");
+        std::io::Write::flush(&mut std::io::stdout())?;
         return Ok(());
     }
 
-    let _download_span = tracing::info_span!("download_audio").entered();
-    info!("Downloading audio...");
+    print!(" 📥");
+    std::io::Write::flush(&mut std::io::stdout())?;
 
     let temp_path = build_temp_path(output_path);
 
@@ -220,11 +221,6 @@ pub async fn process_track_cache(
         return Err(e);
     }
 
-    drop(_download_span); // End download span
-
-    let _metadata_span = tracing::info_span!("add_metadata").entered();
-    info!("Adding metadata...");
-
     // Fetch cover art
     let cover_art = cache_track_cover_art(image_downloader, track_provider).await;
 
@@ -235,19 +231,12 @@ pub async fn process_track_cache(
         return Err(e);
     }
 
-    drop(_metadata_span); // End metadata span
-
-    let _finalize_span = tracing::info_span!("finalize_track").entered();
-    info!("Finalizing track...");
-
     // Rename temp file to final output path
     if let Err(e) = finalize_track_file(&temp_path, output_path) {
         // Error already printed by finalize_track_file
         return Err(e);
     }
 
-    drop(_finalize_span); // End finalize span
-
-    info!("Track processing complete");
+    println!(" ✅");
     Ok(())
 }

@@ -20,3 +20,8 @@ pub fn build_temp_path(output_path: &Path) -> PathBuf {
     temp_path.set_extension("tmp.ogg");
     temp_path
 }
+
+/// Generate track display string for console output
+pub fn format_track_display(index: usize, total: usize, track_name: &str) -> String {
+    format!("Track {} of {}: {}", index, total, track_name)
+}

@@ -1,8 +1,6 @@
 use std::env;
 
 use tracing::info;
-use tracing_indicatif::IndicatifLayer;
-use tracing_subscriber::prelude::*;
 
 mod auth;
 mod cache;
@@ -28,18 +26,11 @@ use processor::process_uris;
 async fn main() -> anyhow::Result<()> {
     // Initialize tracing subscriber with INFO level by default
     // Can be overridden with RUST_LOG environment variable
-    let indicatif_layer = IndicatifLayer::new();
-
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(indicatif_layer.get_stderr_writer())
-                .with_filter(
-                    tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-                ),
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
-        .with(indicatif_layer)
         .init();
 
     // Load configuration from environment variables

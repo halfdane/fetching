@@ -9,7 +9,7 @@ use librespot_core::SpotifyUri;
 use tokio::time::{sleep, Duration};
 use tracing::info;
 
-use crate::cache::helpers::get_artist_name_from_vec;
+use crate::cache::helpers::{get_artist_name_from_vec, format_track_display};
 use crate::cache::images::save_cover_art;
 use crate::cache::processors::{get_track_with_ogg_format, process_track_cache};
 use crate::metadata::{build_track_path, sanitize};
@@ -43,7 +43,10 @@ where
         let (track_provider, file_id) = match get_track_with_ogg_format(track_fetcher, track_uri).await {
             Ok(result) => result,
             Err(e) => {
+                let track_display = format_track_display(index + 1, total_tracks, "<unknown>");
+                println!("{} ❌", track_display);
                 tracing::error!("Failed to get track with OGG format: {}", e);
+
                 // Continue to next track
                 if index < total_tracks - 1 {
                     sleep(Duration::from_millis(TRACK_DELAY_MS)).await;
@@ -52,10 +55,9 @@ where
             }
         };
 
-        let track_name = track_provider.name().await;
-        let _track_span = tracing::info_span!("process_track", track = %track_name).entered();
-
-        info!("Starting track processing");
+        let track_display = format_track_display(index + 1, total_tracks, &track_provider.name().await);
+        print!("{}", track_display);
+        std::io::Write::flush(&mut std::io::stdout())?;
 
         let prefix = track_prefix.map(|f| f(index + 1));
         let output_path = build_track_path(&*track_provider, base_dir, prefix).await?;
@@ -81,7 +83,8 @@ where
                 cached_paths.push(output_path);
             }
             Err(_e) => {
-                // Error already logged by process_track_cache
+                // Error already printed by process_track_cache, just add newline
+                println!();
             }
         }
 
@@ -189,8 +192,6 @@ pub async fn cache_album(
     album_uri: &SpotifyUri,
     config: &crate::config::Config,
 ) -> anyhow::Result<Vec<PathBuf>> {
-    let _album_span = tracing::info_span!("cache_album").entered();
-
     info!("Fetching album metadata...");
     let album = album_fetcher.fetch_album(album_uri).await?;
     let album_name = album.album_name().await;
@@ -231,9 +232,6 @@ pub async fn cache_album(
     let music_dir_str = music_dir
         .to_str()
         .ok_or_else(|| anyhow::anyhow!(crate::error::DownloadError::InvalidUtf8Path(music_dir.clone())))?;
-
-    let _tracks_span = tracing::info_span!("process_album_tracks", total_tracks = total_tracks).entered();
-
     cache_track_collection(
         track_fetcher,
         audio_downloader,
