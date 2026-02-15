@@ -183,16 +183,3 @@ This plan builds on the existing progress infrastructure and provides a scalable
 
 This keeps the architecture simple: SSE for updates, HTTP for actions. No need for WebSockets or bidirectional communication. The retry just re-queues the URL, leveraging the existing queue system.
 
-
-
-
-
-- [ ] 1. Verify server/Cargo.toml dependencies (axum, tokio, etc.) and add any missing ones
-- [ ] 2. Add hyper = "1" to server/Cargo.toml for server binding
-- [ ] 3. Create/clean up server/src/main.rs: remove all code except a minimal async main that prints "Hello, world!"
-- [ ] 4. Add a minimal Axum app with a single GET / route returning "OK"
-- [ ] 5. Replace axum::Server with the correct hyper/axum serve pattern for Axum 0.7+
-- [ ] 6. Add AppState struct and wire it into the Axum app (no logic yet)
-- [ ] 7. Add Task struct and channel definitions (no logic yet)
-- [ ] 8. Add stubs for all required routes: GET /, POST /api/queue, GET /api/status, GET /events
-- [ ] 9. Ensure the server builds and runs after each step
