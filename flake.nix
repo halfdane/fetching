@@ -10,6 +10,8 @@
       in pkgs.mkShell {
         buildInputs = [
           (pkgs.rust-bin.stable.latest.default)
+          pkgs.rust-analyzer
+          pkgs.rustup
           pkgs.pkg-config
           pkgs.openssl
           pkgs.alsa-lib
