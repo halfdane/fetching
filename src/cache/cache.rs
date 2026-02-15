@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use librespot_core::SpotifyUri;
 use tokio::time::{sleep, Duration};
 use tracing::info;
+use uuid;
 
 use crate::cache::helpers::{get_artist_name_from_vec, format_track_display};
 use crate::cache::images::save_cover_art;
@@ -27,6 +28,8 @@ async fn cache_tracks_with_entries<'a, I>(
     base_dir: &str,
     track_prefix: Option<fn(usize) -> String>,
     collect_album_covers: bool,
+    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    task_id: uuid::Uuid,
 ) -> anyhow::Result<(Vec<M3uEntry>, Vec<Vec<u8>>, Vec<PathBuf>)>
 where
     I: Iterator<Item = &'a SpotifyUri>,
@@ -81,6 +84,15 @@ where
                 // Add to M3U entries and cached paths
                 m3u_entries.push(crate::m3u::build_m3u_entry(&*track_provider, output_path.clone()).await);
                 cached_paths.push(output_path);
+
+                // Emit progress update
+                let percent = ((index + 1) * 100) / total_tracks;
+                let _ = tx.send(crate::ProgressUpdate {
+                    task_id,
+                    status: format!("Processing track {}/{}", index + 1, total_tracks),
+                    percent: percent as u8,
+                    item: track_provider.name().await,
+                }).await;
             }
             Err(_e) => {
                 // Error already printed by process_track_cache, just add newline
@@ -143,6 +155,8 @@ pub async fn cache_track_collection<'a, I>(
     spotify_url: Option<String>,
     cover_art_bytes: Option<Vec<u8>>,
     collect_album_covers: bool,
+    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    task_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<PathBuf>>
 where
     I: Iterator<Item = &'a SpotifyUri>,
@@ -157,6 +171,8 @@ where
         base_dir,
         track_prefix,
         collect_album_covers,
+        tx,
+        task_id,
     )
     .await?;
 
@@ -191,6 +207,8 @@ pub async fn cache_album(
     image_downloader: &dyn crate::traits::ImageDownloader,
     album_uri: &SpotifyUri,
     config: &crate::config::Config,
+    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    task_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching album metadata...");
     let album = album_fetcher.fetch_album(album_uri).await?;
@@ -245,6 +263,8 @@ pub async fn cache_album(
         spotify_url,
         cover_art,
         false, // Don't collect album covers for albums (we have the main cover)
+        tx,
+        task_id,
     )
     .await
 }
@@ -276,6 +296,8 @@ pub async fn cache_playlist(
     image_downloader: &dyn crate::traits::ImageDownloader,
     playlist_uri: &SpotifyUri,
     config: &crate::config::Config,
+    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    task_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching playlist metadata...");
     let playlist = playlist_fetcher.fetch_playlist(playlist_uri).await?;
@@ -312,6 +334,8 @@ pub async fn cache_playlist(
         spotify_url,
         cover_art,
         true, // Collect album covers for playlist collage
+        tx,
+        task_id,
     )
     .await
 }

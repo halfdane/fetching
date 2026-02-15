@@ -1,6 +1,7 @@
 use std::env;
 
 use tracing::info;
+use tokio::sync::mpsc;
 
 use spotify_player::create_session;
 use spotify_player::cli::{validate_args, print_usage_and_exit, InputSource};
@@ -25,11 +26,13 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => print_usage_and_exit(&args),
     };
 
+    let (tx, _rx) = mpsc::channel(100);
+
     let mut any_error = false;
     match input_source {
         InputSource::SingleUri(uri_arg) => {
             let uris = vec![uri_arg];
-            if let Err(e) = process_uris(&uris).await {
+            if let Err(e) = process_uris(&uris, tx.clone()).await {
                 eprintln!("Error: {e}");
                 any_error = true;
             }
@@ -38,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
             match read_uris_from_file(&path) {
                 Ok(uris) => {
                     info!("Loaded {} URIs from file", uris.len());
-                    if let Err(e) = process_uris(&uris).await {
+                    if let Err(e) = process_uris(&uris, tx.clone()).await {
                         eprintln!("Error: {e}");
                         any_error = true;
                     }

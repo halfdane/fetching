@@ -30,14 +30,14 @@ pub struct ProgressUpdate {
     pub item: String,
 }
 
-pub async fn process_uris(uris: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn process_uris(uris: &[String], tx: tokio::sync::mpsc::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration from environment variables
     let config = config::Config::from_env();
 
     let token_path = ".spotify_access_token";
     let (session, _refresher, _refresh_handle) = auth::session::create_session(token_path).await?;
 
-	processor::process_uris(&session, &uris, &config).await?;
+	processor::process_uris(&session, &uris, &config, tx).await?;
 
     Ok(())
 }

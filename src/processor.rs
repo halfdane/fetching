@@ -5,6 +5,8 @@
 
 use anyhow::Context;
 use tracing::{error, info};
+use uuid::Uuid;
+use tokio::sync::mpsc;
 
 use crate::auth::{create_session_with_auto_refresh, TokenRefresher};
 use crate::cache::{cache_album, cache_playlist, process_track_cache, get_track_with_ogg_format};
@@ -17,9 +19,18 @@ async fn process_single_uri(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
+    tx: mpsc::Sender<crate::ProgressUpdate>,
+    uri_arg: &str,
 ) -> anyhow::Result<()> {
     match spotify_uri {
         librespot_core::SpotifyUri::Track { .. } => {
+            let task_id = Uuid::new_v4();
+            tx.send(crate::ProgressUpdate {
+                task_id,
+                status: "Fetching track".to_string(),
+                percent: 0,
+                item: uri_arg.to_string(), // wait, uri_arg is not in scope here. Wait, in process_single_uri, uri_arg is not available.
+            }).await?;
             info!("Caching single track...");
             let track_fetcher = LibrespotTrackFetcher { session };
             let (track_provider, file_id) = get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
@@ -27,6 +38,13 @@ async fn process_single_uri(
             let track_display = format!("Track: {}", track_provider.name().await);
             print!("{}", track_display);
             std::io::Write::flush(&mut std::io::stdout())?;
+
+            tx.send(crate::ProgressUpdate {
+                task_id,
+                status: "Downloading".to_string(),
+                percent: 50,
+                item: track_display.clone(),
+            }).await?;
 
             let music_dir = config.get_music_dir().map_err(|e| anyhow::anyhow!(e))?;
             let music_dir_str = music_dir.to_str().ok_or_else(|| {
@@ -39,20 +57,53 @@ async fn process_single_uri(
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
 
             process_track_cache(&track_fetcher, &audio_downloader, &image_downloader, &*track_provider, spotify_uri, &output_path, &file_id).await?;
+
+            tx.send(crate::ProgressUpdate {
+                task_id,
+                status: "Completed".to_string(),
+                percent: 100,
+                item: track_display,
+            }).await?;
         }
         librespot_core::SpotifyUri::Album { .. } => {
+            let task_id = Uuid::new_v4();
+            tx.send(crate::ProgressUpdate {
+                task_id,
+                status: "Fetching album".to_string(),
+                percent: 0,
+                item: uri_arg.to_string(),
+            }).await?;
             let album_fetcher = crate::implementations::LibrespotAlbumFetcher { session };
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
-            let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config).await?;
+            let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, &tx, task_id).await?;
+            tx.send(crate::ProgressUpdate {
+                task_id,
+                status: "Completed".to_string(),
+                percent: 100,
+                item: uri_arg.to_string(),
+            }).await?;
         }
         librespot_core::SpotifyUri::Playlist { .. } => {
+            let task_id = Uuid::new_v4();
+            tx.send(crate::ProgressUpdate {
+                task_id,
+                status: "Fetching playlist".to_string(),
+                percent: 0,
+                item: uri_arg.to_string(),
+            }).await?;
             let playlist_fetcher = crate::implementations::LibrespotPlaylistFetcher { session };
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
-            let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config).await?;
+            let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, &tx, task_id).await?;
+            tx.send(crate::ProgressUpdate {
+                task_id,
+                status: "Completed".to_string(),
+                percent: 100,
+                item: uri_arg.to_string(),
+            }).await?;
         }
         _ => {
             anyhow::bail!(
@@ -69,6 +120,7 @@ pub async fn process_uris(
     session: &librespot_core::session::Session,
     uris: &[String],
     config: &Config,
+    tx: mpsc::Sender<crate::ProgressUpdate>,
 ) -> anyhow::Result<()> {
     let mut successful = 0;
     let mut failed: Vec<(String, String)> = Vec::new();
@@ -91,7 +143,7 @@ pub async fn process_uris(
             }
         };
 
-        match process_single_uri(session, &spotify_uri, config).await {
+        match process_single_uri(session, &spotify_uri, config, tx.clone(), uri_arg).await {
             Ok(_) => successful += 1,
             Err(e) => {
                 error!("❌ Failed to process: {}", e);
