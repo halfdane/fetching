@@ -50,6 +50,7 @@ async fn process_single_uri(
                 current: 0,
                 total: 1,
                 item: uri_arg.to_string(),
+                url: Some(uri_arg.to_string()),
             }).await?;
             info!("Caching single track...");
             let track_fetcher = LibrespotTrackFetcher { session };
@@ -66,6 +67,7 @@ async fn process_single_uri(
                 current: 1,
                 total: 1,
                 item: track_display.clone(),
+                url: Some(uri_arg.to_string()),
             }).await?;
 
             let music_dir = config.get_music_dir().map_err(|e| anyhow::anyhow!(e))?;
@@ -87,6 +89,7 @@ async fn process_single_uri(
                 current: 1,
                 total: 1,
                 item: track_display,
+                url: Some(uri_arg.to_string()),
             }).await?;
         }
         librespot_core::SpotifyUri::Album { .. } => {
@@ -97,6 +100,7 @@ async fn process_single_uri(
                 current: 0,
                 total: 1,
                 item: uri_arg.to_string(),
+                url: Some(uri_arg.to_string()),
             }).await?;
             let album_fetcher = crate::implementations::LibrespotAlbumFetcher { session };
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
@@ -110,6 +114,7 @@ async fn process_single_uri(
                 current: 1,
                 total: 1,
                 item: uri_arg.to_string(),
+                url: Some(uri_arg.to_string()),
             }).await?;
         }
         librespot_core::SpotifyUri::Playlist { .. } => {
@@ -120,6 +125,7 @@ async fn process_single_uri(
                 current: 0,
                 total: 1,
                 item: uri_arg.to_string(),
+                url: Some(uri_arg.to_string()),
             }).await?;
             let playlist_fetcher = crate::implementations::LibrespotPlaylistFetcher { session };
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
@@ -133,6 +139,7 @@ async fn process_single_uri(
                 current: 1,
                 total: 1,
                 item: uri_arg.to_string(),
+                url: Some(uri_arg.to_string()),
             }).await?;
         }
         _ => {

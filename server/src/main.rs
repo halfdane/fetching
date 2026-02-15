@@ -6,13 +6,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use tokio::sync::{mpsc, broadcast};
 use std::sync::Arc;
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ProgressUpdate {
-    task_id: Uuid,
-    status: String, // e.g. "started", "progress", "finished"
-    progress: Option<u8>,
-    message: Option<String>,
-}
+use spotify_player::{ProgressUpdate, ProgressScope, process_url};
+use tower_http::services::ServeDir;
+
 
 #[derive(Debug, Clone)]
 struct Task {
@@ -23,7 +19,7 @@ struct Task {
 #[derive(Clone)]
 pub(crate) struct AppState {
     task_tx: mpsc::Sender<Task>,
-    progress_tx: broadcast::Sender<String>, // Placeholder type for now
+    progress_tx: broadcast::Sender<ProgressUpdate>,
     auth_token: String,
 }
 
@@ -43,10 +39,21 @@ async fn queue_url(
     let task_id = Uuid::new_v4();
     let task = Task {
         task_id,
-        url: payload.url,
+        url: payload.url.clone(),
     };
     // Send to worker channel (ignore if full for now)
     let _ = state.task_tx.send(task).await;
+    // Send queued update
+    let queued_update = ProgressUpdate {
+        task_id,
+        scope: ProgressScope::Global,
+        status: "queued".to_string(),
+        current: 0,
+        total: 0,
+        item: "".to_string(),
+        url: Some(payload.url),
+    };
+    let _ = state.progress_tx.send(queued_update);
     axum::http::StatusCode::ACCEPTED
 }
 
@@ -60,13 +67,13 @@ async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let stream = async_stream::stream! {
         loop {
             match rx.recv().await {
-                Ok(json) => {
-                    if let Ok(update) = serde_json::from_str::<ProgressUpdate>(&json) {
-                        if update.status == "end" {
-                            break;
-                        }
+                Ok(update) => {
+                    if update.status == "end" {
+                        break;
                     }
-                    yield Ok::<_, std::convert::Infallible>(Event::default().data(json));
+                    if let Ok(json) = serde_json::to_string(&update) {
+                        yield Ok::<_, std::convert::Infallible>(Event::default().data(json));
+                    }
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -74,6 +81,66 @@ async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         }
     };
     Sse::new(stream)
+}
+
+
+pub fn app(state: Arc<AppState>) -> Router {
+    Router::new()
+        .nest_service("/", ServeDir::new("server/static").not_found_service(axum::routing::get(|| async { axum::http::StatusCode::NOT_FOUND })))
+        .route("/api/queue", axum::routing::post(queue_url))
+        .route("/api/status", get(get_status))
+        .route("/events", get(events))
+        .with_state(state)
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
+
+    // Channel setup (no logic yet)
+    let (task_tx, _task_rx) = mpsc::channel::<Task>(100);
+    let (progress_tx, _progress_rx) = broadcast::channel::<ProgressUpdate>(100);
+    let auth_token = "devtoken".to_string();
+    let state = Arc::new(AppState {
+        task_tx,
+        progress_tx: progress_tx.clone(),
+        auth_token,
+    });
+    // Spawn worker
+    tokio::spawn(async move {
+        let mut task_rx = _task_rx;
+        while let Some(task) = task_rx.recv().await {
+            let (tx, mut rx) = mpsc::channel(32);
+            let progress_tx_clone = progress_tx.clone();
+            tokio::spawn(async move {
+                while let Some(update) = rx.recv().await {
+                    let _ = progress_tx_clone.send(update);
+                }
+            });
+            if let Err(_e) = process_url(task.task_id, task.url.clone(), tx).await {
+                let error_update = ProgressUpdate {
+                    task_id: task.task_id,
+                    scope: ProgressScope::Global,
+                    status: "error".to_string(),
+                    current: 0,
+                    total: 0,
+                    item: "".to_string(),
+                    url: Some(task.url),
+                };
+                let _ = progress_tx.send(error_update);
+            }
+        }
+    });
+    let app = app(state);
+    println!("Server running on http://127.0.0.1:8080");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 #[cfg(test)]
@@ -101,35 +168,47 @@ mod tests {
                         println!("[worker] got task: {}", task.url);
                         let started = ProgressUpdate {
                             task_id: task.task_id,
+                            scope: ProgressScope::Global,
                             status: "started".to_string(),
-                            progress: Some(0),
-                            message: Some(format!("Started task: {}", task.url)),
+                            current: 0,
+                            total: 0,
+                            item: "".to_string(),
+                            url: Some(task.url.clone()),
                         };
-                        let _ = progress_tx.send(serde_json::to_string(&started).unwrap());
+                        let _ = progress_tx.send(started);
                         for pct in [25, 50, 75, 100] {
                             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                             let update = ProgressUpdate {
                                 task_id: task.task_id,
+                                scope: ProgressScope::Global,
                                 status: "progress".to_string(),
-                                progress: Some(pct),
-                                message: None,
+                                current: pct,
+                                total: 100,
+                                item: "".to_string(),
+                                url: Some(task.url.clone()),
                             };
-                            let _ = progress_tx.send(serde_json::to_string(&update).unwrap());
+                            let _ = progress_tx.send(update);
                         }
                         let finished = ProgressUpdate {
                             task_id: task.task_id,
+                            scope: ProgressScope::Global,
                             status: "finished".to_string(),
-                            progress: Some(100),
-                            message: Some("Task finished".to_string()),
+                            current: 100,
+                            total: 100,
+                            item: "".to_string(),
+                            url: Some(task.url.clone()),
                         };
-                        let _ = progress_tx.send(serde_json::to_string(&finished).unwrap());
+                        let _ = progress_tx.send(finished);
                         let end = ProgressUpdate {
                             task_id: task.task_id,
+                            scope: ProgressScope::Global,
                             status: "end".to_string(),
-                            progress: None,
-                            message: None,
+                            current: 0,
+                            total: 0,
+                            item: "".to_string(),
+                            url: Some(task.url.clone()),
                         };
-                        let _ = progress_tx.send(serde_json::to_string(&end).unwrap());
+                        let _ = progress_tx.send(end);
                     }
                     println!("[worker] task_rx closed, worker exiting");
                 }

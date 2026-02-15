@@ -23,7 +23,7 @@ pub mod playback;
 pub use auth::session::create_session;
 
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProgressUpdate {
     pub task_id: Uuid,
     pub scope: ProgressScope,
@@ -31,9 +31,10 @@ pub struct ProgressUpdate {
     pub current: u32,
     pub total: u32,
     pub item: String,
+    pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ProgressScope {
     Track,
     Album,

@@ -176,3 +176,7 @@ This plan builds on the existing progress infrastructure and provides a scalable
 5. Process repeats, hopefully succeeding this time.
 
 This keeps the architecture simple: SSE for updates, HTTP for actions. No need for WebSockets or bidirectional communication. The retry just re-queues the URL, leveraging the existing queue system.
+
+
+
+

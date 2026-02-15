@@ -94,6 +94,7 @@ where
                     current: (index + 1) as u32,
                     total: total_tracks as u32,
                     item: track_provider.name().await,
+                    url: None,
                 }).await;
             }
             Err(_e) => {
