@@ -7,6 +7,15 @@ use server_lib::server::setup_and_run_server;
 use spotify_player_core::input::read_uris_from_file;
 
 
+use tracing::info;
+
+use spotify_player_core::create_session;
+use spotify_player_core::config::Config;
+use spotify_player_core::process_uris;
+
+
+
+
 #[derive(Parser)]
 #[command(name = "spotify-player", version, about = "Spotify Player CLI", author)]
 struct Cli {
@@ -39,10 +48,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    // run_cli_new().await?;
-
-    let args: Vec<String> = env::args().collect();
-    run_cli_obsolete(args).await?;
+    let old = false;
+    if old {
+        println!("Running obsolete CLI...");
+        let args: Vec<String> = env::args().collect();
+        run_cli_obsolete(args).await?;
+    } else {
+        println!("Running new CLI...");
+        run_cli_new().await?;
+    }
 
     Ok(())
 }
@@ -83,38 +97,46 @@ async fn run_cli_new() -> anyhow::Result<()> {
 
 
 async fn run_cli_obsolete(args: Vec<String>) -> anyhow::Result<()> {
+    println!("Arguments: {:?}", args);
+
     let input_source = match validate_args(&args) {
         Ok(result) => result,
         Err(_) => print_usage_and_exit(&args),
     };
 
-    let token_path = ".spotify_access_token";
-    let (session, _refresher, _refresh_handle) = spotify_player_core::create_session(token_path).await?;
-    let (progress_tx, _progress_rx) = broadcast::channel(100);
-    let (task_tx, task_rx) = mpsc::channel::<Task>(100);
+    let (tx, _rx) = broadcast::channel(100);
 
-    let processor_handle = spawn_task_processor(&session, task_rx, progress_tx.clone());
-
-    let uris = match input_source {
-        InputSource::SingleUri(uri) => vec![uri],
-        InputSource::File(path) => {
-            let uris = read_uris_from_file(&path)?;
-            eprintln!("Loaded {} URIs from file", uris.len());
-            uris
+    let mut any_error = false;
+    match input_source {
+        InputSource::SingleUri(uri_arg) => {
+            let uris = vec![uri_arg];
+            if let Err(e) = process_uris(&uris, tx.clone()).await {
+                eprintln!("Error: {e}");
+                any_error = true;
+            }
         }
-    };
-
-    let task_tx_clone = task_tx.clone();
-    queue_uri_tasks(uris, task_tx_clone).await?;
-
-    drop(task_tx);  // Close channel
-
-    let any_error = processor_handle.await.unwrap_or(true);
+        InputSource::File(path) => {
+            match read_uris_from_file(&path) {
+                Ok(uris) => {
+                    info!("Loaded {} URIs from file", uris.len());
+                    if let Err(e) = process_uris(&uris, tx.clone()).await {
+                        eprintln!("Error: {e}");
+                        any_error = true;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to read URIs from file: {e}");
+                    any_error = true;
+                }
+            }
+        }
+    }
     if any_error {
         std::process::exit(1);
     }
     Ok(())
 }
+
 
 
 #[derive(Debug)]
