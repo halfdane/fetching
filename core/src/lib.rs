@@ -20,7 +20,6 @@ pub mod error;
 pub mod traits;
 pub mod implementations;
 pub mod metadata;
-pub mod mocks;
 pub mod stream;
 pub mod playback;
 
