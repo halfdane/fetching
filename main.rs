@@ -50,7 +50,6 @@ async fn run_cli() -> anyhow::Result<()> {
 
     let config = Config::from_env();
 
-
     let token_path = ".spotify_access_token";
     let (session, _refresher, _refresh_handle) = fetching_core::create_session(token_path).await?;
     let (progress_tx, _progress_rx) = broadcast::channel(100);
@@ -63,11 +62,8 @@ async fn run_cli() -> anyhow::Result<()> {
     match cli.command {
         Commands::Batch { urls } => {
             if urls.is_empty() {
-                eprintln!("No URLs provided. Use: fetching batch <urls>...");
                 std::process::exit(1);
             }
-
-            eprintln!("URLs: {:?}", urls);
 
             for url in urls {
                 let task_id = Uuid::new_v4();
