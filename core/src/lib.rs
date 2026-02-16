@@ -8,7 +8,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 pub mod auth;
 pub mod cache;
-pub mod cli;
 pub mod config;
 pub mod input;
 pub mod processor;
