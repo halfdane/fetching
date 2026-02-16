@@ -87,7 +87,7 @@ async fn run_cli() -> anyhow::Result<()> {
             processor_handle.await?;
         }
         Commands::Server { port } => {
-            setup_and_run_server(task_tx, progress_tx).await?;
+            setup_and_run_server(task_tx, progress_tx, port).await?;
         }
     }
     Ok(())

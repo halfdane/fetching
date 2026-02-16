@@ -17,8 +17,6 @@ pub struct AppState {
     pub auth_token: String,
 }
 
-// No longer needed: static files are served by ServeDir
-
 #[derive(Deserialize)]
 struct QueueRequest {
     url: String,
@@ -85,7 +83,11 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-pub async fn setup_and_run_server(task_tx: mpsc::Sender<Task>, progress_tx: broadcast::Sender<ProgressUpdate>) -> anyhow::Result<()> {
+pub async fn setup_and_run_server(
+    task_tx: mpsc::Sender<Task>,
+    progress_tx: broadcast::Sender<ProgressUpdate>,
+    port: u16,
+) -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         task_tx,
         progress_tx,
@@ -93,7 +95,9 @@ pub async fn setup_and_run_server(task_tx: mpsc::Sender<Task>, progress_tx: broa
     });
     let app = app(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    println!("Server listening on http://{}", addr);
 
     axum::serve(listener, app).await?;
 
