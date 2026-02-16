@@ -6,15 +6,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use tokio::sync::{mpsc, broadcast};
 use std::sync::Arc;
-use spotify_player::{ProgressUpdate, ProgressScope, process_url};
+use spotify_player::{ProgressUpdate, ProgressScope, process_url, Task};
 use tower_http::services::ServeDir;
 
-
-#[derive(Debug, Clone)]
-struct Task {
-    pub task_id: Uuid,
-    pub url: String,
-}
 
 #[derive(Clone)]
 pub(crate) struct AppState {
@@ -39,7 +33,7 @@ async fn queue_url(
     let task_id = Uuid::new_v4();
     let task = Task {
         task_id,
-        url: payload.url.clone(),
+        uri: payload.url.clone(),
     };
     // Send to worker channel (ignore if full for now)
     let _ = state.task_tx.send(task).await;
@@ -109,7 +103,7 @@ fn create_channels_and_spawn_worker() -> (mpsc::Sender<Task>, broadcast::Sender<
                     let _ = progress_tx_clone_for_forward.send(update);
                 }
             });
-            if let Err(_e) = process_url(task.task_id, task.url.clone(), tx).await {
+            if let Err(_e) = process_url(task.task_id, task.uri.clone(), tx).await {
                 let error_update = ProgressUpdate {
                     task_id: task.task_id,
                     scope: ProgressScope::Global,
@@ -117,7 +111,7 @@ fn create_channels_and_spawn_worker() -> (mpsc::Sender<Task>, broadcast::Sender<
                     current: 0,
                     total: 0,
                     item: "".to_string(),
-                    url: Some(task.url),
+                    url: Some(task.uri),
                 };
                 let _ = progress_tx_clone.send(error_update);
             }
@@ -128,7 +122,7 @@ fn create_channels_and_spawn_worker() -> (mpsc::Sender<Task>, broadcast::Sender<
     (task_tx, progress_tx)
 }
 
-async fn setup_and_run_server(task_tx: mpsc::Sender<Task>, progress_tx: broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn setup_and_run_server(task_tx: mpsc::Sender<Task>, progress_tx: broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
     let auth_token = "devtoken".to_string();
     let state = Arc::new(AppState {
         task_tx,
@@ -179,7 +173,7 @@ mod tests {
                 let progress_tx = progress_tx.clone();
                 async move {
                     while let Some(task) = task_rx.recv().await {
-                        println!("[worker] got task: {}", task.url);
+                        println!("[worker] got task: {}", task.uri);
                         let started = ProgressUpdate {
                             task_id: task.task_id,
                             scope: ProgressScope::Global,
@@ -187,7 +181,7 @@ mod tests {
                             current: 0,
                             total: 0,
                             item: "".to_string(),
-                            url: Some(task.url.clone()),
+                            url: Some(task.uri.clone()),
                         };
                         let _ = progress_tx.send(started);
                         for pct in [25, 50, 75, 100] {
@@ -199,7 +193,7 @@ mod tests {
                                 current: pct,
                                 total: 100,
                                 item: "".to_string(),
-                                url: Some(task.url.clone()),
+                                url: Some(task.uri.clone()),
                             };
                             let _ = progress_tx.send(update);
                         }
@@ -210,7 +204,7 @@ mod tests {
                             current: 100,
                             total: 100,
                             item: "".to_string(),
-                            url: Some(task.url.clone()),
+                            url: Some(task.uri.clone()),
                         };
                         let _ = progress_tx.send(finished);
                         let end = ProgressUpdate {
@@ -220,7 +214,7 @@ mod tests {
                             current: 0,
                             total: 0,
                             item: "".to_string(),
-                            url: Some(task.url.clone()),
+                            url: Some(task.uri.clone()),
                         };
                         let _ = progress_tx.send(end);
                     }
@@ -367,7 +361,7 @@ mod tests {
         }
         match tokio::time::timeout(std::time::Duration::from_secs(1), task_rx.recv()).await {
             Ok(Some(task)) => {
-                assert_eq!(task.url, "spotify:track:123");
+                assert_eq!(task.uri, "spotify:track:123");
             }
             Ok(None) => panic!("[test] Channel closed unexpectedly"),
             Err(_) => panic!("[test] Timed out waiting for task"),
