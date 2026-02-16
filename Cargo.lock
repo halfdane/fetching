@@ -3236,6 +3236,7 @@ dependencies = [
  "librespot-core",
  "serde",
  "serde_json",
+ "server",
  "spotify-player-core",
  "tokio",
  "tower 0.4.13",

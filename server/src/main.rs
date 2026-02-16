@@ -1,4 +1,4 @@
-use server_lib::setup_and_run_server;
+use crate::setup_and_run_server;
 
 fn create_channels_and_spawn_worker() -> (tokio::sync::mpsc::Sender<spotify_player::Task>, tokio::sync::broadcast::Sender<spotify_player::ProgressUpdate>) {
     let (task_tx, task_rx) = tokio::sync::mpsc::channel::<spotify_player::Task>(100);
