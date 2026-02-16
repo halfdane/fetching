@@ -1,8 +1,8 @@
 
 mod mock;
 use mock::MockAudioDownloader;
-use spotify_player::stream::is_retriable_error;
-use spotify_player::traits::AudioDownloader;
+use spotify_player_core::stream::is_retriable_error;
+use spotify_player_core::traits::AudioDownloader;
 use librespot_core::file_id::FileId;
 use librespot_core::SpotifyId;
 use librespot_core::SpotifyUri;
@@ -117,7 +117,7 @@ async fn test_download_with_retry_succeeds_after_failures() {
     let mock = MockAudioDownloader::new_with_retries(2);
     let (file_id, uri) = create_fake_ids();
 
-    let result = spotify_player::stream::stream_and_cache_track(
+    let result = spotify_player_core::stream::stream_and_cache_track(
         &mock,
         &file_id,
         &uri,
@@ -147,7 +147,7 @@ async fn test_download_fails_immediately_on_non_retriable_error() {
     let mock = MockAudioDownloader::new_always_fails("invalid format".to_string());
     let (file_id, uri) = create_fake_ids();
 
-    let result = spotify_player::stream::stream_and_cache_track(
+    let result = spotify_player_core::stream::stream_and_cache_track(
         &mock,
         &file_id,
         &uri,
@@ -174,7 +174,7 @@ async fn test_download_exhausts_all_retries() {
     let mock = MockAudioDownloader::new_with_retries(999);
     let (file_id, uri) = create_fake_ids();
 
-    let result = spotify_player::stream::stream_and_cache_track(
+    let result = spotify_player_core::stream::stream_and_cache_track(
         &mock,
         &file_id,
         &uri,
@@ -204,7 +204,7 @@ async fn test_download_succeeds_on_first_try() {
     let mock = MockAudioDownloader::new_success();
     let (file_id, uri) = create_fake_ids();
 
-    let result = spotify_player::stream::stream_and_cache_track(
+    let result = spotify_player_core::stream::stream_and_cache_track(
         &mock,
         &file_id,
         &uri,

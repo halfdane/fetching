@@ -1,4 +1,4 @@
-use spotify_player::{m3u::build_m3u_entry, traits::*};
+use spotify_player_core::{m3u::build_m3u_entry, traits::*};
 use librespot_core::file_id::FileId;
 use librespot_metadata::audio::AudioFileFormat;
 use async_trait::async_trait;

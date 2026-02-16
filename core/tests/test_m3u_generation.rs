@@ -1,4 +1,4 @@
-use spotify_player::m3u::{write_m3u_playlist, M3uEntry};
+use spotify_player_core::m3u::{write_m3u_playlist, M3uEntry};
 use tempfile::TempDir;
 
 #[test]

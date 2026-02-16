@@ -1,8 +1,8 @@
 mod mock;
 
 use mock::MockAudioDownloader;
-use spotify_player::cache::helpers::build_temp_path;
-use spotify_player::stream::stream_and_cache_track;
+use spotify_player_core::cache::helpers::build_temp_path;
+use spotify_player_core::stream::stream_and_cache_track;
 use librespot_core::file_id::FileId;
 use librespot_core::SpotifyId;
 use librespot_core::SpotifyUri;

@@ -1,4 +1,4 @@
-use spotify_player::metadata::sanitize;
+use spotify_player_core::metadata::sanitize;
 
 #[test]
 fn test_sanitize_removes_invalid_chars() {
