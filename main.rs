@@ -3,6 +3,7 @@ use tokio::sync::{mpsc, broadcast};
 use fetching_core::{spawn_task_processor, Task};
 use server_lib::server::setup_and_run_server;
 use fetching_core::config::Config;
+use fetching_core::processor;
 
 use uuid::Uuid;
 
@@ -71,11 +72,15 @@ async fn run_cli() -> anyhow::Result<()> {
                     task_id,
                     uri: url.clone(),
                 };
-                let _ = task_tx.send(task).await;
+                // let _ = task_tx.send(task).await;
+                if let Err(e) = processor::process_url(&session, task.task_id, &url, &config, progress_tx.clone()).await {
+                    eprintln!("Error processing {}: {e}", task.uri);
+                    // any_error = true;
+                }
             }
-            // Explicitly drop the sender so the processor can exit when done
-            drop(task_tx);
-            processor_handle.await?;
+            // // Explicitly drop the sender so the processor can exit when done
+            // drop(task_tx);
+            // processor_handle.await?;
         }
         Commands::Server { port } => {
             setup_and_run_server(task_tx, progress_tx, port).await?;
