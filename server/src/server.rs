@@ -85,7 +85,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-pub async fn setup_and_run_server(task_tx: mpsc::Sender<Task>, progress_tx: broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn setup_and_run_server(task_tx: mpsc::Sender<Task>, progress_tx: broadcast::Sender<ProgressUpdate>) -> anyhow::Result<()> {
     let state = Arc::new(AppState {
         task_tx,
         progress_tx,

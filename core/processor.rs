@@ -20,7 +20,7 @@ pub async fn process_url(
     task_id: Uuid,
     url: &str,
     config: &Config,
-    tx: mpsc::Sender<crate::ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
 ) -> anyhow::Result<()> {
     let spotify_uri = match crate::input::parse_spotify_uri(url) {
         Ok(uri) => uri,
@@ -37,7 +37,7 @@ async fn process_single_uri(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
-    tx: mpsc::Sender<crate::ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
     uri_arg: &str,
     task_id: Uuid,
 ) -> anyhow::Result<()> {
@@ -51,7 +51,7 @@ async fn process_single_uri(
                 total: 1,
                 item: uri_arg.to_string(),
                 url: Some(uri_arg.to_string()),
-            }).await?;
+            })?;
             info!("Caching single track...");
             let track_fetcher = LibrespotTrackFetcher { session };
             let (track_provider, file_id) = get_track_with_ogg_format(&track_fetcher, spotify_uri).await?;
@@ -68,7 +68,7 @@ async fn process_single_uri(
                 total: 1,
                 item: track_display.clone(),
                 url: Some(uri_arg.to_string()),
-            }).await?;
+            })?;
 
             let music_dir = config.get_music_dir().map_err(|e| anyhow::anyhow!(e))?;
             let music_dir_str = music_dir.to_str().ok_or_else(|| {
@@ -90,7 +90,7 @@ async fn process_single_uri(
                 total: 1,
                 item: track_display,
                 url: Some(uri_arg.to_string()),
-            }).await?;
+            })?;
         }
         librespot_core::SpotifyUri::Album { .. } => {
             tx.send(crate::ProgressUpdate {
@@ -101,12 +101,12 @@ async fn process_single_uri(
                 total: 1,
                 item: uri_arg.to_string(),
                 url: Some(uri_arg.to_string()),
-            }).await?;
+            })?;
             let album_fetcher = crate::implementations::LibrespotAlbumFetcher { session };
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
-            let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, &tx, task_id).await?;
+            let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, tx.clone(), task_id).await?;
             tx.send(crate::ProgressUpdate {
                 task_id,
                 scope: crate::ProgressScope::Album,
@@ -115,7 +115,7 @@ async fn process_single_uri(
                 total: 1,
                 item: uri_arg.to_string(),
                 url: Some(uri_arg.to_string()),
-            }).await?;
+            })?;
         }
         librespot_core::SpotifyUri::Playlist { .. } => {
             tx.send(crate::ProgressUpdate {
@@ -126,12 +126,12 @@ async fn process_single_uri(
                 total: 1,
                 item: uri_arg.to_string(),
                 url: Some(uri_arg.to_string()),
-            }).await?;
+            })?;
             let playlist_fetcher = crate::implementations::LibrespotPlaylistFetcher { session };
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
-            let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, &tx, task_id).await?;
+            let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, tx.clone(), task_id).await?;
             tx.send(crate::ProgressUpdate {
                 task_id,
                 scope: crate::ProgressScope::Playlist,
@@ -140,7 +140,7 @@ async fn process_single_uri(
                 total: 1,
                 item: uri_arg.to_string(),
                 url: Some(uri_arg.to_string()),
-            }).await?;
+            })?;
         }
         _ => {
             anyhow::bail!(
@@ -157,7 +157,7 @@ pub async fn process_uris(
     session: &librespot_core::session::Session,
     uris: &[String],
     config: &Config,
-    tx: mpsc::Sender<crate::ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
 ) -> anyhow::Result<()> {
     let mut successful = 0;
     let mut failed: Vec<(String, String)> = Vec::new();

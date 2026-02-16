@@ -1,7 +1,7 @@
 use std::env;
 
 use tracing::info;
-use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 
 use spotify_player::create_session;
 use spotify_player::cli::{validate_args, print_usage_and_exit, InputSource};
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         Err(_) => print_usage_and_exit(&args),
     };
 
-    let (tx, _rx) = mpsc::channel(100);
+    let (tx, _rx) = broadcast::channel(100);
 
     let mut any_error = false;
     match input_source {

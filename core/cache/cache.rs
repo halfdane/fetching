@@ -9,6 +9,7 @@ use librespot_core::SpotifyUri;
 use tokio::time::{sleep, Duration};
 use tracing::info;
 use uuid;
+use tokio::sync::broadcast;
 
 use crate::cache::helpers::{get_artist_name_from_vec, format_track_display};
 use crate::cache::images::save_cover_art;
@@ -28,7 +29,7 @@ async fn cache_tracks_with_entries<'a, I>(
     base_dir: &str,
     track_prefix: Option<fn(usize) -> String>,
     collect_album_covers: bool,
-    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
     task_id: uuid::Uuid,
 ) -> anyhow::Result<(Vec<M3uEntry>, Vec<Vec<u8>>, Vec<PathBuf>)>
 where
@@ -95,7 +96,7 @@ where
                     total: total_tracks as u32,
                     item: track_provider.name().await,
                     url: None,
-                }).await;
+                });
             }
             Err(_e) => {
                 // Error already printed by process_track_cache, just add newline
@@ -158,7 +159,7 @@ pub async fn cache_track_collection<'a, I>(
     spotify_url: Option<String>,
     cover_art_bytes: Option<Vec<u8>>,
     collect_album_covers: bool,
-    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
     task_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<PathBuf>>
 where
@@ -210,7 +211,7 @@ pub async fn cache_album(
     image_downloader: &dyn crate::traits::ImageDownloader,
     album_uri: &SpotifyUri,
     config: &crate::config::Config,
-    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
     task_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching album metadata...");
@@ -299,7 +300,7 @@ pub async fn cache_playlist(
     image_downloader: &dyn crate::traits::ImageDownloader,
     playlist_uri: &SpotifyUri,
     config: &crate::config::Config,
-    tx: &tokio::sync::mpsc::Sender<crate::ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
     task_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching playlist metadata...");

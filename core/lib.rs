@@ -7,6 +7,7 @@ use serde::Serialize;
 use librespot_core::Session;
 use anyhow;
 use tokio::sync::mpsc;
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 pub mod auth;
 pub mod cache;
@@ -53,7 +54,7 @@ pub struct Task {
 }
 
 
-pub async fn process_url(task_id: Uuid, url: String, tx: tokio::sync::mpsc::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn process_url(task_id: Uuid, url: String, tx: tokio::sync::broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::from_env();
     let token_path = ".spotify_access_token";
     let (session, _refresher, _refresh_handle) = auth::session::create_session(token_path).await?;
@@ -61,13 +62,13 @@ pub async fn process_url(task_id: Uuid, url: String, tx: tokio::sync::mpsc::Send
     Ok(())
 }
 
-pub async fn process_single_url(session: &librespot_core::session::Session, task_id: Uuid, url: String, tx: tokio::sync::mpsc::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn process_single_url(session: &librespot_core::session::Session, task_id: Uuid, url: String, tx: tokio::sync::broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::from_env();
     processor::process_url(session, task_id, &url, &config, tx).await?;
     Ok(())
 }
 
-pub async fn process_uris(uris: &[String], tx: tokio::sync::mpsc::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn process_uris(uris: &[String], tx: tokio::sync::broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
     // For each URL, generate a task_id and call process_url
     for url in uris {
         let task_id = Uuid::new_v4();
@@ -79,7 +80,7 @@ pub async fn process_uris(uris: &[String], tx: tokio::sync::mpsc::Sender<Progres
 pub fn spawn_task_processor(
     session: &librespot_core::session::Session,
     task_rx: mpsc::Receiver<Task>,
-    tx: mpsc::Sender<ProgressUpdate>,
+    tx: tokio::sync::broadcast::Sender<ProgressUpdate>,
 ) -> JoinHandle<bool> {
     let session_clone = session.clone();
     let tx_clone = tx.clone();
