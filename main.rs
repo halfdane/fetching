@@ -1,21 +1,10 @@
-use std::env;
-
 use clap::{Parser, Subcommand};
 use tokio::sync::{mpsc, broadcast};
-use spotify_player_core::{spawn_task_processor, queue_uri_tasks, Task};
+use spotify_player_core::{spawn_task_processor, Task};
 use server_lib::server::setup_and_run_server;
-use spotify_player_core::input::read_uris_from_file;
-
-
-use tracing::info;
-
-use spotify_player_core::create_session;
 use spotify_player_core::config::Config;
-use spotify_player_core::process_single_url;
 
 use uuid::Uuid;
-
-
 
 
 #[derive(Parser)]
@@ -59,11 +48,17 @@ async fn main() -> anyhow::Result<()> {
 async fn run_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    let config = Config::from_env();
+
+
     let token_path = ".spotify_access_token";
     let (session, _refresher, _refresh_handle) = spotify_player_core::create_session(token_path).await?;
     let (progress_tx, _progress_rx) = broadcast::channel(100);
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
-    let processor_handle = spawn_task_processor(&session, task_rx, progress_tx.clone());
+    let processor_handle = spawn_task_processor(
+        config,
+        &session, 
+        task_rx, progress_tx.clone());
 
     match cli.command {
         Commands::Batch { urls } => {

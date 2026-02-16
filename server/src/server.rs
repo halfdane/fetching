@@ -1,10 +1,8 @@
 use axum::{Router, routing::get, response::IntoResponse, extract::{State, Json}};
-use axum::response::sse::{self, Sse, Event};
-use futures_util::stream::{Stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use axum::response::sse::{Sse, Event};
+use serde::{Deserialize};
 use uuid::Uuid;
 use tokio::sync::{mpsc, broadcast};
-use tokio::net;
 use std::sync::Arc;
 use spotify_player_core::{ProgressUpdate, ProgressScope, Task};
 use tower_http::services::ServeDir;
@@ -104,7 +102,6 @@ pub async fn setup_and_run_server(
 
 #[cfg(test)]
 mod tests {
-        use axum::response::sse::{Event, Sse};
         use futures_util::StreamExt;
         use serde_json;
         #[tokio::test]
@@ -198,7 +195,6 @@ mod tests {
                 .unwrap();
 
             // Fully poll the SSE response body stream to completion
-            use axum::body::Body;
             let body = sse_response.into_body();
             let mut stream = body.into_data_stream();
             let mut buf = Vec::new();
@@ -237,7 +233,6 @@ mod tests {
     use tower::util::ServiceExt; // for `oneshot`
     use hyper::http::{Request, StatusCode};
     use axum::body::to_bytes;
-    use uuid::Uuid;
 
     use std::sync::Arc as StdArc;
     use tokio::sync::{mpsc, broadcast};
@@ -311,7 +306,7 @@ mod tests {
             Ok(Some(task)) => {
                 assert_eq!(task.uri, "spotify:track:123");
             }
-            Ok(None) => panic!("[test] Channel closed unexpectedly"),
+            Ok(_) => panic!("[test] Channel closed unexpectedly"),
             Err(_) => panic!("[test] Timed out waiting for task"),
         }
     }

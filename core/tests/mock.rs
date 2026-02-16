@@ -3,12 +3,9 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use spotify_player_core::traits::AudioDownloader;
 use librespot_core::file_id::FileId;
-use std::collections::HashMap;
-use librespot_metadata::audio::AudioFileFormat;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use librespot_core::SpotifyUri;
-use spotify_player_core::traits::TrackMetadataProvider;
 
 /// Mock audio downloader for testing retry logic and error scenarios
 pub struct MockAudioDownloader {
@@ -133,81 +130,5 @@ impl AudioDownloader for MockAudioDownloader {
             .push(cache_path.to_string());
 
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct MockTrackMetadataProvider {
-    pub id: String,
-    pub name: String,
-    pub album_id: String,
-    pub album_name: String,
-    pub artist_names: Vec<String>,
-    pub album_artist_names: Vec<String>,
-    pub duration_ms: u32,
-    pub year: i32,
-    pub track_number: u32,
-    pub disc_number: u32,
-    pub genres: Vec<String>,
-    pub isrc: Option<String>,
-    pub label: Option<String>,
-    pub files: HashMap<AudioFileFormat, FileId>,
-    pub album_cover_file_ids: Vec<FileId>,
-    pub alternative_uris: Vec<String>,
-}
-
-#[async_trait]
-impl TrackMetadataProvider for MockTrackMetadataProvider {
-    async fn name(&self) -> String {
-        self.name.clone()
-    }
-    async fn album_id(&self) -> String {
-        self.album_id.clone()
-    }
-    async fn album_name(&self) -> String {
-        self.album_name.clone()
-    }
-    async fn artist_names(&self) -> Vec<String> {
-        self.artist_names.clone()
-    }
-    async fn duration_ms(&self) -> u32 {
-        self.duration_ms
-    }
-    async fn date(&self) -> Option<String> {
-        if self.year > 0 {
-            Some(self.year.to_string())
-        } else {
-            None
-        }
-    }
-    async fn track_number(&self) -> u32 {
-        self.track_number
-    }
-    async fn get_file_id(&self, format: &librespot_metadata::audio::AudioFileFormat) -> Option<FileId> {
-        self.files.get(format).copied()
-    }
-    
-    async fn album_artist_names(&self) -> Vec<String> {
-        self.album_artist_names.clone()
-    }
-    async fn disc_number(&self) -> u32 {
-        self.disc_number
-    }
-    async fn genres(&self) -> Vec<String> {
-        self.genres.clone()
-    }
-    async fn isrc(&self) -> Option<String> {
-        self.isrc.clone()
-    }
-    async fn label(&self) -> Option<String> {
-        self.label.clone()
-    }
-    
-    async fn get_album_cover_file_id(&self, index: usize) -> Option<FileId> {
-        self.album_cover_file_ids.get(index).copied()
-    }
-    
-    async fn alternative_uris(&self) -> Vec<String> {
-        self.alternative_uris.clone()
     }
 }

@@ -3,11 +3,8 @@
 // Removed duplicate process_url_from_args; only process_url is required by spec.
 // Library interface for integration tests
 use uuid::Uuid;
-use serde::Serialize;
-use librespot_core::Session;
 use anyhow;
 use tokio::sync::mpsc;
-use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 pub mod auth;
 pub mod cache;
@@ -52,25 +49,20 @@ pub struct Task {
     pub uri: String,
 }
 
-pub async fn process_single_url(session: &librespot_core::session::Session, task_id: Uuid, url: String, tx: tokio::sync::broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
-    let config = config::Config::from_env();
-    processor::process_url(session, task_id, &url, &config, tx).await?;
-    Ok(())
-}
-
 pub fn spawn_task_processor(
+    config: config::Config,
     session: &librespot_core::session::Session,
     task_rx: mpsc::Receiver<Task>,
     tx: tokio::sync::broadcast::Sender<ProgressUpdate>,
 ) -> JoinHandle<bool> {
     let session_clone = session.clone();
-    let tx_clone = tx.clone();
     tokio::spawn(async move {
         let mut task_rx = task_rx;
         let mut any_error = false;
         while let Some(task) = task_rx.recv().await {
             let uri = task.uri.clone();
-            if let Err(e) = process_single_url(&session_clone, task.task_id, uri, tx_clone.clone()).await {
+            
+            if let Err(e) = processor::process_url(&session_clone, task.task_id, &uri, &config, tx.clone()).await {
                 eprintln!("Error processing {}: {e}", task.uri);
                 any_error = true;
             }

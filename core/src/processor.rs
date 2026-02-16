@@ -3,12 +3,9 @@
 //! Functions for downloading, caching, and playing Spotify content
 //! including tracks, albums, and playlists.
 
-use anyhow::Context;
 use tracing::{error, info};
 use uuid::Uuid;
-use tokio::sync::mpsc;
 
-use crate::auth::{create_session_with_auto_refresh, TokenRefresher};
 use crate::cache::{cache_album, cache_playlist, process_track_cache, get_track_with_ogg_format};
 use crate::config::Config;
 use crate::metadata::build_track_path;
@@ -106,7 +103,7 @@ async fn process_single_uri(
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
-            let cached_paths = cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, tx.clone(), task_id).await?;
+            cache_album(&album_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, tx.clone(), task_id).await?;
             tx.send(crate::ProgressUpdate {
                 task_id,
                 scope: crate::ProgressScope::Album,
@@ -131,7 +128,15 @@ async fn process_single_uri(
             let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
             let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
             let image_downloader = crate::implementations::LibrespotImageDownloader { session };
-            let cached_paths = cache_playlist(&playlist_fetcher, &track_fetcher, &audio_downloader, &image_downloader, spotify_uri, config, tx.clone(), task_id).await?;
+            cache_playlist(
+                &playlist_fetcher, 
+                &track_fetcher, 
+                &audio_downloader, 
+                &image_downloader, 
+                spotify_uri, 
+                config, 
+                tx.clone(), 
+                task_id).await?;
             tx.send(crate::ProgressUpdate {
                 task_id,
                 scope: crate::ProgressScope::Playlist,

@@ -9,7 +9,6 @@ use librespot_core::SpotifyUri;
 use tokio::time::{sleep, Duration};
 use tracing::info;
 use uuid;
-use tokio::sync::broadcast;
 
 use crate::cache::helpers::{get_artist_name_from_vec, format_track_display};
 use crate::cache::images::save_cover_art;
@@ -87,7 +86,6 @@ where
                 cached_paths.push(output_path);
 
                 // Emit progress update
-                let percent = ((index + 1) * 100) / total_tracks;
                 let _ = tx.send(crate::ProgressUpdate {
                     task_id,
                     scope: crate::ProgressScope::Track,
