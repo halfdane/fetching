@@ -14,7 +14,6 @@ use tower_http::services::ServeDir;
 pub struct AppState {
     pub task_tx: mpsc::Sender<Task>,
     pub progress_tx: broadcast::Sender<ProgressUpdate>,
-    pub auth_token: String,
 }
 
 #[derive(Deserialize)]
@@ -91,7 +90,6 @@ pub async fn setup_and_run_server(
     let state = Arc::new(AppState {
         task_tx,
         progress_tx,
-        auth_token: "dummy".to_string(), // TODO
     });
     let app = app(state);
 
@@ -119,7 +117,6 @@ mod tests {
             let state = StdArc::new(AppState {
                 task_tx: app_state_task_tx,
                 progress_tx: progress_tx.clone(),
-                auth_token: "devtoken".to_string(),
             });
             // Spawn worker loop (no shutdown channel needed)
             let worker = tokio::spawn({
@@ -257,7 +254,6 @@ mod tests {
         let state = StdArc::new(AppState {
             task_tx,
             progress_tx,
-            auth_token: "devtoken".to_string(),
         });
         let app = axum::Router::new()
             .route("/", axum::routing::get(|| async { "OK" }))
@@ -274,7 +270,6 @@ mod tests {
         let state = StdArc::new(AppState {
             task_tx,
             progress_tx,
-            auth_token: "devtoken".to_string(),
         });
         axum::Router::new()
             .route("/", axum::routing::get(|| async { "OK" }))
