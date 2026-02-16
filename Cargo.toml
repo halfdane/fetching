@@ -25,6 +25,7 @@ async-stream = "0.3.6"
 
 spotify-player-core = { path = "core" }
 server = { path = "server" }
+clap = { version = "4.5.58", features = ["derive"] }
 
 [workspace]
 resolver = "2"
