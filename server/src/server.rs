@@ -4,7 +4,7 @@ use serde::{Deserialize};
 use uuid::Uuid;
 use tokio::sync::{mpsc, broadcast};
 use std::sync::Arc;
-use spotify_player_core::{ProgressUpdate, ProgressScope, Task};
+use fetching_core::{ProgressUpdate, ProgressScope, Task};
 use tower_http::services::ServeDir;
 
 

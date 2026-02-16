@@ -1,6 +1,6 @@
-use spotify_player_core::m3u::build_m3u_entry;
-use spotify_player_core::m3u::write_m3u_playlist;
-use spotify_player_core::traits::TrackMetadataProvider;
+use fetching_core::m3u::build_m3u_entry;
+use fetching_core::m3u::write_m3u_playlist;
+use fetching_core::traits::TrackMetadataProvider;
 use std::path::PathBuf;
 use tempfile::TempDir;
 

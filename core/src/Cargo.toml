@@ -1,5 +1,5 @@
 [package]
-name = "spotify-player-core"
+name = "fetching-core"
 version = "0.1.0"
 edition = "2024"
 
@@ -31,7 +31,7 @@ tempfile = "3.24.0"
 vorbis_rs = "0.5.5"
 
 [lib]
-name = "spotify_player"
+name = "fetching"
 path = "lib.rs"
 
 [[test]]

@@ -16,7 +16,7 @@ serde_json = "1"
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["fs"] }
 uuid = { version = "1", features = ["v4"] }
-spotify-player-core = { path = "../core" }
+fetching-core = { path = "../core" }
 hyper = "1"
 futures-util = "0.3.32"
 async-stream = "0.3.6"

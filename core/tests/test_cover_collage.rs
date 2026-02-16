@@ -1,4 +1,4 @@
-use spotify_player_core::cache::images::create_cover_collage;
+use fetching_core::cache::images::create_cover_collage;
 use image::{ImageFormat, RgbImage};
 use std::io::Cursor;
 

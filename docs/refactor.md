@@ -1,6 +1,6 @@
 # Web GUI Implementation Plan
 
-**Project:** `spotify-player` (Rust-based Spotify downloader with CLI and web interface)
+**Project:** `fetching` (Rust-based Spotify downloader with CLI and web interface)
 
 **Goal:** Build a web application with real-time progress updates, using the existing core library.
 

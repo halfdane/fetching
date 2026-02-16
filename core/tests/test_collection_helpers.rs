@@ -1,4 +1,4 @@
-use spotify_player_core::cache::images::save_cover_art;
+use fetching_core::cache::images::save_cover_art;
 use std::path::PathBuf;
 use tempfile::TempDir;
 

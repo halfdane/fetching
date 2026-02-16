@@ -1,4 +1,4 @@
-# spotify-player
+# fetching
 
 A lightweight Spotify streaming player written in Rust. Streams tracks, albums, and playlists with local caching for offline playback.
 
@@ -26,16 +26,16 @@ cargo build --release
 
 ```bash
 # Stream a track
-spotify-player spotify:track:4uLU6hMCjMI75M1A2tKUQC
+fetching spotify:track:4uLU6hMCjMI75M1A2tKUQC
 
 # Stream an album
-spotify-player spotify:album:1A2GTWGtFfWp7KSQTwWOyo
+fetching spotify:album:1A2GTWGtFfWp7KSQTwWOyo
 
 # Stream a playlist
-spotify-player spotify:playlist:37i9dQZF1DX0XUsuxWHRQd
+fetching spotify:playlist:37i9dQZF1DX0XUsuxWHRQd
 
 # Cache without playback
-spotify-player --no-play spotify:album:1A2GTWGtFfWp7KSQTwWOyo
+fetching --no-play spotify:album:1A2GTWGtFfWp7KSQTwWOyo
 ```
 
 Cached files are stored in `~/Music/` organized by artist and album.

@@ -1,7 +1,7 @@
 /// Mock implementations for testing
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use spotify_player_core::traits::AudioDownloader;
+use fetching_core::traits::AudioDownloader;
 use librespot_core::file_id::FileId;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;

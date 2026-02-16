@@ -1,14 +1,14 @@
 use clap::{Parser, Subcommand};
 use tokio::sync::{mpsc, broadcast};
-use spotify_player_core::{spawn_task_processor, Task};
+use fetching_core::{spawn_task_processor, Task};
 use server_lib::server::setup_and_run_server;
-use spotify_player_core::config::Config;
+use fetching_core::config::Config;
 
 use uuid::Uuid;
 
 
 #[derive(Parser)]
-#[command(name = "spotify-player", version, about = "Spotify Player CLI", author)]
+#[command(name = "fetching", version, about = "Spotify Player CLI", author)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -52,7 +52,7 @@ async fn run_cli() -> anyhow::Result<()> {
 
 
     let token_path = ".spotify_access_token";
-    let (session, _refresher, _refresh_handle) = spotify_player_core::create_session(token_path).await?;
+    let (session, _refresher, _refresh_handle) = fetching_core::create_session(token_path).await?;
     let (progress_tx, _progress_rx) = broadcast::channel(100);
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
     let processor_handle = spawn_task_processor(
@@ -63,7 +63,7 @@ async fn run_cli() -> anyhow::Result<()> {
     match cli.command {
         Commands::Batch { urls } => {
             if urls.is_empty() {
-                eprintln!("No URLs provided. Use: spotify-player batch <urls>...");
+                eprintln!("No URLs provided. Use: fetching batch <urls>...");
                 std::process::exit(1);
             }
 

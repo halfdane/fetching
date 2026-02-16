@@ -927,6 +927,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "fetching"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "axum",
+ "clap",
+ "fetching-core",
+ "futures-util",
+ "librespot-core",
+ "serde",
+ "serde_json",
+ "server",
+ "tokio",
+ "tower 0.4.13",
+ "tower-http 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "fetching-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "hex",
+ "image",
+ "librespot-audio",
+ "librespot-core",
+ "librespot-metadata",
+ "librespot-oauth",
+ "lofty",
+ "ogg 0.9.2",
+ "pathdiff",
+ "reqwest",
+ "rodio",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "vorbis_rs",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3200,11 +3250,11 @@ dependencies = [
  "anyhow",
  "async-stream",
  "axum",
+ "fetching-core",
  "futures-util",
  "hyper",
  "serde",
  "serde_json",
- "spotify-player-core",
  "tokio",
  "tower 0.4.13",
  "tower-http 0.5.2",
@@ -3337,56 +3387,6 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
-]
-
-[[package]]
-name = "spotify-player"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-stream",
- "axum",
- "clap",
- "futures-util",
- "librespot-core",
- "serde",
- "serde_json",
- "server",
- "spotify-player-core",
- "tokio",
- "tower 0.4.13",
- "tower-http 0.5.2",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "spotify-player-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "hex",
- "image",
- "librespot-audio",
- "librespot-core",
- "librespot-metadata",
- "librespot-oauth",
- "lofty",
- "ogg 0.9.2",
- "pathdiff",
- "reqwest",
- "rodio",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "vorbis_rs",
 ]
 
 [[package]]
