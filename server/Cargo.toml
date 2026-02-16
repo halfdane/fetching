@@ -1,9 +1,11 @@
 [package]
 name = "server"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [lib]
+name = "server_lib"
+path = "src/lib.rs"
 
 [dependencies]
 
