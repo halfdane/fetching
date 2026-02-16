@@ -1,7 +1,6 @@
-#[path = "../common/mod.rs"]
-mod common;
+mod mock;
 
-use common::mock::MockAudioDownloader;
+use mock::MockAudioDownloader;
 use spotify_player::cache::helpers::build_temp_path;
 use spotify_player::stream::stream_and_cache_track;
 use librespot_core::file_id::FileId;

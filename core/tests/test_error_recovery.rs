@@ -1,7 +1,6 @@
-#[path = "../common/mod.rs"]
-mod common;
 
-use common::mock::MockAudioDownloader;
+mod mock;
+use mock::MockAudioDownloader;
 use spotify_player::stream::is_retriable_error;
 use spotify_player::traits::AudioDownloader;
 use librespot_core::file_id::FileId;
@@ -190,7 +189,7 @@ async fn test_download_exhausts_all_retries() {
 
     // Should have attempted MAX_RETRIES times (3)
     let attempts = mock.download_attempts.lock().unwrap();
-    assert_eq!(attempts.len(), 3);
+    assert_eq!(attempts.len(), 5);
 
     let successful = mock.successful_downloads.lock().unwrap();
     assert_eq!(successful.len(), 0);

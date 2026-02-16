@@ -32,4 +32,32 @@ vorbis_rs = "0.5.5"
 
 [lib]
 name = "spotify_player"
+path = "lib.rs"
 
+[[test]]
+name = "test_m3u_generation"
+path = "tests/integration/test_m3u_generation.rs"
+
+[[test]]
+name = "test_cover_collage"
+path = "tests/integration/test_cover_collage.rs"
+
+[[test]]
+name = "test_metadata"
+path = "tests/integration/test_metadata.rs"
+
+[[test]]
+name = "test_collection_helpers"
+path = "tests/integration/test_collection_helpers.rs"
+
+[[test]]
+name = "test_error_recovery"
+path = "tests/integration/test_error_recovery.rs"
+
+[[test]]
+name = "test_temp_file_cleanup"
+path = "tests/integration/test_temp_file_cleanup.rs"
+
+[[test]]
+name = "test_build_m3u_entry"
+path = "tests/integration/test_build_m3u_entry.rs"
