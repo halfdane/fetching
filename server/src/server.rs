@@ -6,7 +6,7 @@ use uuid::Uuid;
 use tokio::sync::{mpsc, broadcast};
 use tokio::net;
 use std::sync::Arc;
-use spotify_player_core::{ProgressUpdate, ProgressScope, process_url, Task};
+use spotify_player_core::{ProgressUpdate, ProgressScope, Task};
 use tower_http::services::ServeDir;
 
 

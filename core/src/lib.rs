@@ -52,27 +52,9 @@ pub struct Task {
     pub uri: String,
 }
 
-
-pub async fn process_url(task_id: Uuid, url: String, tx: tokio::sync::broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
-    let config = config::Config::from_env();
-    let token_path = ".spotify_access_token";
-    let (session, _refresher, _refresh_handle) = auth::session::create_session(token_path).await?;
-    processor::process_url(&session, task_id, &url, &config, tx).await?;
-    Ok(())
-}
-
 pub async fn process_single_url(session: &librespot_core::session::Session, task_id: Uuid, url: String, tx: tokio::sync::broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
     let config = config::Config::from_env();
     processor::process_url(session, task_id, &url, &config, tx).await?;
-    Ok(())
-}
-
-pub async fn process_uris(uris: &[String], tx: tokio::sync::broadcast::Sender<ProgressUpdate>) -> Result<(), Box<dyn std::error::Error>> {
-    // For each URL, generate a task_id and call process_url
-    for url in uris {
-        let task_id = Uuid::new_v4();
-        process_url(task_id, url.clone(), tx.clone()).await?;
-    }
     Ok(())
 }
 
