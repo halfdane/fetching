@@ -77,8 +77,10 @@ pub async fn stream_and_cache_track<D: AudioDownloader + ?Sized>(
         if attempt > 0 {
             let delay = retry_delay_override.unwrap_or_else(|| calculate_retry_delay(attempt));
             if delay > Duration::ZERO {
-                print!(" 🔄{}({}s)", attempt, delay.as_secs());
-                std::io::Write::flush(&mut std::io::stdout())?;
+                let err_msg = last_error.unwrap_or_else(|| anyhow::anyhow!("Something went wrong getting the error message after retries: {}", MAX_RETRIES));
+
+                tracing::info!("Retrying streaming (attempt {} of {}) after error: {}", attempt + 1, MAX_RETRIES, err_msg);
+
                 sleep(delay).await;
             }
         }
@@ -92,12 +94,12 @@ pub async fn stream_and_cache_track<D: AudioDownloader + ?Sized>(
                 let error_msg = e.to_string();
 
                 if is_retriable_error(&error_msg) {
-                    debug!("Retriable error on attempt {}: {}", attempt + 1, error_msg);
+                    tracing::info!("Retriable error on attempt {}: {}", attempt + 1, error_msg);
                     last_error = Some(e);
                     // Continue to next attempt
                 } else {
                     // Non-retriable error - fail immediately
-                    println!(" ❌ {}", error_msg);
+                    tracing::error!(" ❌ {}", error_msg);
                     return Err(e);
                 }
             }

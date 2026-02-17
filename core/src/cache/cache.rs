@@ -40,7 +40,7 @@ where
     let mut cached_paths = Vec::new();
 
     for (index, track_uri) in tracks.enumerate() {
-        tracing::debug!("Processing track URI: {:?}", track_uri);
+        tracing::info!("Processing track URI: {:?}", track_uri);
 
         // Get track with OGG format, trying alternatives if needed
         let (track_provider, file_id) = match get_track_with_ogg_format(track_fetcher, track_uri).await {
@@ -59,8 +59,7 @@ where
         };
 
         let track_display = format_track_display(index + 1, total_tracks, &track_provider.name().await);
-        print!("{}", track_display);
-        std::io::Write::flush(&mut std::io::stdout())?;
+        tracing::info!("{}", track_display);
 
         let prefix = track_prefix.map(|f| f(index + 1));
         let output_path = build_track_path(&*track_provider, base_dir, prefix).await?;

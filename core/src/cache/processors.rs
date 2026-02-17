@@ -99,7 +99,7 @@ pub async fn get_track_with_ogg_format(
 
 async fn cache_track_cover_art(image_downloader: &dyn crate::traits::ImageDownloader, metadata: &dyn crate::traits::TrackMetadataProvider) -> Option<Vec<u8>> {
     if let Some(file_id) = metadata.get_album_cover_file_id(0).await {
-        print!(" 🖼️");
+        tracing::info!("Fetching cover art for track '{}'", metadata.name().await);
         let _ = std::io::Write::flush(&mut std::io::stdout());
         match image_downloader.download_cover(&file_id).await {
             Ok(bytes) => Some(bytes),
@@ -170,15 +170,13 @@ pub async fn process_track_cache(
 ) -> anyhow::Result<()> {
     // Check if file already exists
     if output_path.exists() {
-        println!(" ✅");
-        std::io::Write::flush(&mut std::io::stdout())?;
+        tracing::info!("Track '{}' already cached at {}, skipping download", track_provider.name().await, output_path.display());
         return Ok(());
     }
-
-    println!(" 📥");
-    std::io::Write::flush(&mut std::io::stdout())?;
-
+    
     let temp_path = build_temp_path(output_path);
+
+    tracing::info!("Starting to fetch track '{}' to {}", track_provider.name().await, temp_path.display());
 
     // Clean up any existing temp file
     if temp_path.exists() {
@@ -190,8 +188,6 @@ pub async fn process_track_cache(
     let temp_path_str = match temp_path.to_str() {
         Some(s) => s,
         None => {
-            println!(" ❌");
-            std::io::Write::flush(&mut std::io::stdout()).ok();
             let err = anyhow::anyhow!(DownloadError::InvalidUtf8Path(temp_path.clone()));
             error!("Invalid UTF-8 path: {}", err);
             return Err(err);
@@ -237,6 +233,6 @@ pub async fn process_track_cache(
         return Err(e);
     }
 
-    println!(" ✅");
+    tracing::info!("Track '{}' fetched, tagged and stored successfully at {}", track_provider.name().await, output_path.display());
     Ok(())
 }

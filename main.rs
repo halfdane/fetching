@@ -1,11 +1,12 @@
 use clap::{Parser, Subcommand};
 use tokio::sync::{mpsc, broadcast};
-use fetching_core::{spawn_task_processor, Task};
+use fetching_core::{spawn_task_processor, queue_uri_tasks, Task};
 use server_lib::server::setup_and_run_server;
-use fetching_core::config::Config;
-use fetching_core::processor;
 
 use uuid::Uuid;
+
+use fetching_core::create_session;
+use fetching_core::config::Config;
 
 
 #[derive(Parser)]
@@ -31,7 +32,7 @@ enum Commands {
     },
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 3)]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -55,38 +56,43 @@ async fn run_cli() -> anyhow::Result<()> {
     let (session, _refresher, _refresh_handle) = fetching_core::create_session(token_path).await?;
     let (progress_tx, _progress_rx) = broadcast::channel(100);
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
-    let processor_handle = spawn_task_processor(
-        config,
-        &session, 
-        task_rx, progress_tx.clone());
+
+    let processor_handle = spawn_task_processor(&session, task_rx, progress_tx.clone());
 
     match cli.command {
         Commands::Batch { urls } => {
-            if urls.is_empty() {
+            queue_uri_tasks(urls, task_tx.clone()).await?;
+            drop(task_tx);
+            let mut any_error = false;
+            any_error = processor_handle.await.unwrap_or(true);
+           if any_error {
                 std::process::exit(1);
             }
-
-            for url in urls {
-                let task_id = Uuid::new_v4();
-                let task = Task {
-                    task_id,
-                    uri: url.clone(),
-                };
-                // let _ = task_tx.send(task).await;
-                if let Err(e) = processor::process_url(&session, task.task_id, &url, &config, progress_tx.clone()).await {
-                    eprintln!("Error processing {}: {e}", task.uri);
-                    // any_error = true;
-                }
-            }
-            // // Explicitly drop the sender so the processor can exit when done
-            // drop(task_tx);
-            // processor_handle.await?;
         }
         Commands::Server { port } => {
             setup_and_run_server(task_tx, progress_tx, port).await?;
         }
     }
+
     Ok(())
 }
+
+
+async fn run_cli_new(urls: Vec<String>) -> anyhow::Result<()> {
+    let token_path = ".spotify_access_token";
+    let (session, _refresher, _refresh_handle) = create_session(token_path).await?;
+    
+    let (progress_tx, _progress_rx) = broadcast::channel(100);
+    let (task_tx, task_rx) = mpsc::channel::<Task>(100);
+    let processor_handle = spawn_task_processor(&session, task_rx, progress_tx.clone());  // &session
+        
+    queue_uri_tasks(urls, task_tx.clone()).await?;
+    drop(task_tx);
+    
+    let any_error = processor_handle.await.unwrap_or(true);
+
+    Ok(())
+}
+
 
 
