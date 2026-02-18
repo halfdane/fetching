@@ -68,7 +68,7 @@ async fn run_cli() -> anyhow::Result<()> {
             let (session, _refresher, _refresh_handle) = create_session(&credentials_file).await?;
             let (progress_tx, _progress_rx) = broadcast::channel(100);
             let (task_tx, task_rx) = mpsc::channel::<Task>(100);
-            let processor_handle = spawn_task_processor(&session, task_rx, progress_tx.clone());
+            let _processor_handle = spawn_task_processor(&session, task_rx, progress_tx.clone());
 
             // Pass token_path to server setup if you want to support it there too
             setup_and_run_server(task_tx, progress_tx, port).await?;

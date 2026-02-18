@@ -54,7 +54,7 @@ pub async fn create_session(
             }
         };
 
-    let refresher = Arc::new(TokenRefresher::new(credentials_path.to_string(), token_data));
+    let refresher = Arc::new(TokenRefresher::new(token_data));
     let refresh_handle = Arc::clone(&refresher).start_background_refresh();
 
     info!("Background token refresh task started");

@@ -14,7 +14,7 @@ const SCOPES: &[&str] = &["streaming"];
 
 /// Stored token data with refresh capability
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct TokenData {
+pub struct TokenData {
     pub(crate) access_token: String,
     pub(crate) refresh_token: String,
     pub(crate) expires_at: u64, // Unix timestamp in seconds

@@ -17,15 +17,13 @@ use tracing::{debug, info, warn};
 /// - Updates both in-memory token and disk storage
 /// - Ensures long-running sessions don't experience authentication failures
 pub struct TokenRefresher {
-    credentials_path: String,
     current_token: Arc<RwLock<Option<super::oauth::TokenData>>>,
 }
 
 impl TokenRefresher {
     /// Create a new token refresher (internal use only)
-    pub(crate) fn new(credentials_path: String, initial_token: super::oauth::TokenData) -> Self {
+    pub(crate) fn new(initial_token: super::oauth::TokenData) -> Self {
         Self {
-            credentials_path,
             current_token: Arc::new(RwLock::new(Some(initial_token))),
         }
     }
