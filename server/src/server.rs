@@ -120,7 +120,7 @@ mod tests {
                 let progress_tx = progress_tx.clone();
                 async move {
                     while let Some(task) = task_rx.recv().await {
-                        println!("[worker] got task: {}", task.uri);
+                        tracing::debug!("[worker] got task: {}", task.uri);
                         let started = ProgressUpdate {
                             task_id: task.task_id,
                             scope: ProgressScope::Global,
@@ -165,7 +165,7 @@ mod tests {
                         };
                         let _ = progress_tx.send(end);
                     }
-                    println!("[worker] task_rx closed, worker exiting");
+                    tracing::info!("[worker] task_rx closed, worker exiting");
                 }
             });
             let app = axum::Router::new()
@@ -186,7 +186,6 @@ mod tests {
 
             // Drop task_tx after queuing the task
             drop(task_tx);
-            println!("[test] dropped all task_tx clones");
 
             let sse_response = app.clone().oneshot(Request::builder()
                 .uri("/events")
@@ -227,7 +226,6 @@ mod tests {
 
             // Wait for worker to finish (optionally with timeout)
             let _ = tokio::time::timeout(std::time::Duration::from_secs(1), worker).await;
-            println!("[test] worker join complete");
         }
     use super::*;
     use tower::util::ServiceExt; // for `oneshot`

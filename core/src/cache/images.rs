@@ -46,19 +46,19 @@ pub fn save_cover_art(
     let cover_path = parent_dir.join("cover.jpg");
 
     if let Some(bytes) = cover_bytes {
-        println!("Saving cover art to: {}", cover_path.display());
+        tracing::info!("Saving cover art to: {}", cover_path.display());
         std::fs::write(&cover_path, bytes)?;
-        println!("Cover art saved successfully");
+        tracing::info!("Cover art saved successfully");
     } else if !unique_album_covers.is_empty() {
-        println!(
+        tracing::info!(
             "Creating cover collage from {} album covers",
             unique_album_covers.len()
         );
         let collage_bytes = create_cover_collage(unique_album_covers)?;
         std::fs::write(&cover_path, collage_bytes)?;
-        println!("Cover collage saved successfully");
+        tracing::info!("Cover collage saved successfully");
     } else {
-        println!("No cover art bytes to save");
+        tracing::info!("No cover art bytes to save");
     }
 
     Ok(())

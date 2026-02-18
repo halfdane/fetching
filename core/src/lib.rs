@@ -19,7 +19,7 @@ pub mod metadata;
 pub mod stream;
 pub mod playback;
 
-// Re-export create_session if needed
+// Re-export create_session
 pub use auth::session::create_session;
 
 
@@ -85,7 +85,7 @@ pub fn spawn_task_processor(
             let uri = task.uri.clone();
             let config = config::Config::from_env();
                         if let Err(e) = process_url_safe(&session_clone, task.task_id, &uri, &config, tx_clone.clone()).await {
-                eprintln!("Error processing {}: {e}", task.uri);
+                tracing::error!("Error processing {}: {e}", task.uri);
                 any_error = true;
             }
         }

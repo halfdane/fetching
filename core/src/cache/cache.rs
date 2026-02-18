@@ -47,8 +47,7 @@ where
             Ok(result) => result,
             Err(e) => {
                 let track_display = format_track_display(index + 1, total_tracks, "<unknown>");
-                println!("{} ❌", track_display);
-                tracing::error!("Failed to get track with OGG format: {}", e);
+                tracing::error!("Failed to get track {} with OGG format: {}", track_display, e);
 
                 // Continue to next track
                 if index < total_tracks - 1 {

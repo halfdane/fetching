@@ -24,7 +24,7 @@ The token refresh system uses a background task to proactively monitor and refre
         ┌─────────────────────────┐
         │   TokenRefresher        │◄──┐
         │  - current_token        │   │
-        │  - token_path           │   │
+        │  - credentials_path    │   │
         └─────────────────────────┘   │
                   │                    │
                   │ spawns             │ refreshes
@@ -115,7 +115,7 @@ Stored at: `.spotify_access_token` (JSON format)
 ### TokenRefresher (In-Memory)
 ```rust
 pub struct TokenRefresher {
-    token_path: String,                           // Path to token file
+    credentials_path: String,                     // Path to credentials file
     current_token: Arc<RwLock<Option<TokenData>>>, // Thread-safe current token
 }
 ```
