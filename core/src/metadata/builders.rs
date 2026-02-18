@@ -30,13 +30,10 @@ pub async fn build_track_path<T: TrackMetadataProvider + ?Sized>(
 
     let mut dir_path = PathBuf::from(base_music_dir);
     dir_path.push(&artist_name);
-    dir_path.push(&album_name);
+    dir_path.push(format!("{} - {}", year, album_name));
     std::fs::create_dir_all(&dir_path)?;
 
-    let filename = format!(
-        "{:04}_{}_{}_{:03}_{}.ogg",
-        year, artist_name, album_name, track_num, track_title
-    );
+    let filename = format!("{:02} - {}.ogg", track_num, track_title);
 
     dir_path.push(filename);
     Ok(dir_path)
