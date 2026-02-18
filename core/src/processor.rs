@@ -68,7 +68,7 @@ async fn handle_track(
     let music_dir_str = music_dir.to_str().ok_or_else(|| {
         anyhow::anyhow!(crate::error::DownloadError::InvalidUtf8Path(music_dir.clone()))
     })?;
-    let output_path = build_track_path(&*track_provider, music_dir_str, None).await?;
+    let output_path = build_track_path(&*track_provider, music_dir_str).await?;
 
     let track_fetcher = LibrespotTrackFetcher { session };
     let audio_downloader = crate::stream::LibrespotAudioDownloader { session };

@@ -16,7 +16,6 @@ use crate::metadata::validation::sanitize;
 pub async fn build_track_path<T: TrackMetadataProvider + ?Sized>(
     track: &T,
     base_music_dir: &str,
-    prefix: Option<String>,
 ) -> anyhow::Result<PathBuf> {
     let date = track.date().await;
     let year = date.as_ref()
@@ -34,17 +33,10 @@ pub async fn build_track_path<T: TrackMetadataProvider + ?Sized>(
     dir_path.push(&album_name);
     std::fs::create_dir_all(&dir_path)?;
 
-    let filename = if let Some(prefix_str) = prefix {
-        format!(
-            "{}_{:04}_{}_{}_{:03}_{}.ogg",
-            prefix_str, year, artist_name, album_name, track_num, track_title
-        )
-    } else {
-        format!(
-            "{:04}_{}_{}_{:03}_{}.ogg",
-            year, artist_name, album_name, track_num, track_title
-        )
-    };
+    let filename = format!(
+        "{:04}_{}_{}_{:03}_{}.ogg",
+        year, artist_name, album_name, track_num, track_title
+    );
 
     dir_path.push(filename);
     Ok(dir_path)
@@ -146,7 +138,7 @@ mod tests {
             track_number: 5,
         };
 
-        let result = build_track_path(&mock_track, base_music_dir, None).await.unwrap();
+        let result = build_track_path(&mock_track, base_music_dir).await.unwrap();
 
         let expected_filename = "2023_Test_Artist_Test_Album_005_Test_Track.ogg";
         assert_eq!(result.file_name().unwrap(), expected_filename);
@@ -170,7 +162,8 @@ mod tests {
             track_number: 1,
         };
 
-        let result = build_track_path(&mock_track, base_music_dir, Some("PREFIX".to_string())).await.unwrap();
+        // Prefix is no longer supported, so this test is obsolete.
+        let result = build_track_path(&mock_track, base_music_dir).await.unwrap();
 
         let expected_filename = "PREFIX_2024_Another_Artist_Another_Album_001_Another_Track.ogg";
         assert_eq!(result.file_name().unwrap(), expected_filename);
@@ -189,7 +182,7 @@ mod tests {
             track_number: 10,
         };
 
-        let result = build_track_path(&mock_track, base_music_dir, None).await.unwrap();
+        let result = build_track_path(&mock_track, base_music_dir).await.unwrap();
 
         let expected_filename = "2022_Artist_One_Artist_Two_Collaboration_Album_010_Collaboration_Track.ogg";
         assert_eq!(result.file_name().unwrap(), expected_filename);
@@ -208,7 +201,7 @@ mod tests {
             track_number: 2,
         };
 
-        let result = build_track_path(&mock_track, base_music_dir, None).await.unwrap();
+        let result = build_track_path(&mock_track, base_music_dir).await.unwrap();
 
         let expected_filename = "2021_Artist_With_Bad_Chars_Album_Deluxe_Edition_002_Track_With_Special_Chars.ogg";
         assert_eq!(result.file_name().unwrap(), expected_filename);

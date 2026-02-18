@@ -26,7 +26,6 @@ async fn cache_tracks_with_entries<'a, I>(
     tracks: I,
     total_tracks: usize,
     base_dir: &str,
-    track_prefix: Option<fn(usize) -> String>,
     collect_album_covers: bool,
     tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
     task_id: uuid::Uuid,
@@ -60,8 +59,7 @@ where
         let track_display = format_track_display(index + 1, total_tracks, &track_provider.name().await);
         tracing::info!("{}", track_display);
 
-        let prefix = track_prefix.map(|f| f(index + 1));
-        let output_path = build_track_path(&*track_provider, base_dir, prefix).await?;
+        let output_path = build_track_path(&*track_provider, base_dir).await?;
 
         match process_track_cache(track_fetcher, audio_downloader, image_downloader, &*track_provider, track_uri, &output_path, &file_id).await {
             Ok(()) => {
@@ -149,8 +147,6 @@ pub async fn cache_track_collection<'a, I>(
     tracks: I,
     total_tracks: usize,
     base_dir: &str,
-    track_prefix: Option<fn(usize) -> String>,
-    _collection_name: &str,
     m3u_path: PathBuf,
     spotify_url: Option<String>,
     cover_art_bytes: Option<Vec<u8>>,
@@ -169,7 +165,6 @@ where
         tracks,
         total_tracks,
         base_dir,
-        track_prefix,
         collect_album_covers,
         tx,
         task_id,
@@ -257,8 +252,6 @@ pub async fn cache_album(
         track_uris.iter(),
         total_tracks,
         music_dir_str,
-        None,
-        "Album",
         m3u_path,
         spotify_url,
         cover_art,
@@ -328,8 +321,6 @@ pub async fn cache_playlist(
         track_uris.iter(),
         total_tracks,
         music_dir_str,
-        None,
-        "Playlist",
         m3u_path,
         spotify_url,
         cover_art,
