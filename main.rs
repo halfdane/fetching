@@ -3,10 +3,7 @@ use tokio::sync::{mpsc, broadcast};
 use fetching_core::{spawn_task_processor, queue_uri_tasks, Task};
 use server_lib::server::setup_and_run_server;
 
-use uuid::Uuid;
-
 use fetching_core::create_session;
-use fetching_core::config::Config;
 
 
 #[derive(Parser)]
@@ -50,10 +47,8 @@ async fn main() -> anyhow::Result<()> {
 async fn run_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    let config = Config::from_env();
-
     let token_path = ".spotify_access_token";
-    let (session, _refresher, _refresh_handle) = fetching_core::create_session(token_path).await?;
+    let (session, _refresher, _refresh_handle) = create_session(token_path).await?;
     let (progress_tx, _progress_rx) = broadcast::channel(100);
     let (task_tx, task_rx) = mpsc::channel::<Task>(100);
 
@@ -63,9 +58,8 @@ async fn run_cli() -> anyhow::Result<()> {
         Commands::Batch { urls } => {
             queue_uri_tasks(urls, task_tx.clone()).await?;
             drop(task_tx);
-            let mut any_error = false;
-            any_error = processor_handle.await.unwrap_or(true);
-           if any_error {
+            let any_error = processor_handle.await.unwrap_or(true);
+            if any_error {
                 std::process::exit(1);
             }
         }
@@ -76,23 +70,4 @@ async fn run_cli() -> anyhow::Result<()> {
 
     Ok(())
 }
-
-
-async fn run_cli_new(urls: Vec<String>) -> anyhow::Result<()> {
-    let token_path = ".spotify_access_token";
-    let (session, _refresher, _refresh_handle) = create_session(token_path).await?;
-    
-    let (progress_tx, _progress_rx) = broadcast::channel(100);
-    let (task_tx, task_rx) = mpsc::channel::<Task>(100);
-    let processor_handle = spawn_task_processor(&session, task_rx, progress_tx.clone());  // &session
-        
-    queue_uri_tasks(urls, task_tx.clone()).await?;
-    drop(task_tx);
-    
-    let any_error = processor_handle.await.unwrap_or(true);
-
-    Ok(())
-}
-
-
 

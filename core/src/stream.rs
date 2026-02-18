@@ -11,7 +11,6 @@ use librespot_core::file_id::FileId;
 use librespot_core::session::Session;
 use librespot_core::SpotifyUri;
 use tokio::time::{sleep, Duration};
-use tracing::debug;
 
 use crate::traits::AudioDownloader;
 

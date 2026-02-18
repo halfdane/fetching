@@ -18,7 +18,6 @@ pub mod implementations;
 pub mod metadata;
 pub mod stream;
 pub mod playback;
-use std::sync::Arc;
 
 // Re-export create_session if needed
 pub use auth::session::create_session;
