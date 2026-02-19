@@ -1,14 +1,11 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 
-// Removed duplicate process_url_from_args; only process_url is required by spec.
-// Library interface for integration tests
-use uuid::Uuid;
-use anyhow;
-use tokio::sync::{mpsc, broadcast};
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
+use uuid::Uuid;
 
 pub mod auth;
 pub mod cache;
@@ -45,7 +42,6 @@ pub enum ProgressScope {
     Playlist,
     Global,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Task {
@@ -95,7 +91,6 @@ impl SharedQueue {
         drop(tasks);
         tracing::info!(">>> START PROCESSING {}: {}", task.task_id, task.uri);
 
-        // FULL BLOCKING OFFLOAD
         let session = Arc::clone(&self.session);
         let config_guard = self.config.read().await;
         let config = (*config_guard).clone();  // Or & if deref
@@ -123,7 +118,6 @@ impl SharedQueue {
         len == 0
     }
 
-    // lib.rs: Add idle timeout param
     pub fn run_worker(self: Arc<Self>, idle_timeout: Duration) -> JoinHandle<()> {
         let queue_clone = Arc::clone(&self);
         tokio::spawn(async move {
@@ -134,7 +128,7 @@ impl SharedQueue {
                         tracing::info!("Idle timeout, worker exiting");
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
                     continue;
                 }
                 if queue_clone.process_next().await.is_some() {

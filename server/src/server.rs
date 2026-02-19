@@ -2,9 +2,9 @@ use axum::{Router, routing::get, response::IntoResponse, extract::{State, Json}}
 use axum::response::sse::{Sse, Event};
 use serde::{Deserialize};
 use uuid::Uuid;
-use tokio::sync::{mpsc, broadcast};
+use tokio::sync::broadcast;
 use std::sync::Arc;
-use fetching_core::{ProgressUpdate, ProgressScope, Task, SharedQueue};
+use fetching_core::{ProgressUpdate, ProgressScope, SharedQueue};
 use tower_http::services::ServeDir;
 
 
@@ -67,7 +67,6 @@ async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Sse::new(stream)
 }
 
-
 pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
         .nest_service("/", ServeDir::new("server/static").not_found_service(axum::routing::get(|| async { axum::http::StatusCode::NOT_FOUND })))
@@ -75,15 +74,6 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/api/status", get(get_status))
         .route("/events", get(events))
         .with_state(state)
-}
-
-pub async fn setup_and_run_server(
-    queue: SharedQueue,
-    progress_tx: broadcast::Sender<ProgressUpdate>,
-    port: u16,
-) -> anyhow::Result<()> {
-    
-    Ok(())
 }
 
 #[cfg(test)]

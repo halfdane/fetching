@@ -1,12 +1,9 @@
+use clap::{Parser, Subcommand};
+use fetching_core::{config, SharedQueue};
+use server_lib::server::{app, AppState};
 use std::sync::Arc;
 use std::time::Duration;
-use clap::{Parser, Subcommand};
-use tokio::signal;
-use tokio::sync::{mpsc, broadcast};
-use uuid::Uuid;
-use fetching_core::{SharedQueue, Task, processor, config};
-use server_lib::server::{app, setup_and_run_server, AppState};
-
+use tokio::sync::broadcast;
 use fetching_core::create_session;
 
 
@@ -49,33 +46,24 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    run_cli().await?;
-
-    Ok(())
-}
-
-async fn run_cli() -> anyhow::Result<()> {
     let cli = Cli::parse();
-
     match cli.command {
         Commands::Batch { urls, credentials_file, queue } => {
             let (raw_session, _refresher, _refresh_handle) = create_session(&credentials_file).await?;
             let (progress_tx, _progress_rx) = broadcast::channel(100);
-            let session = Arc::new(raw_session);  // CRITICAL: Arc<Session>
+            let session = Arc::new(raw_session);
             let config = config::Config::from_env();
             let shared_queue = Arc::new(SharedQueue::new(session, config, progress_tx.clone()));
 
-            tracing::info!("About to add_tasks with {} URLs", urls.len());  // CLI arg count
+            tracing::info!("About to add_tasks with {} URLs", urls.len());
             shared_queue.add_tasks(urls).await;
             tracing::info!("add_tasks done, queue len: {}", {shared_queue.tasks.read().await}.len());
 
             if queue {
-                let worker = shared_queue.run_worker(Duration::from_secs(5));  // Exit 5s idle
-                tokio::select! {
-                    _ = worker => { tracing::info!("Worker completed"); }
-                }
+                let worker = shared_queue.run_worker(Duration::from_millis(700));
+                worker.await?;
             } else {
-                // Single: drain all sequentially (or .next() for true single)
+                // Single: drain all sequentially and wait for completion before exiting
                 while !shared_queue.is_empty().await {
                     let _ = shared_queue.process_next().await;
                 }
@@ -99,8 +87,6 @@ async fn run_cli() -> anyhow::Result<()> {
 
             let listener = tokio::net::TcpListener::bind(&format!("0.0.0.0:{}", port)).await?;
             tracing::info!("Server listening on http://0.0.0.0:{}", port);
-
-
 
             tokio::select! {
                 res = axum::serve(listener, app(app_state)) => {
