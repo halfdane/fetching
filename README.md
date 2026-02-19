@@ -1,6 +1,7 @@
 # fetching
 
-A lightweight Spotify streaming player written in Rust. Streams tracks, albums, and playlists with local caching for offline playback.
+A lightweight Spotify streaming player written in Rust. Streams tracks, albums, and playlists with local caching for
+offline playback.
 
 ## Features
 
@@ -43,20 +44,22 @@ Cached files are stored in `~/Music/` organized by artist and album.
 ### First Run
 
 On first run, the application will:
+
 1. Open your browser for Spotify OAuth authentication
 2. Save the access token to `.spotify_access_token`
 3. Cache credentials in `.cache/` directory
 
 Subsequent runs will reuse the cached credentials automatically.
+
 ## Configuration
 
 Environment variables (all optional):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MUSIC_DIR` | `~/Music` | Cache directory |
-| `TRACK_DELAY_MS` | `200` | Delay between operations (ms) |
-| `RUST_LOG` | `info` | Logging level |
+| Variable         | Default   | Description                   |
+|------------------|-----------|-------------------------------|
+| `MUSIC_DIR`      | `~/Music` | Cache directory               |
+| `TRACK_DELAY_MS` | `200`     | Delay between operations (ms) |
+| `RUST_LOG`       | `info`    | Logging level                 |
 
 ## License
 
@@ -68,4 +71,5 @@ Built with [librespot](https://github.com/librespot-org/librespot).
 
 ---
 
-**Note**: For personal use only. Respects Spotify's streaming infrastructure similar to official mobile apps with offline mode.
+**Note**: For personal use only. Respects Spotify's streaming infrastructure similar to official mobile apps with
+offline mode.

@@ -231,7 +231,7 @@ mod tests {
     use super::*;
     use axum::body::to_bytes;
     use hyper::http::{Request, StatusCode};
-    use tower::util::ServiceExt; // for `oneshot`
+    use tower::util::ServiceExt;
 
     use std::sync::Arc as StdArc;
     use tokio::sync::{broadcast, mpsc};

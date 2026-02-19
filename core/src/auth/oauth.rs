@@ -41,8 +41,8 @@ pub(crate) async fn refresh_access_token(refresh_token: &str) -> anyhow::Result<
         REDIRECT_URI,
         SCOPES.to_vec(),
     )
-    .build()
-    .context("Failed to build OAuth client")?;
+        .build()
+        .context("Failed to build OAuth client")?;
 
     let oauth_token = oauth_client
         .refresh_token_async(refresh_token)
@@ -78,11 +78,11 @@ pub(crate) async fn perform_oauth_flow(credentials_path: &str) -> anyhow::Result
         REDIRECT_URI,
         SCOPES.to_vec(),
     )
-    .open_in_browser()
-    .build()
-    .context("Failed to build OAuth client")?
-    .get_access_token()
-    .context("Failed to get access token")?;
+        .open_in_browser()
+        .build()
+        .context("Failed to build OAuth client")?
+        .get_access_token()
+        .context("Failed to get access token")?;
 
     // Convert Instant to Unix timestamp
     // oauth_token.expires_at is an Instant representing when token expires

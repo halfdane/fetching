@@ -1,15 +1,16 @@
-
 # Web API Security Guidance
 
 ## No Built-in Authentication
 
-This service does **not** implement any built-in authentication or authorization. All API and SSE endpoints are open to anyone who can reach the server.
+This service does **not** implement any built-in authentication or authorization. All API and SSE endpoints are open to
+anyone who can reach the server.
 
 ## Critical Warning
 
 **Do NOT expose this service to the public internet!**
 
-Anyone with network access to the server can queue downloads, view status, and access all features. There are no passwords, tokens, or user accounts.
+Anyone with network access to the server can queue downloads, view status, and access all features. There are no
+passwords, tokens, or user accounts.
 
 ## Recommended Deployment
 
@@ -23,4 +24,5 @@ The codebase can be refactored later to support authentication (e.g., static tok
 
 ---
 **Summary:**
-This service is designed for private/internal use only. Always restrict access at the network level. For public or multi-user deployments, add authentication before exposing the service.
+This service is designed for private/internal use only. Always restrict access at the network level. For public or
+multi-user deployments, add authentication before exposing the service.

@@ -103,7 +103,7 @@ async fn test_m3u_playlist_with_mock_provider() {
             },
             temp_dir.path().join("song1.ogg"),
         )
-        .await,
+            .await,
         build_m3u_entry(
             &TestTrackProvider {
                 name: "Song Two".to_string(),
@@ -112,7 +112,7 @@ async fn test_m3u_playlist_with_mock_provider() {
             },
             temp_dir.path().join("song2.ogg"),
         )
-        .await,
+            .await,
     ];
 
     write_m3u_playlist(&playlist_path, &entries, Some("spotify:playlist:test")).unwrap();

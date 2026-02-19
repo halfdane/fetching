@@ -9,6 +9,7 @@
 - **Frontend**: Simple static HTML/JS served by Axum, with live updates via SSE.
 
 **Key Technologies:**
+
 - **Axum**: Modern Rust web framework (async, Tokio-based).
 - **SSE (Server-Sent Events)**: For real-time progress updates (simpler than WebSockets for this use case).
 - **Workspace**: Clean separation between core logic and web server.

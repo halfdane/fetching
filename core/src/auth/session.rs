@@ -72,13 +72,3 @@ pub async fn create_authenticated_session(
     session.connect(credentials, false).await?;
     Ok(session)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tempfile::NamedTempFile;
-    use tokio::time::{Duration, timeout};
-
-    // Obsolete test for file writing/removal removed. Only session creation tests remain.
-}

@@ -1,78 +1,126 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Spotify Player Web GUI</title>
-  <style>
-    body { font-family: sans-serif; margin: 2em; background: #181818; color: #fff; }
-    h1 { color: #1db954; }
-    form { margin-bottom: 1.5em; }
-    input[type="text"] { width: 350px; padding: 0.5em; border-radius: 4px; border: none; }
-    button { background: #1db954; color: #fff; border: none; padding: 0.5em 1em; border-radius: 4px; cursor: pointer; }
-    table { width: 100%; border-collapse: collapse; margin-top: 1em; background: #222; }
-    th, td { padding: 0.5em 1em; border-bottom: 1px solid #333; }
-    th { background: #282828; }
-    tr:last-child td { border-bottom: none; }
-    .status { font-weight: bold; }
-  </style>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Spotify Player Web GUI</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 2em;
+            background: #181818;
+            color: #fff;
+        }
+
+        h1 {
+            color: #1db954;
+        }
+
+        form {
+            margin-bottom: 1.5em;
+        }
+
+        input[type="text"] {
+            width: 350px;
+            padding: 0.5em;
+            border-radius: 4px;
+            border: none;
+        }
+
+        button {
+            background: #1db954;
+            color: #fff;
+            border: none;
+            padding: 0.5em 1em;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+            background: #222;
+        }
+
+        th, td {
+            padding: 0.5em 1em;
+            border-bottom: 1px solid #333;
+        }
+
+        th {
+            background: #282828;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .status {
+            font-weight: bold;
+        }
+    </style>
 </head>
 <body>
-  <h1>Spotify Player</h1>
-  <form id="queue-form">
-    <input type="text" id="url-input" placeholder="Paste Spotify URL (track, album, playlist)" required />
+<h1>Spotify Player</h1>
+<form id="queue-form">
+    <input id="url-input" placeholder="Paste Spotify URL (track, album, playlist)" required type="text"/>
     <button type="submit">Queue</button>
-  </form>
-  <table id="tasks-table">
+</form>
+<table id="tasks-table">
     <thead>
-      <tr><th>Task ID</th><th>URL</th><th>Status</th></tr>
+    <tr>
+        <th>Task ID</th>
+        <th>URL</th>
+        <th>Status</th>
+    </tr>
     </thead>
     <tbody id="tasks-body">
-      <!-- Tasks will appear here -->
+    <!-- Tasks will appear here -->
     </tbody>
-  </table>
-  <script>
+</table>
+<script>
     const form = document.getElementById('queue-form');
     const urlInput = document.getElementById('url-input');
     const tasksBody = document.getElementById('tasks-body');
     const tasks = {};
 
     form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const url = urlInput.value.trim();
-      if (!url) return;
-      const res = await fetch('/api/queue', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
-      });
-      if (res.ok) {
-        urlInput.value = '';
-      } else {
-        alert('Failed to queue URL');
-      }
+        e.preventDefault();
+        const url = urlInput.value.trim();
+        if (!url) return;
+        const res = await fetch('/api/queue', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url})
+        });
+        if (res.ok) {
+            urlInput.value = '';
+        } else {
+            alert('Failed to queue URL');
+        }
     });
 
     function renderTasks() {
-      tasksBody.innerHTML = '';
-      Object.values(tasks).forEach(task => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${task.task_id}</td><td>${task.url}</td><td class="status">${task.status}</td>`;
-        tasksBody.appendChild(tr);
-      });
+        tasksBody.innerHTML = '';
+        Object.values(tasks).forEach(task => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${task.task_id}</td><td>${task.url}</td><td class="status">${task.status}</td>`;
+            tasksBody.appendChild(tr);
+        });
     }
 
     // SSE for live updates
     const evtSource = new EventSource('/events');
     evtSource.onmessage = (event) => {
-      try {
-        const update = JSON.parse(event.data);
-        tasks[update.task_id] = update;
-        renderTasks();
-      } catch (e) {
-        // Ignore parse errors
-      }
+        try {
+            const update = JSON.parse(event.data);
+            tasks[update.task_id] = update;
+            renderTasks();
+        } catch (e) {
+            // Ignore parse errors
+        }
     };
-  </script>
+</script>
 </body>
 </html>

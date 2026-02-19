@@ -10,7 +10,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::cache::helpers::build_temp_path;
 use crate::error::DownloadError;
-use crate::metadata::{TrackMetadata, write_ogg_tags};
+use crate::metadata::{write_ogg_tags, TrackMetadata};
 use crate::stream::stream_and_cache_track;
 use crate::traits::TrackMetadataProvider;
 
@@ -259,7 +259,7 @@ pub async fn process_track_cache(
         temp_path_str,
         None, // Use default retry delays in production
     )
-    .await
+        .await
     {
         if temp_path.exists() {
             if let Err(cleanup_err) = std::fs::remove_file(&temp_path) {

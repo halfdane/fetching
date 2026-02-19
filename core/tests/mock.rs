@@ -1,11 +1,12 @@
 /// Mock implementations for testing
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use fetching_core::traits::AudioDownloader;
-use librespot_core::SpotifyUri;
 use librespot_core::file_id::FileId;
-use std::sync::Mutex;
+use librespot_core::SpotifyUri;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+
 
 /// Mock audio downloader for testing retry logic and error scenarios
 pub struct MockAudioDownloader {

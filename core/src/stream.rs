@@ -7,10 +7,10 @@ use std::io::{Read, Write};
 
 use async_trait::async_trait;
 use librespot_audio::{AudioDecrypt, AudioFile};
-use librespot_core::SpotifyUri;
 use librespot_core::file_id::FileId;
 use librespot_core::session::Session;
-use tokio::time::{Duration, sleep};
+use librespot_core::SpotifyUri;
+use tokio::time::{sleep, Duration};
 
 use crate::traits::AudioDownloader;
 
@@ -133,7 +133,7 @@ async fn stream_to_cache(
         *file_id,
         (STREAMING_BUFFER_HINT_KBPS * 1024 / 8) as usize,
     )
-    .await?;
+        .await?;
     let (encrypted_reader, audio_key) = match audio_file {
         AudioFile::Streaming(stream) => {
             let track_id = match track_uri {

@@ -1,9 +1,9 @@
 mod mock;
 use fetching_core::stream::is_retriable_error;
 use fetching_core::traits::AudioDownloader;
+use librespot_core::file_id::FileId;
 use librespot_core::SpotifyId;
 use librespot_core::SpotifyUri;
-use librespot_core::file_id::FileId;
 use mock::MockAudioDownloader;
 use tempfile::TempDir;
 
@@ -123,7 +123,7 @@ async fn test_download_with_retry_succeeds_after_failures() {
         output_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO), // No delay in tests
     )
-    .await;
+        .await;
 
     // Should succeed after retries
     assert!(result.is_ok());
@@ -153,7 +153,7 @@ async fn test_download_fails_immediately_on_non_retriable_error() {
         output_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO), // No delay in tests
     )
-    .await;
+        .await;
 
     // Should fail immediately without retries
     assert!(result.is_err());
@@ -180,7 +180,7 @@ async fn test_download_exhausts_all_retries() {
         output_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO), // No delay in tests
     )
-    .await;
+        .await;
 
     // Should fail after exhausting retries
     assert!(result.is_err());
@@ -210,7 +210,7 @@ async fn test_download_succeeds_on_first_try() {
         output_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO), // No delay in tests
     )
-    .await;
+        .await;
 
     // Should succeed
     assert!(result.is_ok());

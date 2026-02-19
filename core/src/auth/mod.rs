@@ -93,10 +93,3 @@ pub async fn get_credentials(credentials_path: &str) -> anyhow::Result<Credentia
         token_data: Some(token_data),
     })
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use tempfile::NamedTempFile;
-}

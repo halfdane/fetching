@@ -6,14 +6,14 @@
 use librespot_core::SpotifyUri;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 use tracing::info;
 use uuid;
 
 use crate::cache::helpers::{format_track_display, get_artist_name_from_vec};
 use crate::cache::images::save_cover_art;
 use crate::cache::processors::{get_track_with_ogg_format, process_track_cache};
-use crate::m3u::{M3uEntry, write_m3u_playlist};
+use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, sanitize};
 
 pub const TRACK_DELAY_MS: u64 = 200;
@@ -31,7 +31,7 @@ async fn cache_tracks_with_entries<'a, I>(
     task_id: uuid::Uuid,
 ) -> anyhow::Result<(Vec<M3uEntry>, Vec<Vec<u8>>, Vec<PathBuf>)>
 where
-    I: Iterator<Item = &'a SpotifyUri>,
+    I: Iterator<Item=&'a SpotifyUri>,
 {
     let mut m3u_entries = Vec::new();
     let mut unique_album_covers: Vec<Vec<u8>> = Vec::new();
@@ -76,7 +76,7 @@ where
             &output_path,
             &file_id,
         )
-        .await
+            .await
         {
             Ok(()) => {
                 // Collect album cover for collage if needed
@@ -87,7 +87,7 @@ where
                         &mut unique_album_covers,
                         &mut seen_album_ids,
                     )
-                    .await
+                        .await
                     {
                         tracing::warn!("Failed to collect album cover: {}", e);
                     }
@@ -168,7 +168,7 @@ pub async fn cache_track_collection<'a, I>(
     task_id: uuid::Uuid,
 ) -> anyhow::Result<Vec<PathBuf>>
 where
-    I: Iterator<Item = &'a SpotifyUri>,
+    I: Iterator<Item=&'a SpotifyUri>,
 {
     // Cache all tracks and collect M3U entries
     let (m3u_entries, unique_album_covers, cached_paths) = cache_tracks_with_entries(
@@ -182,7 +182,7 @@ where
         tx,
         task_id,
     )
-    .await?;
+        .await?;
 
     // Save cover art (provided or collage)
     if let Err(e) = save_cover_art(&m3u_path, cover_art_bytes, &unique_album_covers) {
@@ -274,7 +274,7 @@ pub async fn cache_album(
         tx,
         task_id,
     )
-    .await
+        .await
 }
 
 /// Prepare playlist directory and M3U file path
@@ -345,5 +345,5 @@ pub async fn cache_playlist(
         tx,
         task_id,
     )
-    .await
+        .await
 }

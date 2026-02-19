@@ -4,7 +4,8 @@ This document describes the automatic token refresh system that keeps your Spoti
 
 ## Overview
 
-The token refresh system uses a background task to proactively monitor and refresh OAuth tokens before they expire, eliminating the need for repeated browser-based authentication during long-running operations.
+The token refresh system uses a background task to proactively monitor and refresh OAuth tokens before they expire,
+eliminating the need for repeated browser-based authentication during long-running operations.
 
 ## Architecture Diagram
 
@@ -102,6 +103,7 @@ Time    Event                                       Action
 ## Data Structures
 
 ### TokenData (Stored on Disk)
+
 ```rust
 {
   "access_token": "BQC8xK2...",      // Used for API authentication
@@ -113,6 +115,7 @@ Time    Event                                       Action
 Stored at: `.spotify_access_token` (JSON format)
 
 ### TokenRefresher (In-Memory)
+
 ```rust
 pub struct TokenRefresher {
     credentials_path: String,                     // Path to credentials file
@@ -122,16 +125,17 @@ pub struct TokenRefresher {
 
 ## Configuration
 
-| Setting | Value | Description |
-|---------|-------|-------------|
-| Check interval | 5 minutes | How often background task checks expiration |
-| Refresh threshold | 10 minutes | Refresh when token expires within this window |
-| Token validity | ~60 minutes | Spotify's default access token lifetime |
-| Expiration buffer | 5 minutes | Safety margin for `is_token_expired()` checks |
+| Setting           | Value       | Description                                   |
+|-------------------|-------------|-----------------------------------------------|
+| Check interval    | 5 minutes   | How often background task checks expiration   |
+| Refresh threshold | 10 minutes  | Refresh when token expires within this window |
+| Token validity    | ~60 minutes | Spotify's default access token lifetime       |
+| Expiration buffer | 5 minutes   | Safety margin for `is_token_expired()` checks |
 
 ## Usage
 
 ### Recommended (with auto-refresh)
+
 ```rust
 let (session, _refresher, _refresh_handle) = 
     create_session_with_auto_refresh(".spotify_access_token").await?;
@@ -141,6 +145,7 @@ cache_album(&session, album_uri, music_dir).await?;
 ```
 
 ### Manual (not recommended for long operations)
+
 ```rust
 let credentials = get_credentials(".spotify_access_token").await?;
 let session = create_authenticated_session(credentials).await?;
@@ -151,12 +156,14 @@ let session = create_authenticated_session(credentials).await?;
 ## Error Handling
 
 ### Automatic Recovery
+
 - **Token refresh fails**: Logged as warning, retried on next cycle
 - **Invalid refresh token**: Falls back to full OAuth flow (browser)
 - **Network timeout**: Logged, retried on next cycle
 - **Disk write fails**: Token still updated in-memory, logged as warning
 
 ### Manual Intervention Required
+
 - **Browser OAuth fails**: User must provide valid credentials
 - **Bad credentials**: Token file deleted, triggers re-authentication
 
@@ -167,16 +174,18 @@ let session = create_authenticated_session(credentials).await?;
 ✅ **Resilient**: Handles network issues gracefully  
 ✅ **Efficient**: Only refreshes when needed (not every API call)  
 ✅ **Persistent**: Saves refreshed tokens for next run  
-✅ **Observable**: Logs all refresh attempts for debugging  
+✅ **Observable**: Logs all refresh attempts for debugging
 
 ## Logging
 
 Enable detailed logs with:
+
 ```bash
 RUST_LOG=debug cargo run -- <spotify_uri>
 ```
 
 Look for:
+
 - `Background token refresh task started` - Task initialization
 - `Token expiring soon, refreshing in background...` - Refresh triggered
 - `Background token refresh successful` - Refresh completed
@@ -185,11 +194,13 @@ Look for:
 ## Testing
 
 Run auth module tests:
+
 ```bash
 cargo test --lib auth
 ```
 
 Tests cover:
+
 - Token expiration detection
 - Token save/load roundtrip
 - TokenRefresher initialization

@@ -2,9 +2,9 @@ mod mock;
 
 use fetching_core::cache::helpers::build_temp_path;
 use fetching_core::stream::stream_and_cache_track;
+use librespot_core::file_id::FileId;
 use librespot_core::SpotifyId;
 use librespot_core::SpotifyUri;
-use librespot_core::file_id::FileId;
 use mock::MockAudioDownloader;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -33,7 +33,7 @@ async fn test_successful_download_removes_temp_file() {
         temp_path_str.to_str().unwrap(),
         Some(std::time::Duration::ZERO),
     )
-    .await;
+        .await;
 
     assert!(result.is_ok());
 
@@ -58,7 +58,7 @@ async fn test_failed_download_leaves_no_temp_file() {
         temp_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO),
     )
-    .await;
+        .await;
 
     assert!(result.is_err());
 
@@ -82,7 +82,7 @@ async fn test_retry_scenario_no_partial_files() {
         temp_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO),
     )
-    .await;
+        .await;
 
     assert!(result.is_ok());
 
@@ -132,7 +132,7 @@ async fn test_exhausted_retries_no_temp_file() {
         temp_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO),
     )
-    .await;
+        .await;
 
     assert!(result.is_err());
 
@@ -160,7 +160,7 @@ async fn test_pre_existing_temp_file_not_interfere() {
         temp_path.to_str().unwrap(),
         Some(std::time::Duration::ZERO),
     )
-    .await;
+        .await;
 
     assert!(result.is_ok());
 

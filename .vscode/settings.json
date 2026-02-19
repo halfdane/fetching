@@ -1,11 +1,11 @@
 {
-    "nixEnvSelector.nixFile": "${workspaceFolder}/flake.nix",
-    "chat.tools.terminal.autoApprove": {
-        "cargo test": true,
-        "/^cargo check$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "cargo check": true
-    }
+  "nixEnvSelector.nixFile": "${workspaceFolder}/flake.nix",
+  "chat.tools.terminal.autoApprove": {
+    "cargo test": true,
+    "/^cargo check$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "cargo check": true
+  }
 }

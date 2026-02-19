@@ -85,7 +85,7 @@ pub async fn handle_track(
         &output_path,
         &file_id,
     )
-    .await?;
+        .await?;
 
     tx.send(crate::ProgressUpdate {
         task_id,
@@ -131,7 +131,7 @@ async fn handle_album(
         tx.clone(),
         task_id,
     )
-    .await?;
+        .await?;
 
     tx.send(crate::ProgressUpdate {
         task_id,
@@ -177,7 +177,7 @@ async fn handle_playlist(
         tx.clone(),
         task_id,
     )
-    .await?;
+        .await?;
     tx.send(crate::ProgressUpdate {
         task_id,
         scope: crate::ProgressScope::Playlist,
