@@ -69,10 +69,9 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let (raw_session, _refresher, _refresh_handle) =
                 create_session(&credentials_file).await?;
-            let (progress_tx, _progress_rx) = broadcast::channel(100);
             let session = Arc::new(raw_session);
             let config = config::Config::from_env();
-            let shared_queue = Arc::new(SharedQueue::new(session, config, progress_tx.clone()));
+            let (shared_queue, mut progress_rx) = SharedQueue::new(session, config, 100);
 
             tracing::info!("About to add_tasks with {} URLs", urls.len());
             shared_queue.add_tasks(urls).await;
@@ -82,8 +81,17 @@ async fn main() -> anyhow::Result<()> {
             );
 
             if queue {
-                let worker = shared_queue.run_worker(Duration::from_millis(700));
-                worker.await?;
+                let worker = shared_queue.run_worker(Duration::from_secs(10));
+
+                let progress_handle = tokio::spawn(async move {
+                    while let Ok(update) = progress_rx.recv().await {
+                        println!("Task {}: {} {}/{}",
+                                 update.task_id, update.status, update.current, update.total);
+                    }
+                    println!("Queue complete!");
+                });
+
+                tokio::try_join!(worker, progress_handle)?;
             } else {
                 // Single: drain all sequentially and wait for completion before exiting
                 while !shared_queue.is_empty().await {
@@ -99,16 +107,14 @@ async fn main() -> anyhow::Result<()> {
             let (raw_session, _refresher, _refresh_handle) =
                 create_session(&credentials_file).await?;
             let session = Arc::new(raw_session);
-            let (progress_tx, _progress_rx) = broadcast::channel(100);
             let config = config::Config::from_env();
-            let shared_queue = Arc::new(SharedQueue::new(session, config, progress_tx.clone()));
+            let (shared_queue, mut progress_rx) = SharedQueue::new(session, config, 100);
 
-            let queue_worker = shared_queue.clone(); // Clone FIRST for worker
-            let worker = queue_worker.run_worker(Duration::from_secs(3600));
+            let queue_worker = shared_queue.clone();
+            let worker = queue_worker.run_worker(Duration::MAX);
 
             let app_state = Arc::new(AppState {
                 queue: shared_queue.clone(), // Now safe
-                progress_tx: progress_tx.clone(),
             });
 
             let listener = tokio::net::TcpListener::bind(&format!("0.0.0.0:{}", port)).await?;
@@ -121,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 _ = worker => { tracing::warn!("Worker exited"); }
-            };
+            }
         }
     }
 

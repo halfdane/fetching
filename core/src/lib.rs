@@ -61,16 +61,18 @@ unsafe impl Sync for SharedQueue {}
 
 impl SharedQueue {
     pub fn new(
-        session: Arc<librespot_core::Session>, // Accept Arc
+        session: Arc<librespot_core::Session>,
         config: config::Config,
-        progress_tx: broadcast::Sender<ProgressUpdate>,
-    ) -> Self {
-        Self {
+        capacity: usize,
+    ) -> (Arc<Self>, broadcast::Receiver<ProgressUpdate>) {
+        let (progress_tx, progress_rx) = broadcast::channel(capacity);
+        let queue = Arc::new(Self {
             session,
             tasks: Arc::new(RwLock::new(Vec::new())),
             config: Arc::new(RwLock::new(config)),
             progress_tx,
-        }
+        });
+        (queue, progress_rx)
     }
 
     pub async fn add_tasks(&self, uris: Vec<String>) {
@@ -147,5 +149,9 @@ impl SharedQueue {
                 }
             }
         })
+    }
+
+    pub fn progress_tx(&self) -> tokio::sync::broadcast::Sender<ProgressUpdate> {
+        self.progress_tx.clone()
     }
 }
