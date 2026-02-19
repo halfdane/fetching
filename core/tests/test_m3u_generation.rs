@@ -1,4 +1,4 @@
-use fetching_core::m3u::{write_m3u_playlist, M3uEntry};
+use fetching_core::m3u::{M3uEntry, write_m3u_playlist};
 use tempfile::TempDir;
 
 #[test]

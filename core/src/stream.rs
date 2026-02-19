@@ -7,10 +7,10 @@ use std::io::{Read, Write};
 
 use async_trait::async_trait;
 use librespot_audio::{AudioDecrypt, AudioFile};
+use librespot_core::SpotifyUri;
 use librespot_core::file_id::FileId;
 use librespot_core::session::Session;
-use librespot_core::SpotifyUri;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 use crate::traits::AudioDownloader;
 
@@ -76,9 +76,19 @@ pub async fn stream_and_cache_track<D: AudioDownloader + ?Sized>(
         if attempt > 0 {
             let delay = retry_delay_override.unwrap_or_else(|| calculate_retry_delay(attempt));
             if delay > Duration::ZERO {
-                let err_msg = last_error.unwrap_or_else(|| anyhow::anyhow!("Something went wrong getting the error message after retries: {}", MAX_RETRIES));
+                let err_msg = last_error.unwrap_or_else(|| {
+                    anyhow::anyhow!(
+                        "Something went wrong getting the error message after retries: {}",
+                        MAX_RETRIES
+                    )
+                });
 
-                tracing::info!("Retrying streaming (attempt {} of {}) after error: {}", attempt + 1, MAX_RETRIES, err_msg);
+                tracing::info!(
+                    "Retrying streaming (attempt {} of {}) after error: {}",
+                    attempt + 1,
+                    MAX_RETRIES,
+                    err_msg
+                );
 
                 sleep(delay).await;
             }
@@ -255,9 +265,11 @@ mod tests {
         assert!(output.starts_with(b"OggS\x00\x02"));
 
         // Verify content is present
-        assert!(output
-            .windows(b"actual audio data here".len())
-            .any(|w| w == b"actual audio data here"));
+        assert!(
+            output
+                .windows(b"actual audio data here".len())
+                .any(|w| w == b"actual audio data here")
+        );
 
         // Verify byte count
         assert_eq!(bytes_written, b"OggS\x00\x02actual audio data here".len());

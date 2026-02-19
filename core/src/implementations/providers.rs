@@ -49,7 +49,12 @@ impl crate::traits::TrackMetadataProvider for OwnedLibrespotTrackProvider {
     }
 
     async fn album_artist_names(&self) -> Vec<String> {
-        self.track.album.artists.iter().map(|a| a.name.clone()).collect()
+        self.track
+            .album
+            .artists
+            .iter()
+            .map(|a| a.name.clone())
+            .collect()
     }
     async fn disc_number(&self) -> u32 {
         self.track.disc_number as u32
@@ -77,6 +82,10 @@ impl crate::traits::TrackMetadataProvider for OwnedLibrespotTrackProvider {
     }
 
     async fn alternative_uris(&self) -> Vec<String> {
-        self.track.alternatives.iter().map(|uri| uri.to_string()).collect()
+        self.track
+            .alternatives
+            .iter()
+            .map(|uri| uri.to_string())
+            .collect()
     }
 }

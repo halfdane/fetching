@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 
-use crate::traits::TrackMetadataProvider;
 use crate::metadata::validation::sanitize;
+use crate::traits::TrackMetadataProvider;
 
 /// Build the output path for a track (directory structure + filename)
 ///
@@ -18,7 +18,8 @@ pub async fn build_track_path<T: TrackMetadataProvider + ?Sized>(
     base_music_dir: &str,
 ) -> anyhow::Result<PathBuf> {
     let date = track.date().await;
-    let year = date.as_ref()
+    let year = date
+        .as_ref()
         .and_then(|d| d.split('-').next())
         .and_then(|y| y.parse::<i32>().ok())
         .unwrap_or(0);
@@ -42,8 +43,8 @@ pub async fn build_track_path<T: TrackMetadataProvider + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::traits::TrackMetadataProvider;
+    use async_trait::async_trait;
 
     // Mock implementation for testing build_track_path
     #[derive(Debug)]
@@ -105,11 +106,17 @@ mod tests {
             Some("Mock Label".to_string())
         }
 
-        async fn get_file_id(&self, _format: &librespot_metadata::audio::AudioFileFormat) -> Option<librespot_core::file_id::FileId> {
+        async fn get_file_id(
+            &self,
+            _format: &librespot_metadata::audio::AudioFileFormat,
+        ) -> Option<librespot_core::file_id::FileId> {
             None
         }
 
-        async fn get_album_cover_file_id(&self, index: usize) -> Option<librespot_core::file_id::FileId> {
+        async fn get_album_cover_file_id(
+            &self,
+            index: usize,
+        ) -> Option<librespot_core::file_id::FileId> {
             if index == 0 {
                 Some(librespot_core::file_id::FileId::from_raw(&[1u8; 16]))
             } else {
@@ -181,7 +188,8 @@ mod tests {
 
         let result = build_track_path(&mock_track, base_music_dir).await.unwrap();
 
-        let expected_filename = "2022_Artist_One_Artist_Two_Collaboration_Album_010_Collaboration_Track.ogg";
+        let expected_filename =
+            "2022_Artist_One_Artist_Two_Collaboration_Album_010_Collaboration_Track.ogg";
         assert_eq!(result.file_name().unwrap(), expected_filename);
     }
 
@@ -200,7 +208,8 @@ mod tests {
 
         let result = build_track_path(&mock_track, base_music_dir).await.unwrap();
 
-        let expected_filename = "2021_Artist_With_Bad_Chars_Album_Deluxe_Edition_002_Track_With_Special_Chars.ogg";
+        let expected_filename =
+            "2021_Artist_With_Bad_Chars_Album_Deluxe_Edition_002_Track_With_Special_Chars.ogg";
         assert_eq!(result.file_name().unwrap(), expected_filename);
     }
 }

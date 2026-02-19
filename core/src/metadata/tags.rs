@@ -27,7 +27,10 @@ pub struct TrackMetadata {
 
 impl TrackMetadata {
     /// Extract metadata from a librespot Track.
-    pub async fn from_provider<T: TrackMetadataProvider + ?Sized>(provider: &T, cover_art: Option<Vec<u8>>) -> Self {
+    pub async fn from_provider<T: TrackMetadataProvider + ?Sized>(
+        provider: &T,
+        cover_art: Option<Vec<u8>>,
+    ) -> Self {
         // Extract artists
         let artists = provider.artist_names().await;
 
@@ -303,8 +306,8 @@ mod tests {
 
     #[test]
     fn test_path_construction() {
-        use std::path::PathBuf;
         use crate::metadata::validation::sanitize;
+        use std::path::PathBuf;
 
         let base_dir = "/tmp/music";
         let artist = "Test Artist";

@@ -104,22 +104,24 @@ pub(crate) async fn perform_oauth_flow(credentials_path: &str) -> anyhow::Result
         expires_at,
     };
 
-
     // Instead of saving to file, display credentials to user for manual storage
     println!("\n******************************************************");
     println!("Spotify authentication successful!");
-    println!("Please copy the following credentials and save them to a file (e.g., {}), then re-run the program with --credentials-file.", credentials_path);
+    println!(
+        "Please copy the following credentials and save them to a file (e.g., {}), then re-run the program with --credentials-file.",
+        credentials_path
+    );
     println!("\n----- BEGIN SPOTIFY CREDENTIALS -----");
     println!("{}", serde_json::to_string_pretty(&token_data).unwrap());
     println!("----- END SPOTIFY CREDENTIALS -----\n");
     println!("******************************************************\n");
 
-        // Wait for user to press Enter before continuing
-        use std::io::{self, Write};
-        print!("Press Enter to continue...");
-        io::stdout().flush().unwrap();
-        let mut _input = String::new();
-        io::stdin().read_line(&mut _input).unwrap();
+    // Wait for user to press Enter before continuing
+    use std::io::{self, Write};
+    print!("Press Enter to continue...");
+    io::stdout().flush().unwrap();
+    let mut _input = String::new();
+    io::stdin().read_line(&mut _input).unwrap();
 
     Ok(token_data)
 }

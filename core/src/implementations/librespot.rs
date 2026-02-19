@@ -2,8 +2,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use librespot_core::file_id::FileId;
 use librespot_core::SpotifyUri;
+use librespot_core::file_id::FileId;
 use librespot_metadata::Metadata;
 use reqwest;
 
@@ -28,7 +28,9 @@ pub struct LibrespotTrackFetcher<'a> {
 #[async_trait]
 impl crate::traits::TrackFetcher for LibrespotTrackFetcher<'_> {
     async fn fetch_track(&self, uri: &SpotifyUri) -> Result<librespot_metadata::track::Track> {
-        librespot_metadata::track::Track::get(self.session, uri).await.map_err(anyhow::Error::from)
+        librespot_metadata::track::Track::get(self.session, uri)
+            .await
+            .map_err(anyhow::Error::from)
     }
 }
 
@@ -39,7 +41,10 @@ pub struct LibrespotAlbumFetcher<'a> {
 
 #[async_trait]
 impl crate::traits::AlbumFetcher for LibrespotAlbumFetcher<'_> {
-    async fn fetch_album(&self, uri: &librespot_core::SpotifyUri) -> Result<Box<dyn crate::traits::metadata::AlbumMetadataProvider>> {
+    async fn fetch_album(
+        &self,
+        uri: &librespot_core::SpotifyUri,
+    ) -> Result<Box<dyn crate::traits::metadata::AlbumMetadataProvider>> {
         let album = librespot_metadata::album::Album::get(self.session, uri).await?;
         Ok(Box::new(LibrespotAlbumProvider { album }))
     }
@@ -85,7 +90,10 @@ impl<'a> std::fmt::Debug for LibrespotPlaylistFetcher<'a> {
 
 #[async_trait]
 impl crate::traits::PlaylistFetcher for LibrespotPlaylistFetcher<'_> {
-    async fn fetch_playlist(&self, uri: &librespot_core::SpotifyUri) -> Result<Box<dyn crate::traits::metadata::PlaylistMetadataProvider>> {
+    async fn fetch_playlist(
+        &self,
+        uri: &librespot_core::SpotifyUri,
+    ) -> Result<Box<dyn crate::traits::metadata::PlaylistMetadataProvider>> {
         let playlist = librespot_metadata::playlist::Playlist::get(self.session, uri).await?;
         Ok(Box::new(LibrespotPlaylistProvider { playlist }))
     }

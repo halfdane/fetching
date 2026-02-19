@@ -1,11 +1,10 @@
-
 mod mock;
-use mock::MockAudioDownloader;
 use fetching_core::stream::is_retriable_error;
 use fetching_core::traits::AudioDownloader;
-use librespot_core::file_id::FileId;
 use librespot_core::SpotifyId;
 use librespot_core::SpotifyUri;
+use librespot_core::file_id::FileId;
+use mock::MockAudioDownloader;
 use tempfile::TempDir;
 
 // Helper to create fake FileId and SpotifyUri for testing

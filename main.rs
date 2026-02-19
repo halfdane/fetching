@@ -1,11 +1,10 @@
 use clap::{Parser, Subcommand};
+use fetching_core::create_session;
 use fetching_core::{config, SharedQueue};
 use server_lib::server::{app, AppState};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
-use fetching_core::create_session;
-
 
 #[derive(Parser)]
 #[command(name = "fetching", version, about = "Spotify Player CLI", author)]
@@ -18,7 +17,12 @@ struct Cli {
 enum Commands {
     #[command(about = "Process Spotify URLs (batch mode)")]
     Batch {
-        #[arg(short = 'c', default_value = "credentials.json", long = "credentials-file", help = "Path to the credentials file")] 
+        #[arg(
+            short = 'c',
+            default_value = "credentials.json",
+            long = "credentials-file",
+            help = "Path to the credentials file"
+        )]
         credentials_file: String,
         /// Spotify track/album/playlist URLs (or @file.txt)
         #[arg(required = true, help = "One or more Spotify URLs")]
@@ -29,10 +33,20 @@ enum Commands {
     },
     #[command(about = "Start web server + download queue")]
     Server {
-        #[arg(short = 'c', default_value = "credentials.json", long = "credentials-file", help = "Path to the credentials file")] 
+        #[arg(
+            short = 'c',
+            default_value = "credentials.json",
+            long = "credentials-file",
+            help = "Path to the credentials file"
+        )]
         credentials_file: String,
         /// Port to listen on
-        #[arg(short, long, default_value_t = 8080, help = "Server port (overrides config)")]
+        #[arg(
+            short,
+            long,
+            default_value_t = 8080,
+            help = "Server port (overrides config)"
+        )]
         port: u16,
     },
 }
@@ -48,8 +62,13 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Commands::Batch { urls, credentials_file, queue } => {
-            let (raw_session, _refresher, _refresh_handle) = create_session(&credentials_file).await?;
+        Commands::Batch {
+            urls,
+            credentials_file,
+            queue,
+        } => {
+            let (raw_session, _refresher, _refresh_handle) =
+                create_session(&credentials_file).await?;
             let (progress_tx, _progress_rx) = broadcast::channel(100);
             let session = Arc::new(raw_session);
             let config = config::Config::from_env();
@@ -57,7 +76,10 @@ async fn main() -> anyhow::Result<()> {
 
             tracing::info!("About to add_tasks with {} URLs", urls.len());
             shared_queue.add_tasks(urls).await;
-            tracing::info!("add_tasks done, queue len: {}", {shared_queue.tasks.read().await}.len());
+            tracing::info!(
+                "add_tasks done, queue len: {}",
+                { shared_queue.tasks.read().await }.len()
+            );
 
             if queue {
                 let worker = shared_queue.run_worker(Duration::from_millis(700));
@@ -70,19 +92,23 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Server { port, credentials_file } => {
-            let (raw_session, _refresher, _refresh_handle) = create_session(&credentials_file).await?;
+        Commands::Server {
+            port,
+            credentials_file,
+        } => {
+            let (raw_session, _refresher, _refresh_handle) =
+                create_session(&credentials_file).await?;
             let session = Arc::new(raw_session);
             let (progress_tx, _progress_rx) = broadcast::channel(100);
             let config = config::Config::from_env();
             let shared_queue = Arc::new(SharedQueue::new(session, config, progress_tx.clone()));
 
-            let queue_worker = shared_queue.clone();  // Clone FIRST for worker
+            let queue_worker = shared_queue.clone(); // Clone FIRST for worker
             let worker = queue_worker.run_worker(Duration::from_secs(3600));
 
             let app_state = Arc::new(AppState {
-                queue: shared_queue.clone(),  // Now safe
-                progress_tx: progress_tx.clone()
+                queue: shared_queue.clone(), // Now safe
+                progress_tx: progress_tx.clone(),
             });
 
             let listener = tokio::net::TcpListener::bind(&format!("0.0.0.0:{}", port)).await?;
@@ -101,4 +127,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-

@@ -68,7 +68,9 @@ impl TokenRefresher {
                                 if new_token_data.refresh_token != ref_token {
                                     warn!("******************************************************");
                                     warn!("WARNING: Spotify issued a new refresh token.");
-                                    warn!("Please re-authenticate and update your credentials file before your next run, or you may need to re-authenticate again.");
+                                    warn!(
+                                        "Please re-authenticate and update your credentials file before your next run, or you may need to re-authenticate again."
+                                    );
                                     warn!("******************************************************");
                                 }
 
@@ -112,7 +114,7 @@ mod tests {
         let nonexistent_path = "/tmp/definitely_does_not_exist_token_67890.json";
         assert!(read_token_data(nonexistent_path).is_none());
     }
-    
+
     #[test]
     fn test_is_token_expired() {
         // Token expired 1 hour ago

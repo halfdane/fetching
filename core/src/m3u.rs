@@ -69,9 +69,15 @@ pub fn write_m3u_playlist(
 }
 
 /// Build an M3U entry from track metadata
-pub async fn build_m3u_entry(metadata: &dyn crate::traits::TrackMetadataProvider, output_path: std::path::PathBuf) -> M3uEntry {
+pub async fn build_m3u_entry(
+    metadata: &dyn crate::traits::TrackMetadataProvider,
+    output_path: std::path::PathBuf,
+) -> M3uEntry {
     let artist_names = metadata.artist_names().await;
-    let artist = artist_names.first().cloned().unwrap_or_else(|| "Unknown Artist".to_string());
+    let artist = artist_names
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "Unknown Artist".to_string());
 
     M3uEntry {
         duration: (metadata.duration_ms().await / 1000) as i32,

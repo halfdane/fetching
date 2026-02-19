@@ -4,10 +4,10 @@
 //! librespot implementation, enabling mocking in tests.
 
 pub mod audio;
-pub mod metadata;
 pub mod fetchers;
+pub mod metadata;
 
 // Re-exports for backward compatibility
 pub use audio::*;
-pub use metadata::*;
 pub use fetchers::*;
+pub use metadata::*;

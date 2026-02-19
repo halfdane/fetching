@@ -1,7 +1,7 @@
+use async_trait::async_trait;
 use fetching_core::{m3u::build_m3u_entry, traits::*};
 use librespot_core::file_id::FileId;
 use librespot_metadata::audio::AudioFileFormat;
-use async_trait::async_trait;
 use std::path::PathBuf;
 
 // Integration tests for cache functionality using mocks
@@ -16,15 +16,31 @@ struct MockTrackForM3uEntry {
 
 #[async_trait]
 impl TrackMetadataProvider for MockTrackForM3uEntry {
-    async fn name(&self) -> String { self.name.clone() }
-    async fn album_id(&self) -> String { "album".to_string() }
-    async fn album_name(&self) -> String { "album".to_string() }
-    async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
-    async fn duration_ms(&self) -> u32 { self.duration_ms }
-    async fn date(&self) -> Option<String> { Some("2023".to_string()) }
-    async fn track_number(&self) -> u32 { 1 }
-    async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> { None }
-    
+    async fn name(&self) -> String {
+        self.name.clone()
+    }
+    async fn album_id(&self) -> String {
+        "album".to_string()
+    }
+    async fn album_name(&self) -> String {
+        "album".to_string()
+    }
+    async fn artist_names(&self) -> Vec<String> {
+        self.artist_names.clone()
+    }
+    async fn duration_ms(&self) -> u32 {
+        self.duration_ms
+    }
+    async fn date(&self) -> Option<String> {
+        Some("2023".to_string())
+    }
+    async fn track_number(&self) -> u32 {
+        1
+    }
+    async fn get_file_id(&self, _format: &AudioFileFormat) -> Option<FileId> {
+        None
+    }
+
     async fn album_artist_names(&self) -> Vec<String> {
         vec!["Test Album Artist".to_string()]
     }
@@ -40,7 +56,7 @@ impl TrackMetadataProvider for MockTrackForM3uEntry {
     async fn label(&self) -> Option<String> {
         Some("Test Label".to_string())
     }
-    
+
     async fn get_album_cover_file_id(&self, _index: usize) -> Option<FileId> {
         None
     }
@@ -77,4 +93,3 @@ async fn test_build_m3u_entry_duration_rounding() {
 
     assert_eq!(entry.duration, 123); // Integer division truncates
 }
-

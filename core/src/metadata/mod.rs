@@ -10,5 +10,5 @@ pub mod validation;
 
 // Re-export the main functions for backward compatibility
 pub use builders::build_track_path;
-pub use tags::{write_ogg_tags, TrackMetadata};
+pub use tags::{TrackMetadata, write_ogg_tags};
 pub use validation::sanitize;

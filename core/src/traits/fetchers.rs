@@ -14,11 +14,17 @@ pub trait TrackFetcher: Send + Sync {
 #[async_trait]
 pub trait AlbumFetcher: Send + Sync {
     /// Fetch album metadata by URI
-    async fn fetch_album(&self, uri: &librespot_core::SpotifyUri) -> Result<Box<dyn crate::traits::metadata::AlbumMetadataProvider>>;
+    async fn fetch_album(
+        &self,
+        uri: &librespot_core::SpotifyUri,
+    ) -> Result<Box<dyn crate::traits::metadata::AlbumMetadataProvider>>;
 }
 
 /// Fetches playlist metadata from Spotify
 #[async_trait]
 pub trait PlaylistFetcher: Send + Sync + std::fmt::Debug {
-    async fn fetch_playlist(&self, uri: &librespot_core::SpotifyUri) -> anyhow::Result<Box<dyn crate::traits::metadata::PlaylistMetadataProvider>>;
+    async fn fetch_playlist(
+        &self,
+        uri: &librespot_core::SpotifyUri,
+    ) -> anyhow::Result<Box<dyn crate::traits::metadata::PlaylistMetadataProvider>>;
 }

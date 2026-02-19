@@ -37,22 +37,22 @@ pub async fn create_session(
     let session = create_authenticated_session(credentials.credentials.clone()).await?;
 
     // Get current token data for refresher
-        // Prefer file-based token data, else use in-memory token data from OAuth
-        let token_data = match super::token::read_token_data(credentials_path) {
-            Some(data) => data,
-            None => {
-                if let Some(token_data) = credentials.token_data.clone() {
-                    tracing::warn!(
-                        "\nWARNING: Credentials file not found or unreadable after authentication. Using in-memory credentials for this session.\n\
+    // Prefer file-based token data, else use in-memory token data from OAuth
+    let token_data = match super::token::read_token_data(credentials_path) {
+        Some(data) => data,
+        None => {
+            if let Some(token_data) = credentials.token_data.clone() {
+                tracing::warn!(
+                    "\nWARNING: Credentials file not found or unreadable after authentication. Using in-memory credentials for this session.\n\
     Token refresh will NOT work in future runs until you provide a credentials file with a refresh token.\n\
     Please ensure you have copied the credentials to the specified file for future runs.\n"
-                    );
-                    token_data
-                } else {
-                    anyhow::bail!("No usable token data available for refresher");
-                }
+                );
+                token_data
+            } else {
+                anyhow::bail!("No usable token data available for refresher");
             }
-        };
+        }
+    };
 
     let refresher = Arc::new(TokenRefresher::new(token_data));
     let refresh_handle = Arc::clone(&refresher).start_background_refresh();
@@ -73,13 +73,12 @@ pub async fn create_authenticated_session(
     Ok(session)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::NamedTempFile;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     // Obsolete test for file writing/removal removed. Only session creation tests remain.
 }

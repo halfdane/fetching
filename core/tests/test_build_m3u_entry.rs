@@ -13,15 +13,34 @@ struct TestTrackProvider {
 
 #[async_trait::async_trait]
 impl TrackMetadataProvider for TestTrackProvider {
-    async fn name(&self) -> String { self.name.clone() }
-    async fn album_id(&self) -> String { "album".to_string() }
-    async fn album_name(&self) -> String { "album".to_string() }
-    async fn artist_names(&self) -> Vec<String> { self.artist_names.clone() }
-    async fn duration_ms(&self) -> u32 { self.duration_ms }
-    async fn date(&self) -> Option<String> { Some("2023".to_string()) }
-    async fn track_number(&self) -> u32 { 1 }
-    async fn get_file_id(&self, _format: &librespot_metadata::audio::AudioFileFormat) -> Option<librespot_core::file_id::FileId> { None }
-    
+    async fn name(&self) -> String {
+        self.name.clone()
+    }
+    async fn album_id(&self) -> String {
+        "album".to_string()
+    }
+    async fn album_name(&self) -> String {
+        "album".to_string()
+    }
+    async fn artist_names(&self) -> Vec<String> {
+        self.artist_names.clone()
+    }
+    async fn duration_ms(&self) -> u32 {
+        self.duration_ms
+    }
+    async fn date(&self) -> Option<String> {
+        Some("2023".to_string())
+    }
+    async fn track_number(&self) -> u32 {
+        1
+    }
+    async fn get_file_id(
+        &self,
+        _format: &librespot_metadata::audio::AudioFileFormat,
+    ) -> Option<librespot_core::file_id::FileId> {
+        None
+    }
+
     async fn album_artist_names(&self) -> Vec<String> {
         vec!["Test Album Artist".to_string()]
     }
@@ -37,8 +56,11 @@ impl TrackMetadataProvider for TestTrackProvider {
     async fn label(&self) -> Option<String> {
         Some("Test Label".to_string())
     }
-    
-    async fn get_album_cover_file_id(&self, index: usize) -> Option<librespot_core::file_id::FileId> {
+
+    async fn get_album_cover_file_id(
+        &self,
+        index: usize,
+    ) -> Option<librespot_core::file_id::FileId> {
         if index == 0 {
             Some(librespot_core::file_id::FileId::from_raw(&[1u8; 16]))
         } else {
@@ -79,16 +101,18 @@ async fn test_m3u_playlist_with_mock_provider() {
                 artist_names: vec!["Artist A".to_string()],
                 duration_ms: 200000,
             },
-            temp_dir.path().join("song1.ogg")
-        ).await,
+            temp_dir.path().join("song1.ogg"),
+        )
+        .await,
         build_m3u_entry(
             &TestTrackProvider {
                 name: "Song Two".to_string(),
                 artist_names: vec!["Artist B".to_string()],
                 duration_ms: 250000,
             },
-            temp_dir.path().join("song2.ogg")
-        ).await,
+            temp_dir.path().join("song2.ogg"),
+        )
+        .await,
     ];
 
     write_m3u_playlist(&playlist_path, &entries, Some("spotify:playlist:test")).unwrap();

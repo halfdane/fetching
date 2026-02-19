@@ -1,12 +1,16 @@
-use axum::{Router, routing::get, response::IntoResponse, extract::{State, Json}};
-use axum::response::sse::{Sse, Event};
-use serde::{Deserialize};
-use uuid::Uuid;
-use tokio::sync::broadcast;
+use axum::response::sse::{Event, Sse};
+use axum::{
+    extract::{Json, State},
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
+use fetching_core::{ProgressScope, ProgressUpdate, SharedQueue};
+use serde::Deserialize;
 use std::sync::Arc;
-use fetching_core::{ProgressUpdate, ProgressScope, SharedQueue};
+use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
-
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -69,7 +73,12 @@ async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
-        .nest_service("/", ServeDir::new("server/static").not_found_service(axum::routing::get(|| async { axum::http::StatusCode::NOT_FOUND })))
+        .nest_service(
+            "/",
+            ServeDir::new("server/static").not_found_service(axum::routing::get(|| async {
+                axum::http::StatusCode::NOT_FOUND
+            })),
+        )
         .route("/api/queue", axum::routing::post(queue_url))
         .route("/api/status", get(get_status))
         .route("/events", get(events))
@@ -78,145 +87,161 @@ pub fn app(state: Arc<AppState>) -> Router {
 
 #[cfg(test)]
 mod tests {
-        use futures_util::StreamExt;
-        use serde_json;
-        #[tokio::test]
-        async fn post_queue_triggers_progress_sse() {
-            // Setup app and channels
-            let (task_tx, mut task_rx) = mpsc::channel(8);
-            let (progress_tx, _progress_rx) = broadcast::channel(8);
-            // Only clone task_tx for AppState after drop
-            let app_state_task_tx = task_tx.clone();
-            let state = StdArc::new(AppState {
-                task_tx: app_state_task_tx,
-                progress_tx: progress_tx.clone(),
-            });
-            // Spawn worker loop (no shutdown channel needed)
-            let worker = tokio::spawn({
-                let progress_tx = progress_tx.clone();
-                async move {
-                    while let Some(task) = task_rx.recv().await {
-                        tracing::debug!("[worker] got task: {}", task.uri);
-                        let started = ProgressUpdate {
+    use futures_util::StreamExt;
+    use serde_json;
+    #[tokio::test]
+    async fn post_queue_triggers_progress_sse() {
+        // Setup app and channels
+        let (task_tx, mut task_rx) = mpsc::channel(8);
+        let (progress_tx, _progress_rx) = broadcast::channel(8);
+        // Only clone task_tx for AppState after drop
+        let app_state_task_tx = task_tx.clone();
+        let state = StdArc::new(AppState {
+            task_tx: app_state_task_tx,
+            progress_tx: progress_tx.clone(),
+        });
+        // Spawn worker loop (no shutdown channel needed)
+        let worker = tokio::spawn({
+            let progress_tx = progress_tx.clone();
+            async move {
+                while let Some(task) = task_rx.recv().await {
+                    tracing::debug!("[worker] got task: {}", task.uri);
+                    let started = ProgressUpdate {
+                        task_id: task.task_id,
+                        scope: ProgressScope::Global,
+                        status: "started".to_string(),
+                        current: 0,
+                        total: 0,
+                        item: "".to_string(),
+                        url: Some(task.uri.clone()),
+                    };
+                    let _ = progress_tx.send(started);
+                    for pct in [25, 50, 75, 100] {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        let update = ProgressUpdate {
                             task_id: task.task_id,
                             scope: ProgressScope::Global,
-                            status: "started".to_string(),
-                            current: 0,
-                            total: 0,
-                            item: "".to_string(),
-                            url: Some(task.uri.clone()),
-                        };
-                        let _ = progress_tx.send(started);
-                        for pct in [25, 50, 75, 100] {
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                            let update = ProgressUpdate {
-                                task_id: task.task_id,
-                                scope: ProgressScope::Global,
-                                status: "progress".to_string(),
-                                current: pct,
-                                total: 100,
-                                item: "".to_string(),
-                                url: Some(task.uri.clone()),
-                            };
-                            let _ = progress_tx.send(update);
-                        }
-                        let finished = ProgressUpdate {
-                            task_id: task.task_id,
-                            scope: ProgressScope::Global,
-                            status: "finished".to_string(),
-                            current: 100,
+                            status: "progress".to_string(),
+                            current: pct,
                             total: 100,
                             item: "".to_string(),
                             url: Some(task.uri.clone()),
                         };
-                        let _ = progress_tx.send(finished);
-                        let end = ProgressUpdate {
-                            task_id: task.task_id,
-                            scope: ProgressScope::Global,
-                            status: "end".to_string(),
-                            current: 0,
-                            total: 0,
-                            item: "".to_string(),
-                            url: Some(task.uri.clone()),
-                        };
-                        let _ = progress_tx.send(end);
+                        let _ = progress_tx.send(update);
                     }
-                    tracing::info!("[worker] task_rx closed, worker exiting");
+                    let finished = ProgressUpdate {
+                        task_id: task.task_id,
+                        scope: ProgressScope::Global,
+                        status: "finished".to_string(),
+                        current: 100,
+                        total: 100,
+                        item: "".to_string(),
+                        url: Some(task.uri.clone()),
+                    };
+                    let _ = progress_tx.send(finished);
+                    let end = ProgressUpdate {
+                        task_id: task.task_id,
+                        scope: ProgressScope::Global,
+                        status: "end".to_string(),
+                        current: 0,
+                        total: 0,
+                        item: "".to_string(),
+                        url: Some(task.uri.clone()),
+                    };
+                    let _ = progress_tx.send(end);
                 }
-            });
-            let app = axum::Router::new()
-                .route("/api/queue", axum::routing::post(queue_url))
-                .route("/events", axum::routing::get(events))
-                .with_state(state.clone());
+                tracing::info!("[worker] task_rx closed, worker exiting");
+            }
+        });
+        let app = axum::Router::new()
+            .route("/api/queue", axum::routing::post(queue_url))
+            .route("/events", axum::routing::get(events))
+            .with_state(state.clone());
 
-            // Queue a task
-            let body = serde_json::json!({"url": "spotify:track:abc"}).to_string();
-            let post_response = app.clone().oneshot(Request::builder()
-                .method("POST")
-                .uri("/api/queue")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(body)).unwrap())
-                .await
-                .unwrap();
-            assert_eq!(post_response.status(), StatusCode::ACCEPTED);
+        // Queue a task
+        let body = serde_json::json!({"url": "spotify:track:abc"}).to_string();
+        let post_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/queue")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(post_response.status(), StatusCode::ACCEPTED);
 
-            // Drop task_tx after queuing the task
-            drop(task_tx);
+        // Drop task_tx after queuing the task
+        drop(task_tx);
 
-            let sse_response = app.clone().oneshot(Request::builder()
-                .uri("/events")
-                .body(axum::body::Body::empty()).unwrap())
-                .await
-                .unwrap();
+        let sse_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/events")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
 
-            // Fully poll the SSE response body stream to completion
-            let body = sse_response.into_body();
-            let mut stream = body.into_data_stream();
-            let mut buf = Vec::new();
-            let mut found_started = false;
-            let mut found_finished = false;
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result.expect("SSE body chunk error");
-                buf.extend_from_slice(&chunk);
-                let text = String::from_utf8_lossy(&buf);
-                for line in text.lines() {
-                    if let Some(json) = line.strip_prefix("data:") {
-                        if let Ok(update) = serde_json::from_str::<ProgressUpdate>(json.trim()) {
-                            if update.status == "started" { found_started = true; }
-                            if update.status == "finished" { found_finished = true; }
-                            if update.status == "end" { break; }
+        // Fully poll the SSE response body stream to completion
+        let body = sse_response.into_body();
+        let mut stream = body.into_data_stream();
+        let mut buf = Vec::new();
+        let mut found_started = false;
+        let mut found_finished = false;
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.expect("SSE body chunk error");
+            buf.extend_from_slice(&chunk);
+            let text = String::from_utf8_lossy(&buf);
+            for line in text.lines() {
+                if let Some(json) = line.strip_prefix("data:") {
+                    if let Ok(update) = serde_json::from_str::<ProgressUpdate>(json.trim()) {
+                        if update.status == "started" {
+                            found_started = true;
+                        }
+                        if update.status == "finished" {
+                            found_finished = true;
+                        }
+                        if update.status == "end" {
+                            break;
                         }
                     }
                 }
             }
-            // Explicitly drop the stream to ensure the SSE handler task is cleaned up
-            drop(stream);
-            assert!(found_started, "Did not receive started event");
-            assert!(found_finished, "Did not receive finished event");
-
-            // Explicitly drop responses before dropping app/state
-            drop(post_response);
-
-            drop(app);
-            drop(state);
-
-            // Wait for worker to finish (optionally with timeout)
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), worker).await;
         }
+        // Explicitly drop the stream to ensure the SSE handler task is cleaned up
+        drop(stream);
+        assert!(found_started, "Did not receive started event");
+        assert!(found_finished, "Did not receive finished event");
+
+        // Explicitly drop responses before dropping app/state
+        drop(post_response);
+
+        drop(app);
+        drop(state);
+
+        // Wait for worker to finish (optionally with timeout)
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), worker).await;
+    }
     use super::*;
-    use tower::util::ServiceExt; // for `oneshot`
-    use hyper::http::{Request, StatusCode};
     use axum::body::to_bytes;
+    use hyper::http::{Request, StatusCode};
+    use tower::util::ServiceExt; // for `oneshot`
 
     use std::sync::Arc as StdArc;
-    use tokio::sync::{mpsc, broadcast};
+    use tokio::sync::{broadcast, mpsc};
 
     struct TestApp {
         app: axum::Router,
         task_rx: mpsc::Receiver<Task>,
     }
 
-         // Removed test_queue from AppState
+    // Removed test_queue from AppState
     fn test_app_with_queue() -> TestApp {
         let (task_tx, task_rx) = mpsc::channel(8);
         let (progress_tx, _progress_rx) = broadcast::channel(8);
@@ -252,7 +277,12 @@ mod tests {
     async fn get_root_returns_ok() {
         let app = test_app();
         let response = app
-            .oneshot(Request::builder().uri("/").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -263,18 +293,24 @@ mod tests {
         let TestApp { app, mut task_rx } = test_app_with_queue();
         let body = serde_json::json!({"url": "spotify:track:123"}).to_string();
         let response = app
-            .oneshot(Request::builder()
-                .method("POST")
-                .uri("/api/queue")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(body)).unwrap())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/queue")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let status = response.status();
         let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
         let body_str = std::str::from_utf8(&bytes).unwrap_or("<non-utf8>");
         if status != StatusCode::ACCEPTED {
-            panic!("POST /api/queue failed: status = {:?}, body = {}", status, body_str);
+            panic!(
+                "POST /api/queue failed: status = {:?}, body = {}",
+                status, body_str
+            );
         }
         match tokio::time::timeout(std::time::Duration::from_secs(1), task_rx.recv()).await {
             Ok(Some(task)) => {
@@ -289,12 +325,16 @@ mod tests {
     async fn get_status_returns_html() {
         let app = test_app();
         let response = app
-            .oneshot(Request::builder().uri("/api/status").body(axum::body::Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/status")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let body = to_bytes(response.into_body(), 1024).await.unwrap();
         let body_str = std::str::from_utf8(&body).unwrap();
         assert!(body_str.contains("Status: TODO"));
     }
-
 }

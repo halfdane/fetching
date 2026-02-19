@@ -48,7 +48,10 @@ mod tests {
 
     #[test]
     fn test_sanitize_special_characters() {
-        assert_eq!(sanitize("File:Name?With*Special<Chars>"), "File_Name_With_Special_Chars");
+        assert_eq!(
+            sanitize("File:Name?With*Special<Chars>"),
+            "File_Name_With_Special_Chars"
+        );
     }
 
     #[test]
@@ -98,7 +101,10 @@ mod tests {
 
     #[test]
     fn test_sanitize_removes_invalid_chars() {
-        assert_eq!(sanitize("file/name:with?invalid*chars"), "file_name_with_invalid_chars");
+        assert_eq!(
+            sanitize("file/name:with?invalid*chars"),
+            "file_name_with_invalid_chars"
+        );
     }
 
     #[test]

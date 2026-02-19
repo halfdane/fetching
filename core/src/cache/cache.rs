@@ -3,18 +3,18 @@
 //! This module provides the main entry points for caching Spotify content,
 //! coordinating between the various subsystems (track processing, image handling, etc.).
 
+use librespot_core::SpotifyUri;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use librespot_core::SpotifyUri;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing::info;
 use uuid;
 
-use crate::cache::helpers::{get_artist_name_from_vec, format_track_display};
+use crate::cache::helpers::{format_track_display, get_artist_name_from_vec};
 use crate::cache::images::save_cover_art;
 use crate::cache::processors::{get_track_with_ogg_format, process_track_cache};
+use crate::m3u::{M3uEntry, write_m3u_playlist};
 use crate::metadata::{build_track_path, sanitize};
-use crate::m3u::{write_m3u_playlist, M3uEntry};
 
 pub const TRACK_DELAY_MS: u64 = 200;
 
@@ -42,26 +42,42 @@ where
         tracing::info!("Processing track URI: {:?}", track_uri);
 
         // Get track with OGG format, trying alternatives if needed
-        let (track_provider, file_id) = match get_track_with_ogg_format(track_fetcher, track_uri).await {
-            Ok(result) => result,
-            Err(e) => {
-                let track_display = format_track_display(index + 1, total_tracks, "<unknown>");
-                tracing::error!("Failed to get track {} with OGG format: {}", track_display, e);
+        let (track_provider, file_id) =
+            match get_track_with_ogg_format(track_fetcher, track_uri).await {
+                Ok(result) => result,
+                Err(e) => {
+                    let track_display = format_track_display(index + 1, total_tracks, "<unknown>");
+                    tracing::error!(
+                        "Failed to get track {} with OGG format: {}",
+                        track_display,
+                        e
+                    );
 
-                // Continue to next track
-                if index < total_tracks - 1 {
-                    sleep(Duration::from_millis(TRACK_DELAY_MS)).await;
+                    // Continue to next track
+                    if index < total_tracks - 1 {
+                        sleep(Duration::from_millis(TRACK_DELAY_MS)).await;
+                    }
+                    continue;
                 }
-                continue;
-            }
-        };
+            };
 
-        let track_display = format_track_display(index + 1, total_tracks, &track_provider.name().await);
+        let track_display =
+            format_track_display(index + 1, total_tracks, &track_provider.name().await);
         tracing::info!("{}", track_display);
 
         let output_path = build_track_path(&*track_provider, base_dir).await?;
 
-        match process_track_cache(track_fetcher, audio_downloader, image_downloader, &*track_provider, track_uri, &output_path, &file_id).await {
+        match process_track_cache(
+            track_fetcher,
+            audio_downloader,
+            image_downloader,
+            &*track_provider,
+            track_uri,
+            &output_path,
+            &file_id,
+        )
+        .await
+        {
             Ok(()) => {
                 // Collect album cover for collage if needed
                 if collect_album_covers {
@@ -78,7 +94,8 @@ where
                 }
 
                 // Add to M3U entries and cached paths
-                m3u_entries.push(crate::m3u::build_m3u_entry(&*track_provider, output_path.clone()).await);
+                m3u_entries
+                    .push(crate::m3u::build_m3u_entry(&*track_provider, output_path.clone()).await);
                 cached_paths.push(output_path);
 
                 // Emit progress update
@@ -118,11 +135,7 @@ fn finalize_playlist(
         write_m3u_playlist(m3u_path, m3u_entries, spotify_url)?;
         info!("\nPlaylist file created: {}", m3u_path.display());
     }
-    info!(
-        "Cached {} of {} tracks",
-        m3u_entries.len(),
-        total_tracks
-    );
+    info!("Cached {} of {} tracks", m3u_entries.len(), total_tracks);
     Ok(())
 }
 
@@ -242,9 +255,11 @@ pub async fn cache_album(
 
     let spotify_url = Some(album_uri.to_string());
 
-    let music_dir_str = music_dir
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!(crate::error::DownloadError::InvalidUtf8Path(music_dir.clone())))?;
+    let music_dir_str = music_dir.to_str().ok_or_else(|| {
+        anyhow::anyhow!(crate::error::DownloadError::InvalidUtf8Path(
+            music_dir.clone()
+        ))
+    })?;
     cache_track_collection(
         track_fetcher,
         audio_downloader,
@@ -310,9 +325,11 @@ pub async fn cache_playlist(
     let cover_art = playlist.playlist_cover_art_bytes().await;
 
     let spotify_url = Some(playlist_uri.to_string());
-    let music_dir_str = music_dir
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!(crate::error::DownloadError::InvalidUtf8Path(music_dir.clone())))?;
+    let music_dir_str = music_dir.to_str().ok_or_else(|| {
+        anyhow::anyhow!(crate::error::DownloadError::InvalidUtf8Path(
+            music_dir.clone()
+        ))
+    })?;
 
     cache_track_collection(
         track_fetcher,

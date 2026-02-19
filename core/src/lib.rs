@@ -10,19 +10,18 @@ use uuid::Uuid;
 pub mod auth;
 pub mod cache;
 pub mod config;
-pub mod input;
-pub mod processor;
-pub mod m3u;
 pub mod error;
-pub mod traits;
 pub mod implementations;
+pub mod input;
+pub mod m3u;
 pub mod metadata;
-pub mod stream;
 pub mod playback;
+pub mod processor;
+pub mod stream;
+pub mod traits;
 
 // Re-export create_session
 pub use auth::session::create_session;
-
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProgressUpdate {
@@ -53,16 +52,16 @@ pub struct Task {
 pub struct SharedQueue {
     pub tasks: Arc<RwLock<Vec<Task>>>,
     session: Arc<librespot_core::Session>,
-    config: Arc<RwLock<config::Config>>,  // Thread-safe
+    config: Arc<RwLock<config::Config>>, // Thread-safe
     progress_tx: tokio::sync::broadcast::Sender<ProgressUpdate>,
 }
 
-unsafe impl Send for SharedQueue {}  // If needed (RwLock<Vec> already Send)
+unsafe impl Send for SharedQueue {} // If needed (RwLock<Vec> already Send)
 unsafe impl Sync for SharedQueue {}
 
 impl SharedQueue {
     pub fn new(
-        session: Arc<librespot_core::Session>,  // Accept Arc
+        session: Arc<librespot_core::Session>, // Accept Arc
         config: config::Config,
         progress_tx: broadcast::Sender<ProgressUpdate>,
     ) -> Self {
@@ -78,7 +77,10 @@ impl SharedQueue {
         tracing::info!("Adding {} tasks", uris.len());
         let mut tasks = self.tasks.write().await;
         for uri in uris {
-            let task = Task { task_id: Uuid::new_v4(), uri: uri.clone() };
+            let task = Task {
+                task_id: Uuid::new_v4(),
+                uri: uri.clone(),
+            };
             tasks.push(task.clone());
             tracing::debug!("Pushed task: {:?}", task.task_id);
         }
@@ -87,20 +89,28 @@ impl SharedQueue {
 
     pub async fn process_next(&self) -> Option<()> {
         let mut tasks = self.tasks.write().await;
-        let Some(task) = tasks.pop() else { return None; };
+        let Some(task) = tasks.pop() else {
+            return None;
+        };
         drop(tasks);
         tracing::info!(">>> START PROCESSING {}: {}", task.task_id, task.uri);
 
         let session = Arc::clone(&self.session);
         let config_guard = self.config.read().await;
-        let config = (*config_guard).clone();  // Or & if deref
+        let config = (*config_guard).clone(); // Or & if deref
         let progress_tx = self.progress_tx.clone();
         let task_id = task.task_id;
         let uri = task.uri;
 
         let handle = tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Runtime::new().expect("runtime");
-            rt.block_on(processor::process_url(&session, task_id, &uri, &config, progress_tx))
+            rt.block_on(processor::process_url(
+                &session,
+                task_id,
+                &uri,
+                &config,
+                progress_tx,
+            ))
         });
 
         match handle.await {

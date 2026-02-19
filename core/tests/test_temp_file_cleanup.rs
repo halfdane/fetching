@@ -1,11 +1,11 @@
 mod mock;
 
-use mock::MockAudioDownloader;
 use fetching_core::cache::helpers::build_temp_path;
 use fetching_core::stream::stream_and_cache_track;
-use librespot_core::file_id::FileId;
 use librespot_core::SpotifyId;
 use librespot_core::SpotifyUri;
+use librespot_core::file_id::FileId;
+use mock::MockAudioDownloader;
 use std::path::PathBuf;
 use tempfile::TempDir;
 

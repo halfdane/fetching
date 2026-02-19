@@ -3,15 +3,15 @@
 //! Functions for downloading tracks, adding metadata, and managing the
 //! caching workflow with error handling and cleanup.
 
-use std::path::Path;
 use librespot_core::SpotifyUri;
 use librespot_metadata::audio::AudioFileFormat;
+use std::path::Path;
 use tracing::{debug, error, info, warn};
 
-use crate::stream::stream_and_cache_track;
-use crate::error::DownloadError;
-use crate::metadata::{write_ogg_tags, TrackMetadata};
 use crate::cache::helpers::build_temp_path;
+use crate::error::DownloadError;
+use crate::metadata::{TrackMetadata, write_ogg_tags};
+use crate::stream::stream_and_cache_track;
 use crate::traits::TrackMetadataProvider;
 
 /// Get the best quality OGG Vorbis file ID and format for a track
@@ -40,35 +40,73 @@ async fn select_best_ogg_file<T: crate::traits::TrackMetadataProvider>(
 pub async fn get_track_with_ogg_format(
     track_fetcher: &dyn crate::traits::TrackFetcher,
     uri: &SpotifyUri,
-) -> anyhow::Result<(Box<dyn crate::traits::TrackMetadataProvider>, librespot_core::file_id::FileId)> {
+) -> anyhow::Result<(
+    Box<dyn crate::traits::TrackMetadataProvider>,
+    librespot_core::file_id::FileId,
+)> {
     let track = track_fetcher.fetch_track(uri).await?;
-    let provider = crate::implementations::OwnedLibrespotTrackProvider { track: track.clone() };
+    let provider = crate::implementations::OwnedLibrespotTrackProvider {
+        track: track.clone(),
+    };
 
     // Collect all candidates: original track + all alternatives with their OGG format
-    let mut candidates: Vec<(Box<dyn crate::traits::TrackMetadataProvider>, librespot_core::file_id::FileId, AudioFileFormat, String)> = Vec::new();
+    let mut candidates: Vec<(
+        Box<dyn crate::traits::TrackMetadataProvider>,
+        librespot_core::file_id::FileId,
+        AudioFileFormat,
+        String,
+    )> = Vec::new();
 
     // Check original track
     if let Some((file_id, format)) = select_best_ogg_file(&provider).await {
         // Early termination: if original has highest quality (320), no need to check alternatives
         if format == AudioFileFormat::OGG_VORBIS_320 {
-            debug!("Track '{}' has OGG_VORBIS_320 in original, skipping alternatives", provider.track.name);
-            return Ok((Box::new(crate::implementations::OwnedLibrespotTrackProvider { track: track.clone() }), file_id));
+            debug!(
+                "Track '{}' has OGG_VORBIS_320 in original, skipping alternatives",
+                provider.track.name
+            );
+            return Ok((
+                Box::new(crate::implementations::OwnedLibrespotTrackProvider {
+                    track: track.clone(),
+                }),
+                file_id,
+            ));
         }
-        candidates.push((Box::new(crate::implementations::OwnedLibrespotTrackProvider { track: track.clone() }), file_id, format, "original".to_string()));
+        candidates.push((
+            Box::new(crate::implementations::OwnedLibrespotTrackProvider {
+                track: track.clone(),
+            }),
+            file_id,
+            format,
+            "original".to_string(),
+        ));
     }
 
     // Check all alternatives if original doesn't exist or doesn't have best quality
     let alternative_uris = provider.alternative_uris().await;
     if candidates.is_empty() || !alternative_uris.is_empty() {
-        debug!("Track '{}' checking {} alternatives for better quality", provider.track.name, alternative_uris.len());
+        debug!(
+            "Track '{}' checking {} alternatives for better quality",
+            provider.track.name,
+            alternative_uris.len()
+        );
 
         for (i, alt_uri_str) in alternative_uris.iter().enumerate() {
             let alt_uri = SpotifyUri::from_uri(alt_uri_str)?;
             match track_fetcher.fetch_track(&alt_uri).await {
                 Ok(alt_track) => {
-                    let alt_provider = crate::implementations::OwnedLibrespotTrackProvider { track: alt_track.clone() };
+                    let alt_provider = crate::implementations::OwnedLibrespotTrackProvider {
+                        track: alt_track.clone(),
+                    };
                     if let Some((file_id, format)) = select_best_ogg_file(&alt_provider).await {
-                        candidates.push((Box::new(crate::implementations::OwnedLibrespotTrackProvider { track: alt_track.clone() }), file_id, format, format!("alternative {}", i + 1)));
+                        candidates.push((
+                            Box::new(crate::implementations::OwnedLibrespotTrackProvider {
+                                track: alt_track.clone(),
+                            }),
+                            file_id,
+                            format,
+                            format!("alternative {}", i + 1),
+                        ));
                     }
                 }
                 Err(e) => {
@@ -80,7 +118,11 @@ pub async fn get_track_with_ogg_format(
 
     // Select the best quality from all candidates
     if candidates.is_empty() {
-        anyhow::bail!("Track '{}' not available in OGG Vorbis format (tried {} alternatives)", track.name, alternative_uris.len())
+        anyhow::bail!(
+            "Track '{}' not available in OGG Vorbis format (tried {} alternatives)",
+            track.name,
+            alternative_uris.len()
+        )
     }
 
     // Sort by format quality (320 > 160 > 96)
@@ -92,12 +134,20 @@ pub async fn get_track_with_ogg_format(
     });
 
     let (best_track, file_id, format, source) = candidates.into_iter().next().unwrap();
-    info!("Selected {:?} from {} for track '{}'", format, source, best_track.name().await);
+    info!(
+        "Selected {:?} from {} for track '{}'",
+        format,
+        source,
+        best_track.name().await
+    );
 
     Ok((best_track, file_id))
 }
 
-async fn cache_track_cover_art(image_downloader: &dyn crate::traits::ImageDownloader, metadata: &dyn crate::traits::TrackMetadataProvider) -> Option<Vec<u8>> {
+async fn cache_track_cover_art(
+    image_downloader: &dyn crate::traits::ImageDownloader,
+    metadata: &dyn crate::traits::TrackMetadataProvider,
+) -> Option<Vec<u8>> {
     if let Some(file_id) = metadata.get_album_cover_file_id(0).await {
         tracing::info!("Fetching cover art for track '{}'", metadata.name().await);
         let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -170,13 +220,21 @@ pub async fn process_track_cache(
 ) -> anyhow::Result<()> {
     // Check if file already exists
     if output_path.exists() {
-        tracing::info!("Track '{}' already cached at {}, skipping download", track_provider.name().await, output_path.display());
+        tracing::info!(
+            "Track '{}' already cached at {}, skipping download",
+            track_provider.name().await,
+            output_path.display()
+        );
         return Ok(());
     }
-    
+
     let temp_path = build_temp_path(output_path);
 
-    tracing::info!("Starting to fetch track '{}' to {}", track_provider.name().await, temp_path.display());
+    tracing::info!(
+        "Starting to fetch track '{}' to {}",
+        track_provider.name().await,
+        temp_path.display()
+    );
 
     // Clean up any existing temp file
     if temp_path.exists() {
@@ -233,6 +291,10 @@ pub async fn process_track_cache(
         return Err(e);
     }
 
-    tracing::info!("Track '{}' fetched, tagged and stored successfully at {}", track_provider.name().await, output_path.display());
+    tracing::info!(
+        "Track '{}' fetched, tagged and stored successfully at {}",
+        track_provider.name().await,
+        output_path.display()
+    );
     Ok(())
 }

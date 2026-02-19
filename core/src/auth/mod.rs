@@ -27,16 +27,22 @@ pub struct CredentialsWithTokenData {
     pub token_data: Option<crate::auth::oauth::TokenData>,
 }
 
-pub async fn get_credentials(
-    credentials_path: &str,
-) -> anyhow::Result<CredentialsWithTokenData> {
+pub async fn get_credentials(credentials_path: &str) -> anyhow::Result<CredentialsWithTokenData> {
     // Validate OAuth configuration first
     oauth::validate_oauth_config()?;
 
-    let cache = librespot_core::cache::Cache::new(Some(".cache"), Some(".cache"), Some(".cache/files"), None)?;
+    let cache = librespot_core::cache::Cache::new(
+        Some(".cache"),
+        Some(".cache"),
+        Some(".cache/files"),
+        None,
+    )?;
     if let Some(creds) = cache.credentials() {
         tracing::debug!("get_credentials: cache hit, returning credentials from cache");
-        return Ok(CredentialsWithTokenData { credentials: creds, token_data: None });
+        return Ok(CredentialsWithTokenData {
+            credentials: creds,
+            token_data: None,
+        });
     }
 
     // Try to read token data from file
@@ -54,7 +60,9 @@ pub async fn get_credentials(
                     // Do NOT save refreshed credentials to file. Only update in-memory token.
                     // If a new refresh token is issued, warn user (already handled in refresher).
                     return Ok(CredentialsWithTokenData {
-                        credentials: Credentials::with_access_token(new_token_data.access_token.trim()),
+                        credentials: Credentials::with_access_token(
+                            new_token_data.access_token.trim(),
+                        ),
                         token_data: Some(new_token_data),
                     });
                 }
@@ -68,7 +76,9 @@ pub async fn get_credentials(
             tracing::debug!("get_credentials: token file valid, using token");
             // Token is still valid
             return Ok(CredentialsWithTokenData {
-                credentials: Credentials::with_access_token(token_data.access_token.trim().to_string()),
+                credentials: Credentials::with_access_token(
+                    token_data.access_token.trim().to_string(),
+                ),
                 token_data: Some(token_data),
             });
         }
