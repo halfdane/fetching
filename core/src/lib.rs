@@ -1,4 +1,6 @@
-// Remove duplicate imports; use fully qualified paths or module imports as needed.
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{Mutex, RwLock};
 
 // Removed duplicate process_url_from_args; only process_url is required by spec.
 // Library interface for integration tests
@@ -6,6 +8,8 @@ use uuid::Uuid;
 use anyhow;
 use tokio::sync::{mpsc, broadcast};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
+
 pub mod auth;
 pub mod cache;
 pub mod config;
@@ -42,66 +46,102 @@ pub enum ProgressScope {
     Global,
 }
 
+
 #[derive(Debug, Clone)]
 pub struct Task {
     pub task_id: Uuid,
     pub uri: String,
 }
 
-
-pub async fn process_url_safe(
-    session: &librespot_core::Session,
-    task_id: Uuid, uri: &str, config: &config::Config,
-    tx: broadcast::Sender<ProgressUpdate>,
-) -> Result<(), anyhow::Error> {
-    tokio::task::spawn_blocking({
-        let session = session.clone();
-        let uri = uri.to_string();
-        let config = config.clone();
-        let tx = tx.clone();
-        move || {
-            // Runs in blocking thread - safe for librespot decoder
-            tokio::runtime::Handle::current()
-                .block_on(async move {
-                    processor::process_url(&session, task_id, &uri, &config, tx).await
-                })
-        }
-    }).await??;
-    Ok(())
+#[derive(Clone)]
+pub struct SharedQueue {
+    pub tasks: Arc<RwLock<Vec<Task>>>,
+    session: Arc<librespot_core::Session>,
+    config: Arc<RwLock<config::Config>>,  // Thread-safe
+    progress_tx: tokio::sync::broadcast::Sender<ProgressUpdate>,
 }
 
-pub fn spawn_task_processor(
-    session: &librespot_core::session::Session,
-    task_rx: mpsc::Receiver<Task>,
-    tx: tokio::sync::broadcast::Sender<ProgressUpdate>,
-) -> JoinHandle<bool> {
-    let session_clone = session.clone();  // Your original
-    let tx_clone = tx.clone();
-    tokio::spawn(async move {
-        let mut task_rx = task_rx;
-        let mut any_error = false;
-        while let Some(task) = task_rx.recv().await {
-            tracing::info!("Processing task {}: {}", task.task_id, task.uri);
-            let uri = task.uri.clone();
-            let config = config::Config::from_env();
-                        if let Err(e) = process_url_safe(&session_clone, task.task_id, &uri, &config, tx_clone.clone()).await {
-                tracing::error!("Error processing {}: {e}", task.uri);
-                any_error = true;
-            }
-        }
-        any_error
-    })
-}
+unsafe impl Send for SharedQueue {}  // If needed (RwLock<Vec> already Send)
+unsafe impl Sync for SharedQueue {}
 
-pub async fn queue_uri_tasks(
-    uris: Vec<String>,
-    task_tx: mpsc::Sender<Task>,
-) -> anyhow::Result<()> {
-    for uri in uris {
-        let task_id = Uuid::new_v4();
-        let task = Task { task_id, uri };
-        tracing::info!("Queueing task {}: {}", task.task_id, task.uri);
-        task_tx.send(task).await.map_err(|_| anyhow::anyhow!("Queue send failed"))?;
+impl SharedQueue {
+    pub fn new(
+        session: Arc<librespot_core::Session>,  // Accept Arc
+        config: config::Config,
+        progress_tx: broadcast::Sender<ProgressUpdate>,
+    ) -> Self {
+        Self {
+            session,
+            tasks: Arc::new(RwLock::new(Vec::new())),
+            config: Arc::new(RwLock::new(config)),
+            progress_tx,
+        }
     }
-    Ok(())
+
+    pub async fn add_tasks(&self, uris: Vec<String>) {
+        tracing::info!("Adding {} tasks", uris.len());
+        let mut tasks = self.tasks.write().await;
+        for uri in uris {
+            let task = Task { task_id: Uuid::new_v4(), uri: uri.clone() };
+            tasks.push(task.clone());
+            tracing::debug!("Pushed task: {:?}", task.task_id);
+        }
+        tracing::info!("Queue now has {} tasks", tasks.len());
+    }
+
+    pub async fn process_next(&self) -> Option<()> {
+        let mut tasks = self.tasks.write().await;
+        let Some(task) = tasks.pop() else { return None; };
+        drop(tasks);
+        tracing::info!(">>> START PROCESSING {}: {}", task.task_id, task.uri);
+
+        // FULL BLOCKING OFFLOAD
+        let session = Arc::clone(&self.session);
+        let config_guard = self.config.read().await;
+        let config = (*config_guard).clone();  // Or & if deref
+        let progress_tx = self.progress_tx.clone();
+        let task_id = task.task_id;
+        let uri = task.uri;
+
+        let handle = tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            rt.block_on(processor::process_url(&session, task_id, &uri, &config, progress_tx))
+        });
+
+        match handle.await {
+            Ok(Ok(())) => tracing::info!("<<< SUCCESS {}", task_id),
+            Ok(Err(e)) => tracing::error!("Process error: {e}"),
+            Err(e) => tracing::error!("Block join: {e}"),
+        }
+
+        Some(())
+    }
+
+    pub async fn is_empty(&self) -> bool {
+        let len = self.tasks.read().await.len();
+        tracing::debug!("is_empty check: {} tasks", len);
+        len == 0
+    }
+
+    // lib.rs: Add idle timeout param
+    pub fn run_worker(self: Arc<Self>, idle_timeout: Duration) -> JoinHandle<()> {
+        let queue_clone = Arc::clone(&self);
+        tokio::spawn(async move {
+            let mut last_task = Instant::now();
+            loop {
+                if queue_clone.is_empty().await {
+                    if last_task.elapsed() > idle_timeout {
+                        tracing::info!("Idle timeout, worker exiting");
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    continue;
+                }
+                if queue_clone.process_next().await.is_some() {
+                    last_task = Instant::now();
+                    tracing::info!("Worker: task done");
+                }
+            }
+        })
+    }
 }

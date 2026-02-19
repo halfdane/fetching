@@ -29,7 +29,7 @@ pub async fn process_url(
     process_single_uri(session, &spotify_uri, config, tx, url, task_id).await
 }
 
-async fn handle_track(
+pub async fn handle_track(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,

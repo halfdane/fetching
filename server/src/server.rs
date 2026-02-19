@@ -4,13 +4,13 @@ use serde::{Deserialize};
 use uuid::Uuid;
 use tokio::sync::{mpsc, broadcast};
 use std::sync::Arc;
-use fetching_core::{ProgressUpdate, ProgressScope, Task};
+use fetching_core::{ProgressUpdate, ProgressScope, Task, SharedQueue};
 use tower_http::services::ServeDir;
 
 
 #[derive(Clone)]
 pub struct AppState {
-    pub task_tx: mpsc::Sender<Task>,
+    pub queue: Arc<SharedQueue>,
     pub progress_tx: broadcast::Sender<ProgressUpdate>,
 }
 
@@ -22,15 +22,12 @@ struct QueueRequest {
 async fn queue_url(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<QueueRequest>,
-) -> impl IntoResponse {
+) -> impl axum::response::IntoResponse {
     let task_id = Uuid::new_v4();
-    let task = Task {
-        task_id,
-        uri: payload.url.clone(),
-    };
-    // Send to worker channel (ignore if full for now)
-    let _ = state.task_tx.send(task).await;
-    // Send queued update
+    tracing::info!("Web: queued task {}: {}", task_id, payload.url);
+
+    state.queue.add_tasks(vec![payload.url.clone()]).await;
+
     let queued_update = ProgressUpdate {
         task_id,
         scope: ProgressScope::Global,
@@ -41,9 +38,9 @@ async fn queue_url(
         url: Some(payload.url),
     };
     let _ = state.progress_tx.send(queued_update);
+
     axum::http::StatusCode::ACCEPTED
 }
-
 async fn get_status(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // TODO: return JSON status
     axum::response::Html("<pre>Status: TODO</pre>")
@@ -81,22 +78,11 @@ pub fn app(state: Arc<AppState>) -> Router {
 }
 
 pub async fn setup_and_run_server(
-    task_tx: mpsc::Sender<Task>,
+    queue: SharedQueue,
     progress_tx: broadcast::Sender<ProgressUpdate>,
     port: u16,
 ) -> anyhow::Result<()> {
-    let state = Arc::new(AppState {
-        task_tx,
-        progress_tx,
-    });
-    let app = app(state);
-
-    let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    println!("Server listening on http://{}", addr);
-
-    axum::serve(listener, app).await?;
-
+    
     Ok(())
 }
 

@@ -95,9 +95,7 @@ impl Config {
             return Ok(dir.clone());
         }
 
-        let home_dir =
-            std::env::var("HOME").map_err(|_| crate::error::DownloadError::HomeNotSet)?;
-        let mut music_dir = PathBuf::from(home_dir);
+        let mut music_dir = PathBuf::from("/data");
         music_dir.push("Music");
         Ok(music_dir)
     }
