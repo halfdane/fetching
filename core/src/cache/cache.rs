@@ -75,6 +75,10 @@ where
             track_uri,
             &output_path,
             &file_id,
+            tx.clone(),
+            task_id,
+            (index + 1) as u32,
+            total_tracks as u32,
         )
             .await
         {

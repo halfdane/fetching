@@ -84,6 +84,10 @@ pub async fn handle_track(
         spotify_uri,
         &output_path,
         &file_id,
+        tx.clone(),
+        task_id,
+        1,
+        1,
     )
         .await?;
 
@@ -116,7 +120,6 @@ async fn handle_album(
         item: uri_arg.to_string(),
         url: Some(uri_arg.to_string()),
     })?;
-
     let album_fetcher = crate::implementations::LibrespotAlbumFetcher { session };
     let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
     let audio_downloader = crate::stream::LibrespotAudioDownloader { session };

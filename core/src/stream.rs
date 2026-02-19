@@ -132,8 +132,8 @@ async fn stream_to_cache(
         session,
         *file_id,
         (STREAMING_BUFFER_HINT_KBPS * 1024 / 8) as usize,
-    )
-        .await?;
+    ).await?;
+
     let (encrypted_reader, audio_key) = match audio_file {
         AudioFile::Streaming(stream) => {
             let track_id = match track_uri {
@@ -156,8 +156,7 @@ async fn stream_to_cache(
     let mut decrypted_stream = AudioDecrypt::new(Some(audio_key), encrypted_reader);
     let mut cache_file = std::fs::File::create(cache_path)?;
 
-    // Use the extracted function to skip header and copy data
-    skip_header_and_copy(&mut decrypted_stream, &mut cache_file)?;
+    skip_header_and_copy(&mut decrypted_stream, &mut cache_file, |_| {})?;
 
     // Explicitly flush to catch any buffering errors before file closes
     cache_file.flush()?;
@@ -166,9 +165,10 @@ async fn stream_to_cache(
 }
 
 /// Skip the Spotify OGG header and copy remaining data from reader to writer
-pub fn skip_header_and_copy<R: Read, W: Write>(
+pub fn skip_header_and_copy<R: Read, W: Write, F: FnMut(usize)>(
     reader: &mut R,
     writer: &mut W,
+    mut progress_callback: F,
 ) -> anyhow::Result<usize> {
     // Skip Spotify's custom header
     let mut header_skip = vec![0u8; SPOTIFY_OGG_HEADER_END];
@@ -184,6 +184,7 @@ pub fn skip_header_and_copy<R: Read, W: Write>(
             Ok(n) => {
                 writer.write_all(&buffer[..n])?;
                 total_bytes += n;
+                progress_callback(total_bytes);
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e.into()),
@@ -258,7 +259,7 @@ mod tests {
         let mut reader = Cursor::new(input_data);
         let mut output = Vec::new();
 
-        let bytes_written = skip_header_and_copy(&mut reader, &mut output).unwrap();
+        let bytes_written = skip_header_and_copy(&mut reader, &mut output, |_| {}).unwrap();
 
         // Verify header was skipped
         assert!(!output.starts_with(&[0xFF]));
@@ -284,7 +285,7 @@ mod tests {
         let mut reader = Cursor::new(input_data);
         let mut output = Vec::new();
 
-        let bytes_written = skip_header_and_copy(&mut reader, &mut output).unwrap();
+        let bytes_written = skip_header_and_copy(&mut reader, &mut output, |_| {}).unwrap();
 
         assert_eq!(bytes_written, 0);
         assert!(output.is_empty());
@@ -301,7 +302,7 @@ mod tests {
         let mut reader = Cursor::new(input_data);
         let mut output = Vec::new();
 
-        let bytes_written = skip_header_and_copy(&mut reader, &mut output).unwrap();
+        let bytes_written = skip_header_and_copy(&mut reader, &mut output, |_| {}).unwrap();
 
         assert_eq!(bytes_written, AUDIO_BUFFER_SIZE * 2 + 100);
         assert_eq!(output.len(), AUDIO_BUFFER_SIZE * 2 + 100);

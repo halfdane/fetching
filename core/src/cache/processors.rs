@@ -217,6 +217,10 @@ pub async fn process_track_cache(
     track_uri: &SpotifyUri,
     output_path: &Path,
     file_id: &librespot_core::file_id::FileId,
+    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
+    task_id: uuid::Uuid,
+    current: u32,
+    total: u32,
 ) -> anyhow::Result<()> {
     // Check if file already exists
     if output_path.exists() {
@@ -252,6 +256,16 @@ pub async fn process_track_cache(
         }
     };
 
+    let _ = tx.send(crate::ProgressUpdate {
+        task_id,
+        scope: crate::ProgressScope::Track,
+        status: "Fetching audio data".to_string(),
+        current,
+        total,
+        item: track_provider.name().await,
+        url: None,
+    });
+
     if let Err(e) = stream_and_cache_track(
         audio_downloader,
         file_id,
@@ -275,10 +289,26 @@ pub async fn process_track_cache(
         return Err(e);
     }
 
-    // Fetch cover art
+    let _ = tx.send(crate::ProgressUpdate {
+        task_id,
+        scope: crate::ProgressScope::Track,
+        status: "Fetching cover art".to_string(),
+        current,
+        total,
+        item: track_provider.name().await,
+        url: None,
+    });
     let cover_art = cache_track_cover_art(image_downloader, track_provider).await;
 
-    // Add metadata to the temp file
+    let _ = tx.send(crate::ProgressUpdate {
+        task_id,
+        scope: crate::ProgressScope::Track,
+        status: "Adding metadata tags".to_string(),
+        current,
+        total,
+        item: track_provider.name().await,
+        url: None,
+    });
     let metadata = TrackMetadata::from_provider(track_provider, cover_art).await;
     if let Err(e) = write_metadata_to_temp(&temp_path, &metadata) {
         // Error already printed by write_metadata_to_temp
