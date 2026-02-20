@@ -6,7 +6,7 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::info;
+use tracing::{info, warn};
 
 const KEYMASTER_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
 const REDIRECT_URI: &str = "http://127.0.0.1:8898/login";
@@ -14,7 +14,7 @@ const SCOPES: &[&str] = &["streaming"];
 
 /// Stored token data with refresh capability
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TokenData {
+pub(crate) struct TokenData {
     pub(crate) access_token: String,
     pub(crate) refresh_token: String,
     pub(crate) expires_at: u64, // Unix timestamp in seconds
@@ -41,8 +41,8 @@ pub(crate) async fn refresh_access_token(refresh_token: &str) -> anyhow::Result<
         REDIRECT_URI,
         SCOPES.to_vec(),
     )
-        .build()
-        .context("Failed to build OAuth client")?;
+    .build()
+    .context("Failed to build OAuth client")?;
 
     let oauth_token = oauth_client
         .refresh_token_async(refresh_token)
@@ -71,18 +71,18 @@ pub(crate) async fn refresh_access_token(refresh_token: &str) -> anyhow::Result<
 }
 
 /// Perform full OAuth flow to acquire new tokens
-pub(crate) async fn perform_oauth_flow(credentials_path: &str) -> anyhow::Result<TokenData> {
+pub(crate) async fn perform_oauth_flow(token_path: &str) -> anyhow::Result<TokenData> {
     info!("No valid access token found, starting OAuth flow...");
     let oauth_token = librespot_oauth::OAuthClientBuilder::new(
         KEYMASTER_CLIENT_ID,
         REDIRECT_URI,
         SCOPES.to_vec(),
     )
-        .open_in_browser()
-        .build()
-        .context("Failed to build OAuth client")?
-        .get_access_token()
-        .context("Failed to get access token")?;
+    .open_in_browser()
+    .build()
+    .context("Failed to build OAuth client")?
+    .get_access_token()
+    .context("Failed to get access token")?;
 
     // Convert Instant to Unix timestamp
     // oauth_token.expires_at is an Instant representing when token expires
@@ -104,24 +104,11 @@ pub(crate) async fn perform_oauth_flow(credentials_path: &str) -> anyhow::Result
         expires_at,
     };
 
-    // Instead of saving to file, display credentials to user for manual storage
-    println!("\n******************************************************");
-    println!("Spotify authentication successful!");
-    println!(
-        "Please copy the following credentials and save them to a file (e.g., {}), then re-run the program with --credentials-file.",
-        credentials_path
-    );
-    println!("\n----- BEGIN SPOTIFY CREDENTIALS -----");
-    println!("{}", serde_json::to_string_pretty(&token_data).unwrap());
-    println!("----- END SPOTIFY CREDENTIALS -----\n");
-    println!("******************************************************\n");
-
-    // Wait for user to press Enter before continuing
-    use std::io::{self, Write};
-    print!("Press Enter to continue...");
-    io::stdout().flush().unwrap();
-    let mut _input = String::new();
-    io::stdin().read_line(&mut _input).unwrap();
+    if let Err(e) = super::token::save_token_data(token_path, &token_data) {
+        warn!("Failed to save token data: {}", e);
+    } else {
+        info!("Token data saved to {}", token_path);
+    }
 
     Ok(token_data)
 }

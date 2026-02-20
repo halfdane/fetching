@@ -17,13 +17,15 @@ use tracing::{debug, info, warn};
 /// - Updates both in-memory token and disk storage
 /// - Ensures long-running sessions don't experience authentication failures
 pub struct TokenRefresher {
+    token_path: String,
     current_token: Arc<RwLock<Option<super::oauth::TokenData>>>,
 }
 
 impl TokenRefresher {
     /// Create a new token refresher (internal use only)
-    pub(crate) fn new(initial_token: super::oauth::TokenData) -> Self {
+    pub(crate) fn new(token_path: String, initial_token: super::oauth::TokenData) -> Self {
         Self {
+            token_path,
             current_token: Arc::new(RwLock::new(Some(initial_token))),
         }
     }
@@ -63,15 +65,9 @@ impl TokenRefresher {
                             Ok(new_token_data) => {
                                 info!("Background token refresh successful");
 
-                                // Do NOT save refreshed credentials to file. Only update in-memory token.
-                                // If a new refresh token is issued, print a warning.
-                                if new_token_data.refresh_token != ref_token {
-                                    warn!("******************************************************");
-                                    warn!("WARNING: Spotify issued a new refresh token.");
-                                    warn!(
-                                        "Please re-authenticate and update your credentials file before your next run, or you may need to re-authenticate again."
-                                    );
-                                    warn!("******************************************************");
+                                // Save to file
+                                if let Err(e) = save_token_data(&self.token_path, &new_token_data) {
+                                    warn!("Failed to save refreshed token: {}", e);
                                 }
 
                                 // Update in-memory token
@@ -95,6 +91,13 @@ pub(crate) fn read_token_data(token_path: &str) -> Option<super::oauth::TokenDat
     serde_json::from_str(&content).ok()
 }
 
+/// Save token data to file
+pub(crate) fn save_token_data(token_path: &str, token_data: &super::oauth::TokenData) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(token_data)?;
+    std::fs::write(token_path, json)?;
+    Ok(())
+}
+
 /// Check if a token has expired (with 5 minute buffer)
 pub(crate) fn is_token_expired(expires_at: u64) -> bool {
     let now = SystemTime::now()
@@ -116,6 +119,27 @@ mod tests {
     }
 
     #[test]
+    fn test_save_and_read_token_data() {
+        let temp_file = "/tmp/test_token_data.json";
+        let token_data = crate::auth::oauth::TokenData {
+            access_token: "test_access_token".to_string(),
+            refresh_token: "test_refresh_token".to_string(),
+            expires_at: 1234567890,
+        };
+
+        // Save and read back
+        save_token_data(temp_file, &token_data).unwrap();
+        let result = read_token_data(temp_file);
+        assert!(result.is_some());
+        
+        let loaded = result.unwrap();
+        assert_eq!(loaded.access_token, "test_access_token");
+        assert_eq!(loaded.refresh_token, "test_refresh_token");
+        assert_eq!(loaded.expires_at, 1234567890);
+
+        // Cleanup
+        std::fs::remove_file(temp_file).ok();
+    }    #[test]
     fn test_is_token_expired() {
         // Token expired 1 hour ago
         let past = SystemTime::now()
@@ -156,10 +180,9 @@ mod tests {
         // Verify the refresher was created with correct data
         // We can't easily test the background task without complex mocking,
         // but we can test the basic structure
-        assert_eq!(refresher.credentials_path, temp_file);
+        assert_eq!(refresher.token_path, temp_file);
 
         // Cleanup
         std::fs::remove_file(temp_file).ok();
     }
-    // Obsolete test for file writing/removal removed. Only token reading/expiry tests remain.
 }
