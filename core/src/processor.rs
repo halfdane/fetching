@@ -4,19 +4,19 @@
 //! including tracks, albums, and playlists.
 
 use tracing::{error, info};
-use uuid::Uuid;
 
 use crate::cache::{cache_album, cache_playlist, get_track_with_ogg_format, process_track_cache};
 use crate::config::Config;
 use crate::implementations::LibrespotTrackFetcher;
 use crate::metadata::build_track_path;
+use crate::progress::ProgressReporter;
 
-/// Process a single Spotify URI (track, album, or playlist) with a given task_id
+/// Process a single Spotify URI (track, album, or playlist) with a given ProgressReporter
 pub async fn process_url(
     session: &librespot_core::session::Session,
-    task_id: Uuid,
     url: &str,
     config: &Config,
+    reporter: &ProgressReporter,
 ) -> anyhow::Result<()> {
     let spotify_uri = match crate::input::parse_spotify_uri(url) {
         Ok(uri) => uri,
@@ -25,14 +25,14 @@ pub async fn process_url(
             anyhow::bail!("Failed to parse URI: {}", e);
         }
     };
-    process_single_uri(session, &spotify_uri, config, task_id).await
+    process_single_uri(session, &spotify_uri, config, reporter).await
 }
 
 pub async fn handle_track(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
-    task_id: Uuid,
+    reporter: &ProgressReporter,
 ) -> anyhow::Result<()> {
     info!("Caching single track...");
     let track_fetcher = LibrespotTrackFetcher { session };
@@ -58,7 +58,7 @@ pub async fn handle_track(
         spotify_uri,
         &output_path,
         &file_id,
-        task_id,
+        reporter,
         1,
         1,
     )
@@ -70,9 +70,8 @@ async fn handle_album(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
-    task_id: Uuid,
+    reporter: &ProgressReporter,
 ) -> anyhow::Result<()> {
-
     let album_fetcher = crate::implementations::LibrespotAlbumFetcher { session };
     let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
     let audio_downloader = crate::stream::LibrespotAudioDownloader { session };
@@ -84,7 +83,7 @@ async fn handle_album(
         &image_downloader,
         spotify_uri,
         config,
-        task_id,
+        reporter,
     )
         .await?;
     Ok(())
@@ -94,7 +93,7 @@ async fn handle_playlist(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
-    task_id: Uuid,
+    reporter: &ProgressReporter,
 ) -> anyhow::Result<()> {
     let playlist_fetcher = crate::implementations::LibrespotPlaylistFetcher { session };
     let track_fetcher = crate::implementations::LibrespotTrackFetcher { session };
@@ -107,29 +106,28 @@ async fn handle_playlist(
         &image_downloader,
         spotify_uri,
         config,
-        task_id,
+        reporter,
     )
         .await?;
-
     Ok(())
 }
 
-// Internal: process a single Spotify URI with a given task_id
+// Internal: process a single Spotify URI
 async fn process_single_uri(
     session: &librespot_core::session::Session,
     spotify_uri: &librespot_core::SpotifyUri,
     config: &Config,
-    task_id: Uuid,
+    reporter: &ProgressReporter,
 ) -> anyhow::Result<()> {
     match spotify_uri {
         librespot_core::SpotifyUri::Track { .. } => {
-            handle_track(session, spotify_uri, config, task_id).await?;
+            handle_track(session, spotify_uri, config, reporter).await?;
         }
         librespot_core::SpotifyUri::Album { .. } => {
-            handle_album(session, spotify_uri, config, task_id).await?;
+            handle_album(session, spotify_uri, config, reporter).await?;
         }
         librespot_core::SpotifyUri::Playlist { .. } => {
-            handle_playlist(session, spotify_uri, config, task_id).await?;
+            handle_playlist(session, spotify_uri, config, reporter).await?;
         }
         _ => {
             anyhow::bail!(

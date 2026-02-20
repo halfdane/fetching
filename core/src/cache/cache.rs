@@ -8,14 +8,12 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use tokio::time::{sleep, Duration};
 use tracing::info;
-use uuid;
 
 use crate::cache::helpers::{format_track_display, get_artist_name_from_vec};
 use crate::cache::images::save_cover_art;
 use crate::cache::processors::{get_track_with_ogg_format, process_track_cache};
 use crate::m3u::{write_m3u_playlist, M3uEntry};
 use crate::metadata::{build_track_path, sanitize};
-use crate::progress;
 
 pub const TRACK_DELAY_MS: u64 = 200;
 
@@ -28,7 +26,7 @@ async fn cache_tracks_with_entries<'a, I>(
     total_tracks: usize,
     base_dir: &str,
     collect_album_covers: bool,
-    task_id: uuid::Uuid,
+    reporter: &crate::progress::ProgressReporter,
 ) -> anyhow::Result<(Vec<M3uEntry>, Vec<Vec<u8>>, Vec<PathBuf>)>
 where
     I: Iterator<Item=&'a SpotifyUri>,
@@ -60,8 +58,8 @@ where
                     continue;
                 }
             };
-        progress::send_update(crate::ProgressUpdate {
-            task_id,
+        reporter.send(crate::ProgressUpdate {
+            task_id: reporter.task_id,
             scope: crate::ProgressScope::Playlist,
             status: "Fetching playlist".to_string(),
             current: (index + 1) as u32,
@@ -83,7 +81,7 @@ where
             track_uri,
             &output_path,
             &file_id,
-            task_id,
+            reporter,
             (index + 1) as u32,
             total_tracks as u32,
         )
@@ -110,8 +108,8 @@ where
                 cached_paths.push(output_path);
 
                 // Emit progress update
-                progress::send_update(crate::ProgressUpdate {
-                    task_id,
+                reporter.send(crate::ProgressUpdate {
+                    task_id: reporter.task_id,
                     scope: crate::ProgressScope::Track,
                     status: format!("Processing track {}/{}", index + 1, total_tracks),
                     current: (index + 1) as u32,
@@ -174,7 +172,7 @@ pub async fn cache_track_collection<'a, I>(
     spotify_url: Option<String>,
     cover_art_bytes: Option<Vec<u8>>,
     collect_album_covers: bool,
-    task_id: uuid::Uuid,
+    reporter: &crate::progress::ProgressReporter,
 ) -> anyhow::Result<Vec<PathBuf>>
 where
     I: Iterator<Item=&'a SpotifyUri>,
@@ -188,7 +186,7 @@ where
         total_tracks,
         base_dir,
         collect_album_covers,
-        task_id,
+        reporter,
     )
         .await?;
 
@@ -223,7 +221,7 @@ pub async fn cache_album(
     image_downloader: &dyn crate::traits::ImageDownloader,
     album_uri: &SpotifyUri,
     config: &crate::config::Config,
-    task_id: uuid::Uuid,
+    reporter: &crate::progress::ProgressReporter,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching album metadata...");
     let album = album_fetcher.fetch_album(album_uri).await?;
@@ -231,8 +229,8 @@ pub async fn cache_album(
     let artists = album.album_artists().await;
     let artists_str = artists.join(", ");
 
-    progress::send_update(crate::ProgressUpdate {
-        task_id,
+    reporter.send(crate::ProgressUpdate {
+        task_id: reporter.task_id,
         scope: crate::ProgressScope::Album,
         status: "Fetching album".to_string(),
         current: 0,
@@ -287,7 +285,7 @@ pub async fn cache_album(
         spotify_url,
         cover_art,
         false, // Don't collect album covers for albums (we have the main cover)
-        task_id,
+        reporter,
     )
         .await
 }
@@ -319,7 +317,7 @@ pub async fn cache_playlist(
     image_downloader: &dyn crate::traits::ImageDownloader,
     playlist_uri: &SpotifyUri,
     config: &crate::config::Config,
-    task_id: uuid::Uuid,
+    reporter: &crate::progress::ProgressReporter,
 ) -> anyhow::Result<Vec<PathBuf>> {
     info!("Fetching playlist metadata...");
     let playlist = playlist_fetcher.fetch_playlist(playlist_uri).await?;
@@ -356,7 +354,7 @@ pub async fn cache_playlist(
         spotify_url,
         cover_art,
         true, // Collect album covers for playlist collage
-        task_id,
+        reporter,
     )
         .await
 }

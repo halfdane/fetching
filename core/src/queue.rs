@@ -51,8 +51,12 @@ impl SharedQueue {
                 task_id: Uuid::new_v4(),
                 uri: uri.clone(),
             };
-            crate::progress::send_update(ProgressUpdate {
+            let reporter = crate::progress::ProgressReporter {
                 task_id: task.task_id,
+                tx: self.progress_tx.clone(),
+            };
+            reporter.send(ProgressUpdate {
+                task_id: task.task_id, // will be overwritten by reporter.send
                 scope: ProgressScope::Playlist,
                 status: "Adding to queue".to_string(),
                 current: 0,
@@ -78,10 +82,14 @@ impl SharedQueue {
         let config = (*config_guard).clone();
         let task_id = task.task_id;
         let uri = task.uri;
+        let reporter = crate::progress::ProgressReporter {
+            task_id,
+            tx: self.progress_tx.clone(),
+        };
 
         let handle = tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Runtime::new().expect("runtime");
-            rt.block_on(crate::processor::process_url(&session, task_id, &uri, &config))
+            rt.block_on(crate::processor::process_url(&session, &uri, &config, &reporter))
         });
 
         match handle.await {
@@ -124,4 +132,3 @@ impl SharedQueue {
         self.progress_tx.clone()
     }
 }
-

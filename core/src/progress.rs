@@ -27,8 +27,14 @@ pub fn init_progress_tx(capacity: usize) -> broadcast::Receiver<ProgressUpdate> 
     rx
 }
 
-pub fn send_update(update: ProgressUpdate) {
-    if let Some(tx) = PROGRESS_TX.get() {
-        let _ = tx.send(update);
+pub struct ProgressReporter {
+    pub task_id: uuid::Uuid,
+    pub tx: tokio::sync::broadcast::Sender<ProgressUpdate>,
+}
+
+impl ProgressReporter {
+    pub fn send(&self, mut update: ProgressUpdate) {
+        update.task_id = self.task_id;
+        let _ = self.tx.send(update);
     }
 }

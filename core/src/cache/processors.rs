@@ -11,7 +11,6 @@ use tracing::{debug, error, info, warn};
 use crate::cache::helpers::build_temp_path;
 use crate::error::DownloadError;
 use crate::metadata::{write_ogg_tags, TrackMetadata};
-use crate::progress;
 use crate::stream::stream_and_cache_track;
 use crate::traits::TrackMetadataProvider;
 
@@ -218,7 +217,7 @@ pub async fn process_track_cache(
     track_uri: &SpotifyUri,
     output_path: &Path,
     file_id: &librespot_core::file_id::FileId,
-    task_id: uuid::Uuid,
+    reporter: &crate::progress::ProgressReporter,
     current: u32,
     total: u32,
 ) -> anyhow::Result<()> {
@@ -256,8 +255,8 @@ pub async fn process_track_cache(
         }
     };
 
-    progress::send_update(crate::ProgressUpdate {
-        task_id,
+    reporter.send(crate::ProgressUpdate {
+        task_id: reporter.task_id,
         scope: crate::ProgressScope::Track,
         status: "Fetching audio data".to_string(),
         current,
@@ -288,8 +287,8 @@ pub async fn process_track_cache(
         return Err(e);
     }
 
-    progress::send_update(crate::ProgressUpdate {
-        task_id,
+    reporter.send(crate::ProgressUpdate {
+        task_id: reporter.task_id,
         scope: crate::ProgressScope::Track,
         status: "Fetching cover art".to_string(),
         current,
@@ -298,8 +297,8 @@ pub async fn process_track_cache(
     });
     let cover_art = cache_track_cover_art(image_downloader, track_provider).await;
 
-    progress::send_update(crate::ProgressUpdate {
-        task_id,
+    reporter.send(crate::ProgressUpdate {
+        task_id: reporter.task_id,
         scope: crate::ProgressScope::Track,
         status: "Adding metadata tags".to_string(),
         current,
