@@ -19,19 +19,25 @@ pub mod playback;
 pub mod processor;
 pub mod stream;
 pub mod traits;
+mod progress;
 
 // Re-export create_session
 pub use auth::session::create_session;
+use crate::progress::init_progress_tx;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProgressUpdate {
+    // identify place in the ui
     pub task_id: Uuid,
+    // track/album/playlist/global
     pub scope: ProgressScope,
+    // "queued", "fetching metadata", "downloading", "done", "error"
     pub status: String,
+    // for progress bars
     pub current: u32,
+    // for progress bars
     pub total: u32,
-    pub item: String,
-    pub url: Option<String>,
+    pub user_visible_identifier: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -52,7 +58,7 @@ pub struct Task {
 pub struct SharedQueue {
     pub tasks: Arc<RwLock<Vec<Task>>>,
     session: Arc<librespot_core::Session>,
-    config: Arc<RwLock<config::Config>>, // Thread-safe
+    config: Arc<RwLock<config::Config>>,
     progress_tx: tokio::sync::broadcast::Sender<ProgressUpdate>,
 }
 
@@ -65,24 +71,36 @@ impl SharedQueue {
         config: config::Config,
         capacity: usize,
     ) -> (Arc<Self>, broadcast::Receiver<ProgressUpdate>) {
-        let (progress_tx, progress_rx) = broadcast::channel(capacity);
+        let rx = init_progress_tx(capacity);
+        let tx = progress::PROGRESS_TX.get().unwrap().clone();
+
         let queue = Arc::new(Self {
             session,
             tasks: Arc::new(RwLock::new(Vec::new())),
             config: Arc::new(RwLock::new(config)),
-            progress_tx,
+            progress_tx: tx,
         });
-        (queue, progress_rx)
+
+        (queue, rx)
     }
 
     pub async fn add_tasks(&self, uris: Vec<String>) {
         tracing::info!("Adding {} tasks", uris.len());
+
         let mut tasks = self.tasks.write().await;
         for uri in uris {
             let task = Task {
                 task_id: Uuid::new_v4(),
                 uri: uri.clone(),
             };
+            progress::send_update(crate::ProgressUpdate {
+                task_id: task.task_id,
+                scope: crate::ProgressScope::Playlist,
+                status: "Fetching playlist".to_string(),
+                current: 0,
+                total: 1,
+                user_visible_identifier: Some(task.uri.clone())
+            });
             tasks.push(task.clone());
             tracing::debug!("Pushed task: {:?}", task.task_id);
         }
@@ -100,7 +118,6 @@ impl SharedQueue {
         let session = Arc::clone(&self.session);
         let config_guard = self.config.read().await;
         let config = (*config_guard).clone(); // Or & if deref
-        let progress_tx = self.progress_tx.clone();
         let task_id = task.task_id;
         let uri = task.uri;
 
@@ -111,7 +128,6 @@ impl SharedQueue {
                 task_id,
                 &uri,
                 &config,
-                progress_tx,
             ))
         });
 

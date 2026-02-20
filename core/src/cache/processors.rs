@@ -11,6 +11,7 @@ use tracing::{debug, error, info, warn};
 use crate::cache::helpers::build_temp_path;
 use crate::error::DownloadError;
 use crate::metadata::{write_ogg_tags, TrackMetadata};
+use crate::progress;
 use crate::stream::stream_and_cache_track;
 use crate::traits::TrackMetadataProvider;
 
@@ -217,7 +218,6 @@ pub async fn process_track_cache(
     track_uri: &SpotifyUri,
     output_path: &Path,
     file_id: &librespot_core::file_id::FileId,
-    tx: tokio::sync::broadcast::Sender<crate::ProgressUpdate>,
     task_id: uuid::Uuid,
     current: u32,
     total: u32,
@@ -256,14 +256,13 @@ pub async fn process_track_cache(
         }
     };
 
-    let _ = tx.send(crate::ProgressUpdate {
+    progress::send_update(crate::ProgressUpdate {
         task_id,
         scope: crate::ProgressScope::Track,
         status: "Fetching audio data".to_string(),
         current,
         total,
-        item: track_provider.name().await,
-        url: None,
+        user_visible_identifier: Some(track_provider.name().await),
     });
 
     if let Err(e) = stream_and_cache_track(
@@ -289,25 +288,23 @@ pub async fn process_track_cache(
         return Err(e);
     }
 
-    let _ = tx.send(crate::ProgressUpdate {
+    progress::send_update(crate::ProgressUpdate {
         task_id,
         scope: crate::ProgressScope::Track,
         status: "Fetching cover art".to_string(),
         current,
         total,
-        item: track_provider.name().await,
-        url: None,
+        user_visible_identifier: Some(track_provider.name().await),
     });
     let cover_art = cache_track_cover_art(image_downloader, track_provider).await;
 
-    let _ = tx.send(crate::ProgressUpdate {
+    progress::send_update(crate::ProgressUpdate {
         task_id,
         scope: crate::ProgressScope::Track,
         status: "Adding metadata tags".to_string(),
         current,
         total,
-        item: track_provider.name().await,
-        url: None,
+        user_visible_identifier: Some(track_provider.name().await),
     });
     let metadata = TrackMetadata::from_provider(track_provider, cover_art).await;
     if let Err(e) = write_metadata_to_temp(&temp_path, &metadata) {

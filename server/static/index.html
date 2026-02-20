@@ -105,7 +105,7 @@
         tasksBody.innerHTML = '';
         Object.values(tasks).forEach(task => {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td>${task.task_id}</td><td>${task.url}</td><td class="status">${task.status}</td>`;
+            tr.innerHTML = `<td>${task.task_id}</td><td>${task.user_visible_identifier}</td><td class="status">${task.status}</td>`;
             tasksBody.appendChild(tr);
         });
     }

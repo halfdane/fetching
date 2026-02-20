@@ -5,7 +5,7 @@ use axum::{
     routing::get,
     Router,
 };
-use fetching_core::{ProgressScope, ProgressUpdate, SharedQueue};
+use fetching_core::SharedQueue;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -30,17 +30,6 @@ async fn queue_url(
     tracing::info!("Web: queued task {}: {}", task_id, payload.url);
 
     state.queue.add_tasks(vec![payload.url.clone()]).await;
-
-    let queued_update = ProgressUpdate {
-        task_id,
-        scope: ProgressScope::Global,
-        status: "queued".to_string(),
-        current: 0,
-        total: 0,
-        item: "".to_string(),
-        url: Some(payload.url),
-    };
-    let _ = state.queue.as_ref().progress_tx().send(queued_update);
 
     axum::http::StatusCode::ACCEPTED
 }

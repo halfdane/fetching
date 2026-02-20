@@ -62,8 +62,10 @@ async fn main() -> anyhow::Result<()> {
 
             tokio::spawn(async move {
                 while let Ok(update) = progress_rx.recv().await {
+                    let current_status = update.status;
+                    let current_user_id = update.user_visible_identifier.clone().unwrap_or_default();
                     println!("{} {}",
-                             update.status, update.item);
+                             current_status, current_user_id);
                 }
                 println!("Queue complete!");
             });
@@ -84,6 +86,13 @@ async fn main() -> anyhow::Result<()> {
             port,
             credentials_file,
         } => {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                )
+                .init();
+
             let (raw_session, _refresher, _refresh_handle) =
                 create_session(&credentials_file).await?;
             let session = Arc::new(raw_session);
