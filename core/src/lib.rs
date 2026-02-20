@@ -6,7 +6,6 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use uuid::Uuid;
-use std::cell::Cell;
 
 pub mod auth;
 pub mod cache;
@@ -24,47 +23,7 @@ mod progress;
 
 // Re-export create_session
 pub use auth::session::create_session;
-use crate::progress::init_progress_tx;
-
-use tokio::task_local;
-
-task_local! {
-    static CURRENT_TASK_ID: Cell<Option<Uuid>>;
-}
-
-pub fn set_current_task_id(id: Uuid) {
-    CURRENT_TASK_ID.try_with(|cell| {
-        cell.set(Some(id));
-    }).ok();
-}
-
-pub fn current_task_id() -> Option<Uuid> {
-    CURRENT_TASK_ID.try_with(|cell| cell.get()).ok().flatten()
-}
-
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ProgressUpdate {
-    // identify place in the ui
-    pub task_id: Uuid,
-    // track/album/playlist/global
-    pub scope: ProgressScope,
-    // "queued", "fetching metadata", "downloading", "done", "error"
-    pub status: String,
-    // for progress bars
-    pub current: u32,
-    // for progress bars
-    pub total: u32,
-    pub user_visible_identifier: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum ProgressScope {
-    Track,
-    Album,
-    Playlist,
-    Global,
-}
+use crate::progress::{init_progress_tx, ProgressUpdate, ProgressScope};
 
 #[derive(Debug, Clone)]
 pub struct Task {
@@ -110,9 +69,9 @@ impl SharedQueue {
                 task_id: Uuid::new_v4(),
                 uri: uri.clone(),
             };
-            progress::send_update(crate::ProgressUpdate {
+            progress::send_update(ProgressUpdate {
                 task_id: task.task_id,
-                scope: crate::ProgressScope::Playlist,
+                scope: ProgressScope::Playlist,
                 status: "Adding to queue".to_string(),
                 current: 0,
                 total: 1,
@@ -139,7 +98,6 @@ impl SharedQueue {
         let uri = task.uri;
 
         let handle = tokio::task::spawn_blocking(move || {
-            set_current_task_id(task.task_id);
             let rt = tokio::runtime::Runtime::new().expect("runtime");
             rt.block_on(processor::process_url(&session, task_id, &uri, &config))
         });

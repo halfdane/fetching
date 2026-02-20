@@ -1,6 +1,23 @@
 use once_cell::sync::OnceCell;
 use tokio::sync::broadcast;
-use crate::ProgressUpdate;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProgressUpdate {
+    pub task_id: uuid::Uuid,
+    pub scope: ProgressScope,
+    pub status: String,
+    pub current: u32,
+    pub total: u32,
+    pub user_visible_identifier: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum ProgressScope {
+    Track,
+    Album,
+    Playlist,
+    Global,
+}
 
 pub static PROGRESS_TX: OnceCell<broadcast::Sender<ProgressUpdate>> = OnceCell::new();
 
