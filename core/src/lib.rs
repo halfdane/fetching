@@ -6,6 +6,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use uuid::Uuid;
+use std::cell::Cell;
 
 pub mod auth;
 pub mod cache;
@@ -24,6 +25,23 @@ mod progress;
 // Re-export create_session
 pub use auth::session::create_session;
 use crate::progress::init_progress_tx;
+
+use tokio::task_local;
+
+task_local! {
+    static CURRENT_TASK_ID: Cell<Option<Uuid>>;
+}
+
+pub fn set_current_task_id(id: Uuid) {
+    CURRENT_TASK_ID.try_with(|cell| {
+        cell.set(Some(id));
+    }).ok();
+}
+
+pub fn current_task_id() -> Option<Uuid> {
+    CURRENT_TASK_ID.try_with(|cell| cell.get()).ok().flatten()
+}
+
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProgressUpdate {
@@ -86,7 +104,6 @@ impl SharedQueue {
 
     pub async fn add_tasks(&self, uris: Vec<String>) {
         tracing::info!("Adding {} tasks", uris.len());
-
         let mut tasks = self.tasks.write().await;
         for uri in uris {
             let task = Task {
@@ -96,7 +113,7 @@ impl SharedQueue {
             progress::send_update(crate::ProgressUpdate {
                 task_id: task.task_id,
                 scope: crate::ProgressScope::Playlist,
-                status: "Fetching playlist".to_string(),
+                status: "Adding to queue".to_string(),
                 current: 0,
                 total: 1,
                 user_visible_identifier: Some(task.uri.clone())
@@ -117,18 +134,14 @@ impl SharedQueue {
 
         let session = Arc::clone(&self.session);
         let config_guard = self.config.read().await;
-        let config = (*config_guard).clone(); // Or & if deref
+        let config = (*config_guard).clone();
         let task_id = task.task_id;
         let uri = task.uri;
 
         let handle = tokio::task::spawn_blocking(move || {
+            set_current_task_id(task.task_id);
             let rt = tokio::runtime::Runtime::new().expect("runtime");
-            rt.block_on(processor::process_url(
-                &session,
-                task_id,
-                &uri,
-                &config,
-            ))
+            rt.block_on(processor::process_url(&session, task_id, &uri, &config))
         });
 
         match handle.await {
