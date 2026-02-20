@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use fetching_core::create_session;
+use fetching_core::init_progress_tx;
 use fetching_core::{config, SharedQueue};
 use server_lib::server::{app, AppState};
 use std::sync::Arc;
@@ -54,18 +55,35 @@ async fn main() -> anyhow::Result<()> {
         Commands::Batch {
             urls,
             credentials_file} => {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                )
+                .init();
+
             let (raw_session, _refresher, _refresh_handle) =
                 create_session(&credentials_file).await?;
             let session = Arc::new(raw_session);
             let config = config::Config::from_env();
-            let (shared_queue, mut progress_rx) = SharedQueue::new(session, config, 100);
+            let (progress_tx, _) = tokio::sync::broadcast::channel(100);
+            let (shared_queue, mut progress_rx) = SharedQueue::new(session, config, progress_tx.clone());
 
-            tokio::spawn(async move {
-                while let Ok(update) = progress_rx.recv().await {
-                    let current_status = update.status;
-                    let current_user_id = update.user_visible_identifier.clone().unwrap_or_default();
-                    println!("{} {}",
-                             current_status, current_user_id);
+            let progress_handle = tokio::spawn(async move {
+                loop {
+                    match progress_rx.recv().await {
+                        Ok(update) => {
+                            let current_status = update.status.clone();
+                            let current_user_id = update.user_visible_identifier.clone().unwrap_or_default();
+                            println!("{} {}", current_status, current_user_id);
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            continue;
+                        }
+                    }
                 }
                 println!("Queue complete!");
             });
@@ -77,9 +95,14 @@ async fn main() -> anyhow::Result<()> {
                 { shared_queue.tasks.read().await }.len()
             );
 
-            while !shared_queue.is_empty().await {
-                let _ = shared_queue.process_next().await;
-            }
+            // Use a short idle timeout for batch mode (e.g., 500ms)
+            let worker = shared_queue.clone().run_worker(Duration::from_millis(500));
+            worker.await.expect("Worker panicked");
+
+            // Drop all senders to close the channel and allow the progress reporter to exit
+            drop(shared_queue);
+            drop(progress_tx);
+            let _ = progress_handle.await;
         }
 
         Commands::Server {
@@ -97,7 +120,9 @@ async fn main() -> anyhow::Result<()> {
                 create_session(&credentials_file).await?;
             let session = Arc::new(raw_session);
             let config = config::Config::from_env();
-            let (shared_queue, _) = SharedQueue::new(session, config, 100);
+            let _ = init_progress_tx(100);
+            let tx = fetching_core::PROGRESS_TX.get().unwrap().clone();
+            let (shared_queue, _) = SharedQueue::new(session, config, tx);
             let queue_worker = shared_queue.clone();
 
             let worker = queue_worker.run_worker(Duration::MAX);

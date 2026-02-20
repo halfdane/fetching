@@ -5,7 +5,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use uuid::Uuid;
-use crate::progress::{ProgressUpdate, ProgressScope, init_progress_tx};
+use crate::progress::{ProgressUpdate, ProgressScope};
 
 #[derive(Debug, Clone)]
 pub struct Task {
@@ -28,18 +28,15 @@ impl SharedQueue {
     pub fn new(
         session: Arc<librespot_core::Session>,
         config: crate::config::Config,
-        capacity: usize,
+        sender: broadcast::Sender<ProgressUpdate>,
     ) -> (Arc<Self>, broadcast::Receiver<ProgressUpdate>) {
-        let rx = init_progress_tx(capacity);
-        let tx = crate::progress::PROGRESS_TX.get().unwrap().clone();
-
+        let rx = sender.subscribe();
         let queue = Arc::new(Self {
             session,
             tasks: Arc::new(RwLock::new(Vec::new())),
             config: Arc::new(RwLock::new(config)),
-            progress_tx: tx,
+            progress_tx: sender,
         });
-
         (queue, rx)
     }
 

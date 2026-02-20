@@ -14,7 +14,7 @@ mod progress;
 pub mod queue;
 pub use queue::{SharedQueue, Task};
 
-use crate::progress::{ProgressScope, ProgressUpdate};
+pub use crate::progress::{ProgressScope, ProgressUpdate, init_progress_tx};
 // Re-export create_session
 pub use auth::session::create_session;
-
+pub use progress::PROGRESS_TX;
