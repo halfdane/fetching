@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "fetching"
-version = "0.1.0"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "fetching-core"
-version = "0.1.0"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3246,7 +3246,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.1.0"
+version = "0.1.5"
 dependencies = [
  "anyhow",
  "async-stream",

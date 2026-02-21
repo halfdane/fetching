@@ -21,6 +21,7 @@
           pkgs.cmake
           pkgs.python3
           pkgs.vorbis-tools # for ogginfo, vorbiscomment, etc.
+          pkgs.cargo-edit
         ];
         shellHook = ''
           export RUST_BACKTRACE=1
