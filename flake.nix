@@ -4,6 +4,8 @@
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
   outputs = { self, nixpkgs, rust-overlay }:
     let
+      cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+      version = cargoToml.package.version;
       systems = [ "aarch64-linux" "x86_64-linux" ];
       mkDevShell = system: let
         pkgs = import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
@@ -28,7 +30,7 @@
         pkgs = import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
       in pkgs.rustPlatform.buildRustPackage {
         pname = "fetching";
-        version = "0.1.0";
+        version = version;
         src = ./.;
         cargoLock = {
           lockFile = ./Cargo.lock;
