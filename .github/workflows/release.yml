@@ -1,0 +1,81 @@
+name: Release Build
+
+on:
+  push:
+    branches:
+      - main
+    # Exclude version bump commits
+    # Only run if commit message does NOT contain '[skip ci]'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [aarch64-linux, x86_64-linux]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Nix
+        uses: cachix/cachix-action@v12
+        with:
+          install_nix: true
+
+      - name: Build release binary
+        run: |
+          nix build .#packages.${{ matrix.arch }}.default
+          mkdir -p dist/${{ matrix.arch }}
+          cp result/bin/fetching dist/${{ matrix.arch }}/fetching
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetching-${{ matrix.arch }}
+          path: dist/${{ matrix.arch }}/fetching
+
+  bump-version:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cargo-edit
+        run: |
+          cargo install cargo-edit
+
+      - name: Bump patch version
+        run: |
+          cargo set-version --bump patch
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add Cargo.toml
+          git commit -m "chore: bump patch version [skip ci]"
+          git push
+
+  release:
+    needs: bump-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Release ${{ github.run_number }}
+          files: |
+            dist/fetching-aarch64-linux/fetching
+            dist/fetching-x86_64-linux/fetching
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
