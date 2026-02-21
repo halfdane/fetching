@@ -7,8 +7,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Parser)]
-#[command(name = "fetching", version, about = "Spotify Player CLI", author)]
+#[command(name = "fetching", version, about = "Spotify Player CLI", author, disable_version_flag = true)]
 struct Cli {
+    /// Print build info (version + commit hash) and exit
+    #[arg(long, help = "Print build info (version + commit hash) and exit")]
+    hash: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -51,6 +54,12 @@ enum Commands {
 #[tokio::main(flavor = "multi_thread", worker_threads = 3)]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    if cli.hash {
+        let version = env!("CARGO_PKG_VERSION");
+        let git_hash = env!("GIT_HASH");
+        println!("fetching v{} (commit {})", version, git_hash);
+        return Ok(());
+    }
     match cli.command {
         Commands::Batch {
             urls,

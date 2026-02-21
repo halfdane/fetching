@@ -51,6 +51,23 @@ On first run, the application will:
 
 Subsequent runs will reuse the cached credentials automatically.
 
+## Version Information
+
+The `--version` or `-V` flag prints the current version and latest commit hash, then exits.
+
+- The version is sourced from Cargo.toml (`CARGO_PKG_VERSION`).
+- The commit hash is injected at build time using a build script (`build.rs`).
+- This works for builds via `cargo run`, `cargo build`, and Nix (if using Cargo).
+
+Example:
+
+```bash
+fetching --version
+fetching v1.2.3 (commit 9f8c7b6)
+```
+
+If the commit hash cannot be determined, it prints `unknown`.
+
 ## Configuration
 
 Environment variables (all optional):
