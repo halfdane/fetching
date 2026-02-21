@@ -28,7 +28,14 @@
         '';
       };
       mkPackage = system: let
-        pkgs = import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
+        pkgs = if system == "aarch64-linux" then
+          import nixpkgs {
+            system = "x86_64-linux";
+            crossSystem = { config = "aarch64-unknown-linux-gnu"; };
+            overlays = [ rust-overlay.overlays.default ];
+          }
+        else
+          import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
       in pkgs.rustPlatform.buildRustPackage {
         pname = "fetching";
         version = version;

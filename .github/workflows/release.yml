@@ -29,8 +29,8 @@ jobs:
         run: |
           nix build .#packages.${{ matrix.arch }}.default
           mkdir -p dist/${{ matrix.arch }}
+          ls -R result
           cp result/bin/fetching dist/${{ matrix.arch }}/fetching
-      - run: nix-shell --run "echo OK"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
