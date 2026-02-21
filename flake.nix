@@ -43,7 +43,7 @@
         cargoLock = {
           lockFile = ./Cargo.lock;
         };
-        nativeBuildInputs = [ pkgs.pkg-config pkgs.cmake ];
+        nativeBuildInputs = [ pkgs.pkg-config pkgs.cmake pkgs.nodejs ];
         buildInputs = [
           pkgs.openssl
           pkgs.avahi
