@@ -21,6 +21,7 @@
           pkgs.cmake
           pkgs.python3
           pkgs.cargo-edit
+          pkgs.cargo-watch
         ];
         shellHook = ''
           export RUST_BACKTRACE=1

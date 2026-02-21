@@ -9,8 +9,9 @@ use fetching_core::SharedQueue;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tower_http::services::ServeDir;
 use uuid::Uuid;
+
+use crate::handlers::pwa_handler;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -35,7 +36,7 @@ async fn queue_url(
 }
 async fn get_status(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     // TODO: return JSON status
-    axum::response::Html("<pre>Status: TODO</pre>")
+    axum::response::Html("<pre>Status: TODO yeah</pre>")
 }
 
 async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -61,12 +62,8 @@ async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
-        .nest_service(
-            "/",
-            ServeDir::new("frontend/build").not_found_service(axum::routing::get(|| async {
-                axum::http::StatusCode::NOT_FOUND
-            })),
-        )
+        .route("/", get(pwa_handler))
+        .route("/*path", get(pwa_handler))
         .route("/api/queue", axum::routing::post(queue_url))
         .route("/api/status", get(get_status))
         .route("/events", get(events))
