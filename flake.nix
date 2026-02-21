@@ -46,11 +46,8 @@
         nativeBuildInputs = [ pkgs.pkg-config pkgs.cmake ];
         buildInputs = [
           pkgs.openssl
-          pkgs.alsa-lib
           pkgs.avahi
-          pkgs.libpulseaudio
-          pkgs.dbus
-          pkgs.vorbis-tools
+          pkgs.nodejs
         ];
       };
     in {
