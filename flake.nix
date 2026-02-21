@@ -14,13 +14,10 @@
           pkgs.rustup
           pkgs.pkg-config
           pkgs.openssl
-          pkgs.alsa-lib
           pkgs.avahi
-          pkgs.libpulseaudio
           pkgs.dbus
           pkgs.cmake
           pkgs.python3
-          pkgs.vorbis-tools # for ogginfo, vorbiscomment, etc.
           pkgs.cargo-edit
         ];
         shellHook = ''

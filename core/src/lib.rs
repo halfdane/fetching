@@ -6,7 +6,6 @@ pub mod implementations;
 pub mod input;
 pub mod m3u;
 pub mod metadata;
-pub mod playback;
 pub mod processor;
 pub mod stream;
 pub mod traits;
