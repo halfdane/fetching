@@ -5,3 +5,6 @@
 spotify_uris.txt
 test_uris.txt
 .idea
+frontend/node_modules
+frontend/.svelte-kit
+frontend/build

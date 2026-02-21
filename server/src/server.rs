@@ -63,7 +63,7 @@ pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
         .nest_service(
             "/",
-            ServeDir::new("server/static").not_found_service(axum::routing::get(|| async {
+            ServeDir::new("frontend/build").not_found_service(axum::routing::get(|| async {
                 axum::http::StatusCode::NOT_FOUND
             })),
         )
