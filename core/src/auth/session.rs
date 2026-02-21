@@ -28,7 +28,9 @@ pub async fn create_session(token_path: &str) -> anyhow::Result<(librespot_core:
 pub async fn create_authenticated_session(
     credentials: librespot_core::authentication::Credentials,
 ) -> anyhow::Result<Session> {
+    println!("Creating cache...");
     let cache = Cache::new(Some(".cache"), Some(".cache"), Some(".cache/files"), None)?;
+    println!("Created cache at .cache");
     let session = Session::new(SessionConfig::default(), Some(cache));
     // Try to connect
     session.connect(credentials, false).await?;
