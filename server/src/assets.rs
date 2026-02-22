@@ -1,5 +1,5 @@
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
-#[folder = "../static/pwa/"]
+#[folder = "../frontend/build/"]
 pub struct PwaAssets;

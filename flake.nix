@@ -28,14 +28,17 @@
         '';
       };
       mkPackage = system: let
-        pkgs = if system == "aarch64-linux" then
-          import nixpkgs {
-            system = "x86_64-linux";
-            crossSystem = { config = "aarch64-unknown-linux-gnu"; };
-            overlays = [ rust-overlay.overlays.default ];
-          }
-        else
-          import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
+        pkgs = import nixpkgs { inherit system; overlays = [ rust-overlay.overlays.default ]; };
+        frontendBuild = pkgs.buildNpmPackage {
+          pname = "frontend";
+          version = "1.0.0";
+          src = ./frontend;
+          npmBuildScript = "build";
+          installPhase = ''
+            cp -r build $out
+          '';
+          npmDepsHash = "sha256-2NBaOYvOTmPHnPa0N4i5ojJfS88friOTuZrmz6cM4CU=";
+        };
       in pkgs.rustPlatform.buildRustPackage {
         pname = "fetching";
         version = version;
@@ -43,12 +46,30 @@
         cargoLock = {
           lockFile = ./Cargo.lock;
         };
-        nativeBuildInputs = [ pkgs.pkg-config pkgs.cmake pkgs.nodejs ];
+        nativeBuildInputs = [ 
+          pkgs.pkg-config 
+          pkgs.cmake 
+          pkgs.nodejs 
+          pkgs.openssl 
+        ];
         buildInputs = [
           pkgs.openssl
           pkgs.avahi
           pkgs.nodejs
         ];
+        postPatch = ''
+          mkdir -p frontend/build
+          cp -r ${frontendBuild}/* frontend/build/
+        '';
+
+        buildPhase = ''
+          cargo build --release
+        '';
+        installPhase = ''
+          mkdir -p $out/bin $out/pwa
+          cp target/release/fetching $out/bin/
+          cp -r frontend/build/* $out/pwa/
+        '';
       };
     in {
       devShells = builtins.listToAttrs (map (system: {
