@@ -37,21 +37,54 @@ jobs:
           name: halfdane-fetching
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
+      - name: Stage version bump commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add .
+          git commit -m "chore: bump patch version [skip ci]"
+
       - name: Build release binary
         run: |
           nix build .#default
           mkdir -p dist
           cp result/bin/fetching dist/fetching
 
-      - name: Commit and push version bump
+      - name: Push version bump commit
+        if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add Cargo.toml
-          git commit -m "chore: bump patch version [skip ci]"
           git push
+
+        - name: Get new version
+          id: get_version_tag
+          run: |
+            version=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
+            echo "version=$version" >> $GITHUB_OUTPUT
+
+        - name: Create and push tag
+          if: success()
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            version=${{ steps.get_version_tag.outputs.version }}
+            git tag v$version
+            git push origin v$version
+
+      - name: Get new version
+        id: get_version_tag
+        run: |
+          version=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=${{ steps.get_version_tag.outputs.version }}
+          git tag v$version
+          git push origin v$version
 
       - name: Get new version
         id: get_version
@@ -83,8 +116,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.get_version.outputs.version }}
-          name: Release v${{ steps.get_version.outputs.version }}
+            tag_name: v${{ steps.get_version.outputs.version }}
+            name: Release v${{ steps.get_version.outputs.version }}
           files: dist/fetching
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
