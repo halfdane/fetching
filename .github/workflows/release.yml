@@ -2,31 +2,18 @@ name: Release Build
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
 
 jobs:
-  build-and-bump:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
 
-      - name: Check commit message for 'Release please'
-        id: check_commit
-        run: |
-          msg=$(git log -1 --pretty=%B)
-          echo "Commit message: $msg"
-          if ! echo "$msg" | grep -iq 'Release please'; then
-            echo "No release trigger found, skipping."
-            exit 78
-          fi
-
       - name: Install cargo-edit
         run: cargo install cargo-edit
-
-      - name: Bump patch version (local only)
-        run: cargo set-version --bump patch
       
       - uses: cachix/install-nix-action@v31
         with:
@@ -37,68 +24,20 @@ jobs:
           name: halfdane-fetching
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
-      - name: Stage version bump commit
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git add .
-          git commit -m "chore: bump patch version [skip ci]"
-
       - name: Build release binary
         run: |
           nix build .#default
           mkdir -p dist
           cp result/bin/fetching dist/fetching
 
-      - name: Push version bump commit
-        if: success()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git push
-
-        - name: Get new version
-          id: get_version_tag
-          run: |
-            version=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
-            echo "version=$version" >> $GITHUB_OUTPUT
-
-        - name: Create and push tag
-          if: success()
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          run: |
-            version=${{ steps.get_version_tag.outputs.version }}
-            git tag v$version
-            git push origin v$version
-
-      - name: Get new version
-        id: get_version_tag
-        run: |
-          version=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
-          echo "version=$version" >> $GITHUB_OUTPUT
-
-      - name: Create and push tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          version=${{ steps.get_version_tag.outputs.version }}
-          git tag v$version
-          git push origin v$version
-
-      - name: Get new version
-        id: get_version
-        run: |
-          version=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
-          echo "version=$version" >> $GITHUB_OUTPUT
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: fetching
           path: dist/fetching
+
   publish-release:
-    needs: build-and-bump
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Download artifact
@@ -107,17 +46,8 @@ jobs:
           name: fetching
           path: dist
 
-      - name: Get version
-        id: get_version
-        run: |
-          version=$(grep '^version =' Cargo.toml | head -n1 | cut -d '"' -f2)
-          echo "version=$version" >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-            tag_name: v${{ steps.get_version.outputs.version }}
-            name: Release v${{ steps.get_version.outputs.version }}
-          files: dist/fetching
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            files: dist/fetching
