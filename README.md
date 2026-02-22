@@ -90,3 +90,6 @@ Built with [librespot](https://github.com/librespot-org/librespot).
 
 **Note**: For personal use only. Respects Spotify's streaming infrastructure similar to official mobile apps with
 offline mode.
+
+
+new release
