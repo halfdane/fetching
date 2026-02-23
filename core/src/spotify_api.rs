@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use librespot_core::SpotifyUri;
 
 use crate::container::{TrackCollection};
@@ -8,6 +9,11 @@ pub trait SpotifyMetadata {
     fn fetch_track(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
     fn fetch_episode(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
     fn fetch_show(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
+}
+
+#[async_trait]
+pub trait SpotifyCover: Clone + Send + Sync {
+    async fn fetch_cover(&self, cover_id: &str) -> anyhow::Result<Vec<u8>>;
 }
 
 // Collection factory - dispatch + constructors

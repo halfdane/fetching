@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser};
-use fetching_core_lib::{auth::session::create_session, librespot_fetcher::LibrespotMetadataFetcher, metadata::{fetch_collection}};
+use fetching_core_lib::{auth::session::create_session, librespot_fetcher::LibrespotMetadataFetcher, spotify_api::{fetch_collection}};
 
 // Updated main.rs CLI
 #[derive(Parser)]

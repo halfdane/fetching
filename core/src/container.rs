@@ -71,8 +71,8 @@ impl TrackCollection {
 
 #[cfg(test)]
 mod tests {
-    use crate::metadata::SpotifyMetadata;
-    use crate::metadata::fetch_collection;
+    use crate::spotify_api::SpotifyMetadata;
+    use crate::spotify_api::fetch_collection;
 
     use super::*;
     use librespot_core::FileId;
