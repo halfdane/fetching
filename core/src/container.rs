@@ -52,9 +52,9 @@ pub struct TrackCollection {
     pub cover_id: Option<String>,
     pub upc: Option<String>,
     pub total_tracks: usize,
-    pub popularity: i32,
-    pub label: String,
-    pub date: String,
+    pub popularity: Option<i32>,
+    pub label: Option<String>,
+    pub date: Option<String>,
 
     pub tracks: Vec<Track>,
 }
@@ -111,9 +111,9 @@ mod tests {
             total_tracks: 1, 
             tracks: tracks, 
             upc: Some("albumUPC".to_string()),
-            popularity: 80,
-            label: "Test Label".to_string(),
-            date: "2020-01-01".to_string(),
+            popularity: Some(80),
+            label: Some("Test Label".to_string()),
+            date: Some("2020-01-01".to_string()),
             spotify_uri: None,
         }.rehydrate().unwrap()
     }
@@ -126,6 +126,10 @@ mod tests {
         }
 
         fn fetch_track(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> { 
+            Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
+        }
+
+        fn fetch_playlist(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
             Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
         }
 

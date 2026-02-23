@@ -19,6 +19,7 @@ impl LibrespotFetcher {
             librespot_metadata::track::Track::get(&self.session, spotify_uri))?;
         
         tracing::info!("Fetched track metadata: {}", l_track.name);
+        
         let cover_id = l_track.album.covers.first().map(|c| c.id.to_string()).unwrap_or_default();
         let mut track = Track { 
                     spotify_id: spotify_uri.to_id()?,
@@ -32,7 +33,7 @@ impl LibrespotFetcher {
                     language: l_track.language_of_performance, 
                     isrc: l_track.external_ids.iter().find(|id| id.external_type == "isrc").map(|id| id.id.clone()),
 
-                    date: l_track.earliest_live_timestamp.to_string(),
+                    date: l_track.album.date.to_string(),
                     popularity: l_track.popularity,
                     disc_number: l_track.disc_number,
                     number: l_track.number,
@@ -42,12 +43,13 @@ impl LibrespotFetcher {
 }
 
 impl SpotifyMetadata for LibrespotFetcher {
+
     fn fetch_album(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
         let l_album = futures::executor::block_on(
             librespot_metadata::album::Album::get(&self.session, spotify_uri))?;
 
         tracing::info!("Fetched album metadata: {}", l_album.name);
-        
+
         let tracks = l_album.tracks()
             .map(|track_uri| {
                 let (track, _, _) = self.fetch_single_track(&track_uri)?;
@@ -63,13 +65,13 @@ impl SpotifyMetadata for LibrespotFetcher {
             spotify_uri: Some(l_album.id.clone()),
             title: l_album.name, 
             artists: l_album.artists.iter().map(|a| a.name.clone()).collect(),
-            total_tracks: 1, 
+            total_tracks: tracks.len(),
             cover_id: Some(cover_id.clone()), 
             tracks: tracks, 
             upc: l_album.external_ids.iter().find(|id| id.external_type == "upc").map(|id| id.id.clone()),
-            popularity: l_album.popularity,
-            label: l_album.label,
-            date: l_album.date.to_string(),
+            popularity: Some(l_album.popularity),
+            label: Some(l_album.label),
+            date: Some(l_album.date.to_string()),
         }.rehydrate()?)
     }
 
@@ -85,38 +87,43 @@ impl SpotifyMetadata for LibrespotFetcher {
             cover_id: Some(cover_id.clone()), 
             tracks: vec![track], 
             upc: l_album.external_ids.iter().find(|id| id.external_type == "upc").map(|id| id.id.clone()),
-            popularity: l_album.popularity,
-            label: l_album.label,
-            date: l_album.date.to_string(),
+            popularity: Some(l_album.popularity),
+            label: Some(l_album.label),
+            date: Some(l_album.date.to_string()),
         }.rehydrate()?)
     }
 
-    // fn fetch_playlist(&self, uri: &SpotifyUri) -> Result<PlaylistMetadata> {
-    //     let playlist_id = SpotifyId::from_uri(uri)?.try_into()?;
-    //     let playlist = futures::executor::block_on(metadata::Playlist::load(&self.session, playlist_id))?;
-        
-    //     let mut tracks = vec![];
-    //     for page in playlist.list()?.pages() {
-    //         let page = futures::executor::block_on(page)?;
-    //         for item in page.items {
-    //             if let Ok(track_id) = item.try_into() {
-    //                 let track = futures::executor::block_on(metadata::Track::load(&self.session, track_id))?;
-    //                 tracks.push(TrackMetadata {
-    //                     title: track.name().to_string(),
-    //                     artists: track.artists().iter().map(|a| a.name().to_string()).collect(),
-    //                     duration_ms: track.duration as u32 * 1000,
-    //                     explicit: None,
-    //                     cover_id: track.album().and_then(|a| a.cover_id()).map(|id| id.to_base62()).unwrap_or_default(),
-    //                 });
-    //             }
-    //         }
-    //     }
-        
-    //     Ok(PlaylistMetadata {
-    //         name: playlist.name().to_string(),
-    //         tracks,
-    //     })
-    // }
+    fn fetch_playlist(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
+        let l_playlist = futures::executor::block_on(
+            librespot_metadata::playlist::Playlist::get(&self.session, spotify_uri))?;
+
+        tracing::info!("Fetched playlist metadata: {}", l_playlist.attributes.name);
+
+        let tracks = l_playlist.tracks()
+            .map(|track_uri| {
+                let (track, _, _) = self.fetch_single_track(&track_uri)?;
+                Ok(track)
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let artists = tracks.iter().flat_map(|t| t.artists.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        Ok(TrackCollection { 
+            uri_str: l_playlist.id.to_string(), 
+            spotify_id: l_playlist.id.to_id()?, 
+            spotify_uri: Some(l_playlist.id.clone()),
+            title: l_playlist.attributes.name.clone(), 
+            artists: artists,
+            total_tracks: 1, 
+            cover_id: None, 
+            tracks: tracks, 
+            upc: None,
+            popularity: None,
+            label: None,
+            date: None,
+        }.rehydrate()?)
+    }
 
     // fn fetch_episode(&self, uri: &SpotifyUri) -> Result<EpisodeMetadata> {
     //     // Librespot podcast/episode support is limited; fallback to track-like
