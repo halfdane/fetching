@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser};
-use fetching_core_lib::{auth::session::create_session, librespot_fetcher::LibrespotFetcher, metadata::{fetch_collection}};
+use fetching_core_lib::{auth::session::create_session, librespot_fetcher::LibrespotMetadataFetcher, metadata::{fetch_collection}};
 
 // Updated main.rs CLI
 #[derive(Parser)]
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
         create_session(&credentials_file).await?;
     let session = Arc::new(raw_session);
 
-    let fetcher = LibrespotFetcher::new(&session).await?;
+    let fetcher = LibrespotMetadataFetcher::new(&session).await?;
     
     let container = fetch_collection(&args.uri, &fetcher)?;
     

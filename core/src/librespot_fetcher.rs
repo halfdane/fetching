@@ -5,11 +5,11 @@ use librespot_metadata::{Metadata};
 use crate::container::{TrackCollection, Track};
 use crate::metadata::SpotifyMetadata;
 
-pub struct LibrespotFetcher {
+pub struct LibrespotMetadataFetcher {
     session: Session,
 }
 
-impl LibrespotFetcher {
+impl LibrespotMetadataFetcher {
     pub async fn new(session: &Session) -> anyhow::Result<Self> {
         Ok(Self { session: session.clone() })
     }
@@ -68,7 +68,7 @@ impl LibrespotFetcher {
     }
 }
 
-impl SpotifyMetadata for LibrespotFetcher {
+impl SpotifyMetadata for LibrespotMetadataFetcher {
 
     fn fetch_album(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
         let l_album = futures::executor::block_on(
