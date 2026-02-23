@@ -73,7 +73,7 @@ pub struct Track {
     pub spotify_id: String,
     pub title: String,
     pub artists: Vec<String>,
-    pub duration_ms: u32,
+    pub duration_ms: i32,
     pub media_type: MediaType,
     pub progress: f32,
     
@@ -84,7 +84,7 @@ pub struct Track {
     // Spotify extras
     pub chapters: Option<Vec<Chapter>>,
     pub explicit: bool,
-    pub language: Option<String>,
+    pub language: Vec<String>,
 
     // Transient runtime (ignored in ser/de)
     #[serde(skip_serializing, skip_deserializing)]
@@ -330,6 +330,7 @@ impl Container {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use librespot_core::FileId;
     use pretty_assertions::{assert_eq};
 
     const VALID_ID_1: &str = "6rqhFgbbKwnb9MLmUQDhG6";
@@ -385,5 +386,29 @@ mod tests {
         let mut deserialized: Container = serde_json::from_slice(&serialized).unwrap();
         deserialized.rehydrate().unwrap(); // Reconstruct SpotifyUri from uri_str
         assert_eq!(deserialized, container); // No SpotifyUri, serializes fine
+    }
+
+    #[test]
+    fn test_fileid() {
+        let bytes: [u8; 20] = [0x01, 0x02, 0x03, 0x04, 0x05,
+                       0x06, 0x07, 0x08, 0x09, 0x0A,
+                       0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+                       0x10, 0x11, 0x12, 0x13, 0x14];
+        let file_id = FileId(bytes);
+        // let file_id = FileId([/* 20 bytes */]);
+        let hex_str = file_id.to_string(); // e.g. "abcdef123456..."
+
+        use hex;
+
+        // Convert hex string back to FileId
+        let bytes = hex::decode(&hex_str).expect("valid hex");
+        let new_file_id = FileId::from_raw(&bytes);
+
+        // new_file_id is now equivalent to the original file_id
+        println!("Original FileId: {:?}", file_id);
+        println!("Hex String: {}", hex_str);
+        println!("Reconstructed FileId: {:?}", new_file_id);
+
+        assert_eq!(file_id, new_file_id);
     }
 }
