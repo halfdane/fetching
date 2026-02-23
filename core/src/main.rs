@@ -1,8 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
-use clap::{Parser, Subcommand};
-use fetching_core_lib::{auth::session::create_session, container::dispatch_container, librespot_fetcher::LibrespotFetcher, metadata::SpotifyMetadata};
-
+use clap::{Parser};
+use fetching_core_lib::{auth::session::create_session, librespot_fetcher::LibrespotFetcher, metadata::{fetch_collection}};
 
 // Updated main.rs CLI
 #[derive(Parser)]
@@ -29,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
 
     let fetcher = LibrespotFetcher::new(&session).await?;
     
-    let container = dispatch_container(&args.uri, &fetcher)?;
+    let container = fetch_collection(&args.uri, &fetcher)?;
     
     // Print metadata (same as before)
     println!("Container: {} ({:?} tracks)", container.title, container.total_tracks);
