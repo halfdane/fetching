@@ -1,6 +1,6 @@
-use std::path::{PathBuf};
+use std::{collections::HashSet, path::PathBuf};
 
-use crate::{container::TrackCollection, spotify_api::SpotifyCover};
+use crate::{container::{Track, TrackCollection}, spotify_api::SpotifyCover};
 use anyhow::Result;
 
 pub struct CoverCache<C: SpotifyCover + Send + Sync + 'static> {
@@ -15,8 +15,8 @@ impl<C: SpotifyCover + Send + Sync + 'static> CoverCache<C> {
 
     /// Warm cache for a single container: dedup unique cover IDs from tracks + container,
     /// fetch missing in parallel. Handles playlist multi-album case.
-    pub async fn warm_from_container(&self, container: &TrackCollection) -> Result<()> {
-        let unique_covers = self.collect_unique_covers(container);
+    pub async fn warm_from_container(&self, tracks: Vec<Track>) -> Result<()> {
+        let unique_covers = self.collect_unique_covers(&tracks);
         let mut handles: Vec<tokio::task::JoinHandle<std::result::Result<(), anyhow::Error>>> = vec![];
 
         for cover_id in unique_covers {
@@ -51,20 +51,10 @@ impl<C: SpotifyCover + Send + Sync + 'static> CoverCache<C> {
         Ok(())
     }
 
-    fn collect_unique_covers(&self, collection: &TrackCollection) -> Vec<String> {
-        let mut covers = std::collections::HashSet::new();
-        
-        // Container-level cover
-        if let Some(id) = &collection.cover_id {
-            covers.insert(id.clone());
-        }
-        
-        // Per-track covers (playlists/albums with variants)
-        for track in &collection.tracks {
-            if let Some(id) = &track.cover_id {
-                covers.insert(id.clone());
-            }
-        }
+    fn collect_unique_covers(&self, tracks: &Vec<Track>) -> Vec<String> {
+        let covers = tracks.iter()
+            .filter_map(|t| t.cover_id.clone())
+            .collect::<HashSet<String>>();
         
         covers.into_iter().collect()
     }
@@ -100,15 +90,14 @@ mod tests {
             cover_id: Some(format!("track_cover_id{}", track_id)),
             language: vec!["en".to_string()],
             isrc: Some("trackISRC".to_string()),
-            spotify_uri: None,
             date: "2020-01-01".to_string(),
             popularity: Some(50),
             disc_number: Some(1),
             number: 7,
-        }.rehydrate().unwrap()
+        }
     }
 
-    fn fake_collection(tracks: Vec<Track>) -> TrackCollection {
+    fn fake_collection(track_uris: Vec<String>) -> TrackCollection {
         TrackCollection { 
             spotify_id: ALBUM_ID.to_string(),
             uri_str: format!("spotify:album:{}", ALBUM_ID),
@@ -116,13 +105,12 @@ mod tests {
             artists: vec!["Album Artist".to_string()],
             cover_id: Some(format!("album_cover_id{}", ALBUM_ID)),
             total_tracks: 1, 
-            tracks: tracks, 
+            track_uris, 
             upc: Some("albumUPC".to_string()),
             popularity: Some(80),
             label: Some("Test Label".to_string()),
             date: Some("2020-01-01".to_string()),
-            spotify_uri: None,
-        }.rehydrate().unwrap()
+        }
     }
 
     #[derive(Clone)]
@@ -142,10 +130,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache = CoverCache::new(temp_dir.path().join("covers"), client).await.unwrap();
 
-        let collection = fake_collection(
-            vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)]);
-
-        let unique = cache.collect_unique_covers(&collection);
+        let tracks = vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)];
+        let unique = cache.collect_unique_covers(&tracks);
         assert_eq!(unique.len(), 3);
 
         // Simulate: write one missing
@@ -155,13 +141,11 @@ mod tests {
 
         fs::write(&path1, b"exists").await.unwrap();
 
-        cache.warm_from_container(&collection).await.unwrap();
+        cache.warm_from_container(tracks).await.unwrap();
 
         // Verify paths created (mocked fetches would populate)
         assert!(cache.get_cover_path_from_id(&fake_track(TRACK_ID_1).cover_id.unwrap()).exists());
         assert!(cache.get_cover_path_from_id(&fake_track(TRACK_ID_2).cover_id.unwrap()).exists());
-        assert!(cache.get_cover_path_from_id(&collection.cover_id.unwrap()).exists());
-        // abc123 skipped
     }
 
     #[tokio::test]
@@ -174,10 +158,9 @@ mod tests {
 
         track2.cover_id = track1.cover_id.clone(); // Force same cover ID for dedup test
 
-        let collection = fake_collection(
-            vec![track1, track2]);
+        let tracks = vec![track1, track2];
 
-        let unique = cache.collect_unique_covers(&collection);
-        assert_eq!(unique.len(), 2); // Deduped
+        let unique = cache.collect_unique_covers(&tracks);
+        assert_eq!(unique.len(), 1); // Deduped
     }
 }

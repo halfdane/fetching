@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use librespot_core::SpotifyUri;
 
-use crate::container::{TrackCollection};
+use crate::container::{Track, TrackCollection};
 
-pub trait SpotifyMetadata {
+pub trait SpotifyCollectionMetadata {
     fn fetch_album(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
     fn fetch_playlist(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
     fn fetch_track(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
@@ -11,13 +11,27 @@ pub trait SpotifyMetadata {
     fn fetch_show(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
 }
 
+pub trait SpotifyTrackMetadata {
+    fn fetch_single_episode(&self, spotify_uri: &SpotifyUri) -> Result<(Track, String), anyhow::Error> ;
+    fn fetch_single_track(&self, spotify_uri: &SpotifyUri) -> Result<(Track, String), anyhow::Error> ;
+
+    fn fetch_by_uri(&self, uri_str: &str) -> anyhow::Result<(Track, String)> {
+        let spotify_uri = &SpotifyUri::from_uri(uri_str)?;
+        
+        match spotify_uri.item_type() {
+            "track" => Ok(self.fetch_single_track(spotify_uri)?),
+            "episode" => Ok(self.fetch_single_episode(spotify_uri)?),
+            _ => anyhow::bail!("Unsupported URI type: {}", uri_str),
+        }
+    }
+}
+
 #[async_trait]
 pub trait SpotifyCover: Clone + Send + Sync {
     async fn fetch_cover(&self, cover_id: &str) -> anyhow::Result<Vec<u8>>;
 }
 
-// Collection factory - dispatch + constructors
-pub fn fetch_collection(uri_str: &str, fetcher: &impl SpotifyMetadata) -> anyhow::Result<TrackCollection> {
+pub fn fetch_collection(uri_str: &str, fetcher: &impl SpotifyCollectionMetadata) -> anyhow::Result<TrackCollection> {
     let spotify_uri = &SpotifyUri::from_uri(uri_str)?;
     
     let collection = match spotify_uri.item_type() {
@@ -31,3 +45,6 @@ pub fn fetch_collection(uri_str: &str, fetcher: &impl SpotifyMetadata) -> anyhow
     
     Ok(collection)
 }
+
+
+

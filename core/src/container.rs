@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use librespot_core::SpotifyUri;
-use anyhow::{Result};
 
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -8,9 +6,6 @@ pub struct Track {
     // Identifiers
     pub uri_str: String,
     pub spotify_id: String,
-    // Transient runtime (ignored in ser/de)
-    #[serde(skip_serializing, skip_deserializing)]
-    pub spotify_uri: Option<SpotifyUri>,
 
     // Metadata
     pub title: String,
@@ -30,21 +25,12 @@ pub struct Track {
 
 }
 
-impl Track {
-    pub fn rehydrate(&mut self) -> Result<Self> {
-        self.spotify_uri = Some(SpotifyUri::from_uri(&self.uri_str)?);
-        Ok(self.clone())
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct TrackCollection {
     // Identifiers
     pub uri_str: String,
     pub spotify_id: String,
-    // Transient runtime (ignored in ser/de)
-    #[serde(skip_serializing, skip_deserializing)]
-    pub spotify_uri: Option<SpotifyUri>,
     
     // Metadata
     pub title: String,
@@ -56,26 +42,17 @@ pub struct TrackCollection {
     pub label: Option<String>,
     pub date: Option<String>,
 
-    pub tracks: Vec<Track>,
-}
-
-impl TrackCollection {
-    pub fn rehydrate(&mut self) -> Result<Self> {
-        self.spotify_uri = Some(SpotifyUri::from_uri(&self.uri_str)?);
-        for track in &mut self.tracks {
-            track.rehydrate()?;
-        }
-        Ok(self.clone())
-    }
+    pub track_uris: Vec<String>,
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::spotify_api::SpotifyMetadata;
+    use crate::spotify_api::SpotifyCollectionMetadata;
     use crate::spotify_api::fetch_collection;
 
     use super::*;
     use librespot_core::FileId;
+    use librespot_core::SpotifyUri;
     use pretty_assertions::{assert_eq};
 
     const TRACK_ID_1: &str = "6rqhFgbbKwnb9MLmUQDhG6";
@@ -93,15 +70,14 @@ mod tests {
             cover_id: Some("track_cover_id".to_string()),
             language: vec!["en".to_string()],
             isrc: Some("trackISRC".to_string()),
-            spotify_uri: None,
             date: "2020-01-01".to_string(),
             popularity: Some(50),
             disc_number: Some(1),
             number: 7,
-        }.rehydrate().unwrap()
+        }
     }
 
-    fn fake_collection(tracks: Vec<Track>) -> TrackCollection {
+    fn fake_collection(track_uris: Vec<String>) -> TrackCollection {
         TrackCollection { 
             spotify_id: ALBUM_ID.to_string(),
             uri_str: format!("spotify:album:{}", ALBUM_ID),
@@ -109,36 +85,34 @@ mod tests {
             artists: vec!["Album Artist".to_string()],
             cover_id: Some("album_cover_id".to_string()),
             total_tracks: 1, 
-            tracks: tracks, 
+            track_uris, 
             upc: Some("albumUPC".to_string()),
             popularity: Some(80),
             label: Some("Test Label".to_string()),
             date: Some("2020-01-01".to_string()),
-            spotify_uri: None,
-        }.rehydrate().unwrap()
+        }
     }
     
-    
     struct MockFetcher;
-    impl SpotifyMetadata for MockFetcher {
+    impl SpotifyCollectionMetadata for MockFetcher {
         fn fetch_album(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> { 
-            Ok(fake_collection(vec![fake_track(TRACK_ID_1)])) 
+            Ok(fake_collection(vec![format!("spotify:track:{}", TRACK_ID_1)])) 
         }
 
         fn fetch_track(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> { 
-            Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
+            Ok(fake_collection(vec![format!("spotify:track:{}", TRACK_ID_1), format!("spotify:track:{}", TRACK_ID_2)])) 
         }
 
         fn fetch_playlist(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
+            Ok(fake_collection(vec![format!("spotify:track:{}", TRACK_ID_1), format!("spotify:track:{}", TRACK_ID_2)])) 
         }
 
         fn fetch_show(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
+            Ok(fake_collection(vec![format!("spotify:track:{}", TRACK_ID_1), format!("spotify:track:{}", TRACK_ID_2)])) 
         }
 
         fn fetch_episode(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![fake_track(TRACK_ID_1)]))
+            Ok(fake_collection(vec![format!("spotify:track:{}", TRACK_ID_1)]))
         }
     }
 
@@ -155,12 +129,7 @@ mod tests {
         assert_eq!(container.spotify_id, ALBUM_ID);
         assert_eq!(container.title, "Test Album");
 
-        assert_eq!(container.tracks[0].duration_ms, 180000);
-        assert_eq!(container.tracks[0].uri_str, format!("spotify:track:{}", TRACK_ID_1));
-        assert_eq!(container.tracks[0].spotify_id, TRACK_ID_1);
-        assert_eq!(container.tracks[0].title, "Test Track");
-        assert_eq!(container.tracks[0].artists, vec!["Track Artist".to_string()]);
-        assert_eq!(container.tracks[0].explicit, false);
+        assert_eq!(container.track_uris[0], format!("spotify:track:{}", TRACK_ID_1));
     }
 
     #[test]
@@ -168,8 +137,7 @@ mod tests {
         let fetcher = MockFetcher;
         let container = fetch_collection(&format!("spotify:track:{}", TRACK_ID_1), &fetcher).unwrap();
         let serialized = serde_json::to_vec(&container).unwrap();
-        let mut deserialized: TrackCollection = serde_json::from_slice(&serialized).unwrap();
-        deserialized.rehydrate().unwrap();
+        let deserialized: TrackCollection = serde_json::from_slice(&serialized).unwrap();
         assert_eq!(deserialized, container);
     }
 

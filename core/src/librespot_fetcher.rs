@@ -4,16 +4,20 @@ use librespot_core::{FileId, SpotifyUri};
 use librespot_metadata::{Metadata};
 
 use crate::container::{TrackCollection, Track};
-use crate::spotify_api::{SpotifyCover, SpotifyMetadata};
+use crate::spotify_api::{SpotifyCollectionMetadata, SpotifyCover, SpotifyTrackMetadata};
 
-pub struct LibrespotMetadataFetcher {
+pub struct LibrespotTrackMetadataFetcher {
     session: Session,
 }
 
-impl LibrespotMetadataFetcher {
+
+impl LibrespotTrackMetadataFetcher {
     pub async fn new(session: &Session) -> anyhow::Result<Self> {
         Ok(Self { session: session.clone() })
     }
+}
+
+impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
 
     fn fetch_single_episode(&self, spotify_uri: &SpotifyUri) -> Result<(Track, String), anyhow::Error> {
         let l_episode = futures::executor::block_on(
@@ -21,10 +25,9 @@ impl LibrespotMetadataFetcher {
         
         let cover_id = l_episode.covers.first().map(|c| c.id.to_string()).unwrap_or_default();
 
-        let mut track: Track = Track { 
+        let track = Track { 
             spotify_id: spotify_uri.to_id()?,
             uri_str: spotify_uri.to_string(),
-            spotify_uri: spotify_uri.clone().into(), 
             title: l_episode.name, 
             artists: vec![], 
             duration_ms: l_episode.duration, 
@@ -38,10 +41,10 @@ impl LibrespotMetadataFetcher {
             disc_number: None,
             number: l_episode.number,
         };
-        Ok((track.rehydrate()?, cover_id))
+        Ok((track, cover_id))
      }
     
-    fn fetch_single_track(&self, spotify_uri: &SpotifyUri) -> Result<(Track, String, librespot_metadata::Album), anyhow::Error> {
+    fn fetch_single_track(&self, spotify_uri: &SpotifyUri) -> Result<(Track, String), anyhow::Error> {
         let l_track = futures::executor::block_on(
             librespot_metadata::track::Track::get(&self.session, spotify_uri))?;
         
@@ -51,7 +54,6 @@ impl LibrespotMetadataFetcher {
         let track: Track = Track { 
                     spotify_id: spotify_uri.to_id()?,
                     uri_str: spotify_uri.to_string(),
-                    spotify_uri: spotify_uri.clone().into(), 
                     title: l_track.name, 
                     artists: l_track.artists.iter().map(|a| a.name.clone()).collect(), 
                     duration_ms: l_track.duration, 
@@ -65,11 +67,22 @@ impl LibrespotMetadataFetcher {
                     disc_number: Some(l_track.disc_number),
                     number: l_track.number,
                 };
-        Ok((track, cover_id, l_track.album))
+        Ok((track, cover_id))
     }
 }
 
-impl SpotifyMetadata for LibrespotMetadataFetcher {
+pub struct LibrespotCollectionMetadataFetcher<'a, T: SpotifyTrackMetadata> {
+    session: Session,
+    track_fetcher: &'a T,
+}
+
+impl<'a, T: SpotifyTrackMetadata> LibrespotCollectionMetadataFetcher<'a, T> {
+    pub async fn new(session: &Session, track_fetcher: &'a T) -> anyhow::Result<Self> {
+        Ok(Self { session: session.clone(), track_fetcher })
+    }
+}
+
+impl<'a, T: SpotifyTrackMetadata> SpotifyCollectionMetadata for LibrespotCollectionMetadataFetcher<'a, T> {
 
     fn fetch_album(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
         let l_album = futures::executor::block_on(
@@ -77,24 +90,20 @@ impl SpotifyMetadata for LibrespotMetadataFetcher {
 
         tracing::info!("Fetched album metadata: {}", l_album.name);
 
-        let tracks = l_album.tracks()
-            .map(|track_uri| {
-                let (track, _, _) = self.fetch_single_track(&track_uri)?;
-                Ok(track)
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+        let track_uris = l_album.tracks()
+            .map(|uri| uri.to_string())
+            .collect::<Vec<_>>();
 
         let cover_id = l_album.covers.first().map(|c| c.id.to_string()).unwrap_or_default();
 
         Ok(TrackCollection { 
             uri_str: l_album.id.to_string(), 
             spotify_id: l_album.id.to_id()?, 
-            spotify_uri: Some(l_album.id.clone()),
             title: l_album.name, 
             artists: l_album.artists.iter().map(|a| a.name.clone()).collect(),
-            total_tracks: tracks.len(),
+            total_tracks: track_uris.len(),
             cover_id: Some(cover_id.clone()), 
-            tracks: tracks, 
+            track_uris: track_uris, 
             upc: l_album.external_ids.iter().find(|id| id.external_type == "upc").map(|id| id.id.clone()),
             popularity: Some(l_album.popularity),
             label: Some(l_album.label),
@@ -103,16 +112,18 @@ impl SpotifyMetadata for LibrespotMetadataFetcher {
     }
 
     fn fetch_track(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-        let (track, cover_id, l_album) = self.fetch_single_track(spotify_uri)?;
+        let l_album = futures::executor::block_on(
+            librespot_metadata::album::Album::get(&self.session, spotify_uri))?;
+
+        let (track, cover_id) = self.track_fetcher.fetch_single_track(spotify_uri)?;
         Ok(TrackCollection { 
             uri_str: l_album.id.to_string(), 
             spotify_id: l_album.id.to_id()?, 
-            spotify_uri: Some(l_album.id.clone()),
             title: l_album.name, 
             artists: track.artists.clone(),
             total_tracks: 1, 
             cover_id: Some(cover_id.clone()), 
-            tracks: vec![track], 
+            track_uris: vec![track.uri_str.clone()], 
             upc: l_album.external_ids.iter().find(|id| id.external_type == "upc").map(|id| id.id.clone()),
             popularity: Some(l_album.popularity),
             label: Some(l_album.label),
@@ -126,25 +137,17 @@ impl SpotifyMetadata for LibrespotMetadataFetcher {
 
         tracing::info!("Fetched playlist metadata: {}", l_playlist.attributes.name);
 
-        let tracks = l_playlist.tracks()
-            .map(|track_uri| {
-                let (track, _, _) = self.fetch_single_track(&track_uri)?;
-                Ok(track)
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        let artists = tracks.iter().flat_map(|t| t.artists.clone())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
+        let track_uris = l_playlist.tracks()
+            .map(|uri| uri.to_string())
             .collect::<Vec<_>>();
         Ok(TrackCollection { 
             uri_str: l_playlist.id.to_string(), 
             spotify_id: l_playlist.id.to_id()?, 
-            spotify_uri: Some(l_playlist.id.clone()),
             title: l_playlist.attributes.name.clone(), 
-            artists: artists,
-            total_tracks: 1, 
+            artists: vec![],
+            total_tracks: track_uris.len(), 
             cover_id: None, 
-            tracks: tracks, 
+            track_uris: track_uris, 
             upc: None,
             popularity: None,
             label: None,
@@ -158,18 +161,8 @@ impl SpotifyMetadata for LibrespotMetadataFetcher {
         
         tracing::info!("Fetched show metadata: {}", l_show.name);
 
-        let tracks = l_show.episodes
-            .iter()
-            .map(|episode_uri| {
-                let (track, _) = self.fetch_single_episode(&episode_uri)?;
-                println!("Fetched episode metadata: {}", track.title);
-                Ok(track)
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
-
-        let artists = tracks.iter().flat_map(|t| t.artists.clone())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
+        let track_uris = l_show.episodes.iter()
+            .map(|uri| uri.to_string())
             .collect::<Vec<_>>();
 
         let cover_id = l_show.covers.first().map(|c| c.id.to_string()).unwrap_or_default();
@@ -177,12 +170,11 @@ impl SpotifyMetadata for LibrespotMetadataFetcher {
         Ok(TrackCollection { 
             uri_str: l_show.id.to_string(), 
             spotify_id: l_show.id.to_id()?, 
-            spotify_uri: Some(l_show.id.clone()),
             title: l_show.name.clone(), 
-            artists: artists,
-            total_tracks: tracks.len(), 
+            artists: vec![],
+            total_tracks: track_uris.len(), 
             cover_id: Some(cover_id), 
-            tracks: tracks, 
+            track_uris: track_uris, 
             upc: None,
             popularity: None,
             label: Some(l_show.publisher.clone()),
@@ -191,17 +183,15 @@ impl SpotifyMetadata for LibrespotMetadataFetcher {
     }
 
     fn fetch_episode(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-        let (track, cover_id) = self.fetch_single_episode(spotify_uri)?;
-        let track_clone = track.clone();
+        let (track, cover_id) = self.track_fetcher.fetch_single_track(spotify_uri)?;
         Ok(TrackCollection { 
             uri_str: track.uri_str.clone(), 
             spotify_id: track.spotify_id, 
-            spotify_uri: track.spotify_uri.clone(),
             title: track.title.clone(), 
             artists: track.artists.clone(),
             total_tracks: 1, 
             cover_id: Some(cover_id.clone()), 
-            tracks: vec![track_clone], 
+            track_uris: vec![track.uri_str.clone()], 
             upc: None,
             popularity: None,
             label: None,

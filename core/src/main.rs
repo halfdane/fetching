@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser};
-use fetching_core_lib::{auth::session::create_session, librespot_fetcher::LibrespotMetadataFetcher, spotify_api::{fetch_collection}};
+use fetching_core_lib::{auth::session::create_session, container::Track, librespot_fetcher::{LibrespotCollectionMetadataFetcher, LibrespotTrackMetadataFetcher}, spotify_api::{SpotifyTrackMetadata, fetch_collection}};
 
 // Updated main.rs CLI
 #[derive(Parser)]
@@ -25,14 +25,17 @@ async fn main() -> anyhow::Result<()> {
     let (raw_session, _refresher, _refresh_handle) =
         create_session(&credentials_file).await?;
     let session = Arc::new(raw_session);
-
-    let fetcher = LibrespotMetadataFetcher::new(&session).await?;
+    let track_fetcher = LibrespotTrackMetadataFetcher::new(&session).await?; 
+    let collection_fetcher = LibrespotCollectionMetadataFetcher::new(&session, &track_fetcher).await?;
     
-    let container = fetch_collection(&args.uri, &fetcher)?;
-    
+    let container = fetch_collection(&args.uri, &collection_fetcher)?;
+    let tracks2: Vec<Track> = container.track_uris
+        .iter()
+        .map(|uri| track_fetcher.fetch_by_uri(uri).map(|(track, _)| track))
+        .collect::<Result<Vec<_>, _>>()?;
     // Print metadata (same as before)
     println!("Container: {} ({:?} tracks)", container.title, container.total_tracks);
-    for track in &container.tracks {
+    for track in tracks2 {
         println!("  Track: {} ({}s)", track.title, track.duration_ms / 1000);
     }
     println!(">> {:#?}", &container);
