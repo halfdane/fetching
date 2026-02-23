@@ -797,7 +797,7 @@ dependencies = [
  "async-stream",
  "axum",
  "clap",
- "fetching-core",
+ "fetching-core-old",
  "futures-util",
  "librespot-core",
  "serde",
@@ -810,7 +810,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fetching-core"
+name = "fetching-core-old"
 version = "0.1.17"
 dependencies = [
  "anyhow",
@@ -2924,7 +2924,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "axum",
- "fetching-core",
+ "fetching-core-old",
  "futures-util",
  "hyper",
  "mime_guess",

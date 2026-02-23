@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
-use fetching_core::create_session;
-use fetching_core::init_progress_tx;
-use fetching_core::{config, SharedQueue};
+use fetching_core_old::create_session;
+use fetching_core_old::init_progress_tx;
+use fetching_core_old::{config, SharedQueue};
 use server_lib::server::{app, AppState};
 use std::sync::Arc;
 use std::time::Duration;
@@ -122,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
             let session = Arc::new(raw_session);
             let config = config::Config::from_env();
             let _ = init_progress_tx(100);
-            let tx = fetching_core::PROGRESS_TX.get().unwrap().clone();
+            let tx = fetching_core_old::PROGRESS_TX.get().unwrap().clone();
             let (shared_queue, _) = SharedQueue::new(session, config, tx);
             let queue_worker = shared_queue.clone();
 

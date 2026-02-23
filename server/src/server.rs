@@ -5,7 +5,7 @@ use axum::{
     routing::get,
     Router,
 };
-use fetching_core::SharedQueue;
+use fetching_core_old::SharedQueue;
 use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::broadcast;

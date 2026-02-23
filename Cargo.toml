@@ -20,10 +20,10 @@ uuid = { version = "1", features = ["v4"] }
 futures-util = "0.3.32"
 async-stream = "0.3.6"
 
-fetching-core = { path = "core" }
+fetching-core-old = { path = "core-old" }
 server = { path = "server" }
 clap = { version = "4.5.58", features = ["derive"] }
 
 [workspace]
 resolver = "2"
-members = ["core", "server"]
+members = ["core-old", "server"]
