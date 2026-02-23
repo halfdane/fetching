@@ -50,7 +50,7 @@ pub async fn create_authenticated_session(
 ///
 /// # Example
 /// ```no_run
-/// use fetching_core::auth::create_session_with_auto_refresh;
+/// use fetching_core_lib::auth::create_session_with_auto_refresh;
 /// # async fn example() -> anyhow::Result<()> {
 /// let (session, _refresher, _handle) = create_session_with_auto_refresh(".spotify_access_token").await?;
 /// // Use session for hours without worrying about token expiration

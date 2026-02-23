@@ -1,8 +1,8 @@
 use librespot_core::session::Session;
-use librespot_core::{SpotifyId, SpotifyUri, spotify_id};
-use librespot_metadata::{self as metadata, Metadata};
+use librespot_core::{SpotifyUri};
+use librespot_metadata::{Metadata, album};
 
-use crate::container::{MediaType, Track};
+use crate::container::{TrackCollection, Track};
 use crate::metadata::SpotifyMetadata;
 
 pub struct LibrespotFetcher {
@@ -46,27 +46,34 @@ impl SpotifyMetadata for LibrespotFetcher {
     //     })
     // }
 
-    fn fetch_track(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<Track> {
+    fn fetch_track(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
         let l_track = futures::executor::block_on(
             librespot_metadata::track::Track::get(&self.session, spotify_uri))?;
-        
-        let cover_id = l_track.album.covers.first().map(|cover| cover.id); // Get cover ID if available
+        let l_album = l_track.album;
 
-        let album_id = l_track.album.id;
-        Ok(Track { 
-            spotify_id: spotify_uri.to_id()?,
-            uri_str: spotify_uri.to_string(),
-            title: l_track.name, 
-            artists: l_track.artists.iter().map(|a| a.name.clone()).collect(), 
-            duration_ms: l_track.duration, 
-            media_type: MediaType::Music, 
-            progress: 0.0, 
-            cover_id: cover_id.map(|id| id.to_string()), 
-            audio_path: None, 
-            chapters: None, 
-            explicit: l_track.is_explicit, 
-            language: l_track.language_of_performance, 
-            spotify_uri: None, 
+        let cover_id = l_album.covers.first().map(|c| c.id.to_string()).unwrap_or_default();
+        let track = Track { 
+                    spotify_id: spotify_uri.to_id()?,
+                    uri_str: spotify_uri.to_string(),
+                    spotify_uri: None, 
+                    title: l_track.name, 
+                    artists: l_track.artists.iter().map(|a| a.name.clone()).collect(), 
+                    duration_ms: l_track.duration, 
+                    cover_id: Some(cover_id.clone()),
+                    explicit: l_track.is_explicit, 
+                    language: l_track.language_of_performance, 
+                    isrc: l_track.external_ids.iter().find(|id| id.external_type == "isrc").map(|id| id.id.clone()),
+                };
+        Ok(TrackCollection { 
+            uri_str: l_album.id.to_string(), 
+            spotify_id: l_album.id.to_id()?, 
+            spotify_uri: Some(l_album.id.clone()),
+            title: l_album.name, 
+            artists: l_track.artists.iter().map(|a| a.name.clone()).collect(),
+            total_tracks: 1, 
+            cover_id: Some(cover_id.clone()), 
+            tracks: vec![track], 
+            isrc: l_album.external_ids.iter().find(|id| id.external_type == "isrc").map(|id| id.id.clone()),
         })
     }
 

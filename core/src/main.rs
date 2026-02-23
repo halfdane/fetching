@@ -27,18 +27,16 @@ async fn main() -> anyhow::Result<()> {
         create_session(&credentials_file).await?;
     let session = Arc::new(raw_session);
 
-    
     let fetcher = LibrespotFetcher::new(&session).await?;
     
     let container = dispatch_container(&args.uri, &fetcher)?;
     
     // Print metadata (same as before)
-    println!("Container: {} ({:?})", container.title, container.media_type);
+    println!("Container: {} ({:?} tracks)", container.title, container.total_tracks);
     for track in &container.tracks {
         println!("  Track: {} ({}s)", track.title, track.duration_ms / 1000);
     }
-    let serialized = serde_json::to_string_pretty(&container).unwrap();
-    println!("    All: {}", serialized);
+    println!(">> {:#?}", &container);
         
     // if args.fetch_covers && args.covers_dir.is_some() {
     //     let cache = CoverCache::new(args.covers_dir.unwrap())?;
