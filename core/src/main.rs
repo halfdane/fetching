@@ -1,7 +1,14 @@
 use std::{path::PathBuf, sync::Arc};
 
 use clap::{Parser};
-use fetching_core_lib::{auth::session::create_session, container::Track, librespot_fetcher::{LibrespotCollectionMetadataFetcher, LibrespotTrackMetadataFetcher}, spotify_api::{SpotifyTrackMetadata, fetch_collection}};
+use fetching_core_lib::{
+    auth::session::create_session, 
+    container::Track, 
+    librespot_fetcher::{
+        LibrespotCollectionMetadataFetcher, 
+        LibrespotTrackMetadataFetcher}, 
+    spotify_api::{SpotifyTrackMetadata, SpotifyCollectionMetadata}
+};
 
 // Updated main.rs CLI
 #[derive(Parser)]
@@ -28,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let track_fetcher = LibrespotTrackMetadataFetcher::new(&session).await?; 
     let collection_fetcher = LibrespotCollectionMetadataFetcher::new(&session, &track_fetcher).await?;
     
-    let container = fetch_collection(&args.uri, &collection_fetcher)?;
+    let container = collection_fetcher.fetch_by_uri(&args.uri)?;
     let tracks2: Vec<Track> = container.track_uris
         .iter()
         .map(|uri| track_fetcher.fetch_by_uri(uri).map(|(track, _)| track))
