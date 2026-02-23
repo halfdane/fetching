@@ -137,7 +137,9 @@ mod tests {
             Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
         }
 
-        // fn fetch_episode(&self, _uri: &SpotifyUri) -> anyhow::Result<EpisodeMetadata> { Ok(EpisodeMetadata { name: "Test Ep".to_string(), show_artists: vec![], duration_ms: 1800000, chapters: Some(vec![]), explicit: true, language: Some("en".to_string()) }) }
+        fn fetch_episode(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
+            Ok(fake_collection(vec![fake_track(TRACK_ID_1)]))
+        }
     }
 
 

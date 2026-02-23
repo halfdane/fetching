@@ -6,7 +6,7 @@ pub trait SpotifyMetadata {
     fn fetch_album(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
     fn fetch_playlist(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
     fn fetch_track(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
-    // fn fetch_episode(&self, uri: &SpotifyUri) -> anyhow::Result<EpisodeMetadata>;
+    fn fetch_episode(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
     fn fetch_show(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
 }
 
@@ -19,7 +19,7 @@ pub fn fetch_collection(uri_str: &str, fetcher: &impl SpotifyMetadata) -> anyhow
         "track" => fetcher.fetch_track(spotify_uri)?,
         "playlist" => fetcher.fetch_playlist(spotify_uri)?,
         "show" => fetcher.fetch_show(spotify_uri)?,
-        // "episode" => Container::new_episode(uri_str, fetcher)?,
+        "episode" => fetcher.fetch_episode(spotify_uri)?,
         _ => anyhow::bail!("Unsupported URI type: {}", uri_str),
     };
     

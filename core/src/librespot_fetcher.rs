@@ -98,7 +98,7 @@ impl SpotifyMetadata for LibrespotFetcher {
             popularity: Some(l_album.popularity),
             label: Some(l_album.label),
             date: Some(l_album.date.to_string()),
-        }.rehydrate()?)
+        })
     }
 
     fn fetch_track(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
@@ -116,7 +116,7 @@ impl SpotifyMetadata for LibrespotFetcher {
             popularity: Some(l_album.popularity),
             label: Some(l_album.label),
             date: Some(l_album.date.to_string()),
-        }.rehydrate()?)
+        })
     }
 
     fn fetch_playlist(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
@@ -148,7 +148,7 @@ impl SpotifyMetadata for LibrespotFetcher {
             popularity: None,
             label: None,
             date: None,
-        }.rehydrate()?)
+        })
     }
 
     fn fetch_show(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
@@ -186,19 +186,26 @@ impl SpotifyMetadata for LibrespotFetcher {
             popularity: None,
             label: Some(l_show.publisher.clone()),
             date: None,
-        }.rehydrate()?)
+        })
     }
 
-    // fn fetch_episode(&self, uri: &SpotifyUri) -> Result<EpisodeMetadata> {
-    //     // Librespot podcast/episode support is limited; fallback to track-like
-    //     // Real impl: use session.content_feeder() or extend metadata
-    //     self.fetch_track(uri).map(|track_meta| EpisodeMetadata {
-    //         name: track_meta.title,
-    //         show_artists: track_meta.artists,
-    //         duration_ms: track_meta.duration_ms,
-    //         chapters: None, // Requires additional API
-    //         explicit: false,
-    //         language: None,
-    //     })
-    // }
+    fn fetch_episode(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
+        let (track, cover_id) = self.fetch_single_episode(spotify_uri)?;
+        let track_clone = track.clone();
+        Ok(TrackCollection { 
+            uri_str: track.uri_str.clone(), 
+            spotify_id: track.spotify_id, 
+            spotify_uri: track.spotify_uri.clone(),
+            title: track.title.clone(), 
+            artists: track.artists.clone(),
+            total_tracks: 1, 
+            cover_id: Some(cover_id.clone()), 
+            tracks: vec![track_clone], 
+            upc: None,
+            popularity: None,
+            label: None,
+            date: None,
+        })
+    }
+
 }
