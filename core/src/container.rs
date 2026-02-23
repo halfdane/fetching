@@ -19,10 +19,10 @@ pub struct Track {
     pub isrc: Option<String>,
 
     pub duration_ms: i32,
-    pub disc_number: i32,
+    pub disc_number: Option<i32>,
     pub number: i32,
     pub date: String,
-    pub popularity: i32,
+    pub popularity: Option<i32>,
     
     // Spotify extras
     pub explicit: bool,
@@ -95,8 +95,8 @@ mod tests {
             isrc: Some("trackISRC".to_string()),
             spotify_uri: None,
             date: "2020-01-01".to_string(),
-            popularity: 50,
-            disc_number: 1,
+            popularity: Some(50),
+            disc_number: Some(1),
             number: 7,
         }.rehydrate().unwrap()
     }
@@ -133,13 +133,15 @@ mod tests {
             Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
         }
 
-        // fn fetch_playlist(&self, _uri: &SpotifyUri) -> anyhow::Result<PlaylistMetadata> { Ok(PlaylistMetadata { /* mock */ }) }
+        fn fetch_show(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
+            Ok(fake_collection(vec![fake_track(TRACK_ID_1), fake_track(TRACK_ID_2)])) 
+        }
+
         // fn fetch_episode(&self, _uri: &SpotifyUri) -> anyhow::Result<EpisodeMetadata> { Ok(EpisodeMetadata { name: "Test Ep".to_string(), show_artists: vec![], duration_ms: 1800000, chapters: Some(vec![]), explicit: true, language: Some("en".to_string()) }) }
-        // fn fetch_show(&self, _uri: &SpotifyUri) -> anyhow::Result<ShowMetadata> { Ok(ShowMetadata { name: "Test Show".to_string(), narrators: vec![], episodes: vec![], language: Some("en".to_string()) }) }
     }
 
 
-        #[test]
+    #[test]
     fn test_dispatch_single_track() {
         let fetcher = MockFetcher;
         let container = fetch_collection(&format!("spotify:track:{}", TRACK_ID_1), &fetcher).unwrap(); 
