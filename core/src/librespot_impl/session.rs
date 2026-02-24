@@ -111,9 +111,16 @@ fn now_secs() -> u64 {
 
 // ── Session creation ──────────────────────────────────────────────────────────
 
-async fn resolve_credentials(token_path: &str) -> anyhow::Result<(Credentials, TokenData)> {
+fn make_cache() -> anyhow::Result<Cache> {
+    Cache::new(Some(".cache"), Some(".cache"), Some(".cache/files"), None)
+        .context("Failed to create librespot cache")
+}
+
+async fn resolve_credentials(
+    token_path: &str,
+    cache: &Cache,
+) -> anyhow::Result<(Credentials, TokenData)> {
     // 1. Try cached credentials from librespot's own cache
-    let cache = Cache::new(Some(".cache"), Some(".cache"), Some(".cache/files"), None)?;
     if let Some(creds) = cache.credentials() {
         if let Some(token) = read_token(token_path) {
             if !is_expiring_soon(token.expires_at) {
@@ -146,8 +153,7 @@ async fn resolve_credentials(token_path: &str) -> anyhow::Result<(Credentials, T
     Ok((creds, token))
 }
 
-async fn connect(credentials: Credentials) -> anyhow::Result<Session> {
-    let cache = Cache::new(Some(".cache"), Some(".cache"), Some(".cache/files"), None)?;
+async fn connect(credentials: Credentials, cache: Cache) -> anyhow::Result<Session> {
     let session = Session::new(SessionConfig::default(), Some(cache));
     session.connect(credentials, false).await?;
     Ok(session)
@@ -198,8 +204,9 @@ pub async fn create_session(token_path: &str) -> anyhow::Result<Session> {
 }
 
 async fn try_create_session(token_path: &str) -> anyhow::Result<Session> {
-    let (credentials, token) = resolve_credentials(token_path).await?;
-    let session = connect(credentials).await?;
+    let cache = make_cache()?;
+    let (credentials, token) = resolve_credentials(token_path, &cache).await?;
+    let session = connect(credentials, cache).await?;
     spawn_background_refresh(token_path.to_string(), token);
     Ok(session)
 }
