@@ -1,26 +1,65 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use fetching_core_lib::{
-    librespot_impl::session::create_session,
-    container::Track,
-    librespot_impl::{collection_metadata::LibrespotCollectionMetadataFetcher, cover_fetcher::LibrespotCoverFetcher, track_metadata::LibrespotTrackMetadataFetcher},
-    spotify_api::{SpotifyCollectionMetadata, SpotifyCover, SpotifyTrackMetadata},
+    librespot_impl::{
+        collection_metadata::LibrespotCollectionMetadataFetcher,
+        cover_fetcher::LibrespotCoverFetcher,
+        session::create_session,
+        track_metadata::LibrespotTrackMetadataFetcher,
+    },
+    queue::{JobRunner, QueueEntry, TaskStatus, WorkerApis},
+    queue_tokio::TokioQueue,
+    spotify_api::SpotifyCollectionMetadata,
 };
+use tokio::sync::broadcast;
 
-// Updated main.rs CLI
+// ---------------------------------------------------------------------------
+// Playground runner – fetches track metadata + cover and saves the cover
+// ---------------------------------------------------------------------------
+
+struct PlaygroundRunner;
+
+impl JobRunner for PlaygroundRunner {
+    fn run(&self, entry: &QueueEntry, apis: &WorkerApis) -> anyhow::Result<()> {
+        let handle = tokio::runtime::Handle::current();
+
+        // 1. Fetch track metadata (sync librespot call)
+        let (track, cover_id) = apis.track_metadata.fetch_by_uri(&entry.track_uri)?;
+
+        println!(
+            "  [worker] {} – {} ({}s)",
+            entry.task_id,
+            track.title,
+            track.duration_ms / 1000
+        );
+
+        // 2. Fetch cover image (async librespot call, driven from blocking thread)
+        let cover_bytes = handle.block_on(apis.cover.fetch_cover(&cover_id))?;
+
+        // 3. Write cover to disk
+        let filename = format!("cover_{}.jpg", track.spotify_id);
+        std::fs::write(&filename, &cover_bytes)?;
+        println!("  [worker] saved {} ({} bytes)", filename, cover_bytes.len());
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
 #[derive(Parser)]
 struct Args {
     uri: String,
     #[arg(short, long)]
     covers_dir: Option<PathBuf>,
-    #[arg(short, long)]
-    fetch_covers: bool,
-    #[arg(long)]
-    username: Option<String>,
-    #[arg(long)]
-    password: Option<String>,
 }
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -29,34 +68,67 @@ async fn main() -> anyhow::Result<()> {
     let credentials_file = "/home/user/halfdane/.spotify_access_token";
 
     let session = Arc::new(create_session(&credentials_file).await?);
-    let track_fetcher = LibrespotTrackMetadataFetcher { session: session.clone() };
-    let collection_fetcher =
-        LibrespotCollectionMetadataFetcher::new(session.clone(), track_fetcher);
+
+    // Build two independent fetchers – collection fetcher owns its track fetcher,
+    // workers get their own handle via WorkerApis.
+    let collection_fetcher = LibrespotCollectionMetadataFetcher::new(
+        session.clone(),
+        LibrespotTrackMetadataFetcher { session: session.clone() },
+    );
     let cover_fetcher = LibrespotCoverFetcher::new(&session).await?;
 
-    let container = collection_fetcher.fetch_by_uri(&args.uri)?;
-    let tracks2: Vec<Track> = container
-        .track_uris
-        .iter()
-        .map(|uri| collection_fetcher.track_fetcher.fetch_by_uri(uri).map(|(track, _)| track))
-        .collect::<Result<Vec<_>, _>>()?;
-    // Print metadata (same as before)
+    // Fetch collection metadata (blocking librespot call, still on main task here)
+    let collection = Arc::new(collection_fetcher.fetch_by_uri(&args.uri)?);
     println!(
-        "Container: {} ({:?} tracks)",
-        container.title, container.total_tracks
+        "Collection: {} ({} tracks)",
+        collection.title, collection.total_tracks
     );
-    for track in &tracks2 {
-        println!("  Track: {} ({}s)", track.title, track.duration_ms / 1000);
+
+    // Build the queue
+    let apis = WorkerApis {
+        collection_metadata: Arc::new(LibrespotCollectionMetadataFetcher::new(
+            session.clone(),
+            LibrespotTrackMetadataFetcher { session: session.clone() },
+        )),
+        track_metadata: Arc::new(LibrespotTrackMetadataFetcher { session: session.clone() }),
+        cover: Arc::new(cover_fetcher),
+    };
+
+    let queue = Arc::new(TokioQueue::new(apis, PlaygroundRunner));
+    let mut progress_rx = queue.subscribe_progress();
+    queue.start();
+
+    // Enqueue all tracks from the collection
+    let task_ids: HashSet<_> = queue.add_collection(Arc::clone(&collection)).into_iter().collect();
+    let total = task_ids.len();
+    println!("Queued {} track(s)", total);
+
+    // Wait until every task is Done or Failed
+    let mut finished = 0usize;
+    loop {
+        match progress_rx.recv().await {
+            Ok(update) if task_ids.contains(&update.task_id) => {
+                match &update.status {
+                    TaskStatus::Done => {
+                        finished += 1;
+                        println!("[{}] done ({}/{})", update.task_id, finished, total);
+                    }
+                    TaskStatus::Failed { reason } => {
+                        finished += 1;
+                        eprintln!("[{}] failed: {} ({}/{})", update.task_id, reason, finished, total);
+                    }
+                    _ => {}
+                }
+                if finished == total {
+                    break;
+                }
+            }
+            Ok(_) => {}   // not one of our task_ids
+            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+            Err(broadcast::error::RecvError::Closed) => break,
+        }
     }
-    println!(">> {:#?}", &container);
 
-    let cover_id = &tracks2
-        .first()
-        .and_then(|t| t.cover_id.as_ref())
-        .ok_or_else(|| anyhow::anyhow!("No cover ID found for the first track"))?;
-
-    let cover_data = cover_fetcher.fetch_cover(cover_id.as_str()).await?;
-    tokio::fs::write("cover.jpg", cover_data).await?;
-
+    println!("All done.");
     Ok(())
 }

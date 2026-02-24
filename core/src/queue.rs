@@ -151,3 +151,88 @@ pub trait QueueStorage: Send + Sync + 'static {
     /// Remove and return the entry at the front of the queue, or `None` if empty.
     fn pop(&self) -> anyhow::Result<Option<QueueEntry>>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::container::{CollectionType, TrackCollection};
+
+    fn fake_collection() -> Arc<TrackCollection> {
+        Arc::new(TrackCollection {
+            uri_str: "spotify:album:test".to_string(),
+            spotify_id: "test".to_string(),
+            collection_type: CollectionType::Album,
+            title: "Test".to_string(),
+            artists: vec![],
+            cover_id: None,
+            upc: None,
+            total_tracks: 1,
+            popularity: None,
+            label: None,
+            date: None,
+            track_uris: vec!["spotify:track:aaa".to_string()],
+        })
+    }
+
+    #[test]
+    fn entry_new_assigns_unique_task_ids() {
+        let col = fake_collection();
+        let a = QueueEntry::new("spotify:track:aaa", Arc::clone(&col));
+        let b = QueueEntry::new("spotify:track:aaa", Arc::clone(&col));
+        assert_ne!(a.task_id, b.task_id);
+    }
+
+    #[test]
+    fn entry_new_stores_track_uri() {
+        let col = fake_collection();
+        let entry = QueueEntry::new("spotify:track:bbb", col);
+        assert_eq!(entry.track_uri, "spotify:track:bbb");
+    }
+
+    #[test]
+    fn task_status_serde_round_trips_all_variants() {
+        let cases = [
+            TaskStatus::Pending,
+            TaskStatus::Running,
+            TaskStatus::Done,
+            TaskStatus::Failed { reason: "oops".to_string() },
+        ];
+        for status in cases {
+            let json = serde_json::to_string(&status).unwrap();
+            let back: TaskStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, status, "round-trip failed for {json}");
+        }
+    }
+
+    #[test]
+    fn task_status_failed_includes_reason_in_json() {
+        let status = TaskStatus::Failed { reason: "disk full".to_string() };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("disk full"), "reason missing from: {json}");
+    }
+
+    #[test]
+    fn progress_update_serde_round_trips_with_message() {
+        let update = ProgressUpdate {
+            task_id: Uuid::new_v4(),
+            status: TaskStatus::Running,
+            message: Some("fetching".to_string()),
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        let back: ProgressUpdate = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.task_id, update.task_id);
+        assert_eq!(back.status, update.status);
+        assert_eq!(back.message, update.message);
+    }
+
+    #[test]
+    fn progress_update_omits_message_field_when_none() {
+        let update = ProgressUpdate {
+            task_id: Uuid::new_v4(),
+            status: TaskStatus::Done,
+            message: None,
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(!json.contains("message"), "message field should be omitted: {json}");
+    }
+}

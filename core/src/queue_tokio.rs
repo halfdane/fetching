@@ -9,7 +9,8 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use tokio::sync::{broadcast, Mutex, Notify, Semaphore};
+use std::sync::Mutex;
+use tokio::sync::{broadcast, Notify, Semaphore};
 use tracing::{error, info, warn};
 
 use crate::container::TrackCollection;
@@ -42,17 +43,19 @@ impl Default for InMemoryStorage {
 
 impl QueueStorage for InMemoryStorage {
     fn push(&self, entry: QueueEntry) -> anyhow::Result<()> {
-        // QueueStorage::push is sync, but our Mutex is async.
-        // Calling blocking_lock() is safe so long as we are never inside an
-        // async context that would dead-lock on the same lock. Since push is
-        // only called from TokioQueue::add_collection (sync context), this
-        // is fine. Alternatively, callers may use try_lock and retry.
-        self.entries.blocking_lock().push_back(entry);
+        self.entries
+            .lock()
+            .expect("InMemoryStorage mutex poisoned")
+            .push_back(entry);
         Ok(())
     }
 
     fn pop(&self) -> anyhow::Result<Option<QueueEntry>> {
-        Ok(self.entries.blocking_lock().pop_front())
+        Ok(self
+            .entries
+            .lock()
+            .expect("InMemoryStorage mutex poisoned")
+            .pop_front())
     }
 }
 
@@ -270,5 +273,250 @@ fn send_progress(tx: &broadcast::Sender<ProgressUpdate>, update: ProgressUpdate)
         if let Err(e) = tx.send(update) {
             warn!("Failed to send progress update: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::container::{CollectionType, TrackCollection};
+    use crate::queue::{CoverFetcher, JobRunner, QueueEntry, TaskStatus, WorkerApis};
+    use async_trait::async_trait;
+    use librespot_core::SpotifyUri;
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    // -----------------------------------------------------------------------
+    // Stub implementations (none of the workers below actually call these)
+    // -----------------------------------------------------------------------
+
+    struct StubCollectionMetadata;
+    impl crate::spotify_api::SpotifyCollectionMetadata for StubCollectionMetadata {
+        fn fetch_album(&self, _: &SpotifyUri) -> anyhow::Result<TrackCollection> { unimplemented!() }
+        fn fetch_playlist(&self, _: &SpotifyUri) -> anyhow::Result<TrackCollection> { unimplemented!() }
+        fn fetch_track(&self, _: &SpotifyUri) -> anyhow::Result<TrackCollection> { unimplemented!() }
+        fn fetch_episode(&self, _: &SpotifyUri) -> anyhow::Result<TrackCollection> { unimplemented!() }
+        fn fetch_show(&self, _: &SpotifyUri) -> anyhow::Result<TrackCollection> { unimplemented!() }
+    }
+
+    struct StubTrackMetadata;
+    impl crate::spotify_api::SpotifyTrackMetadata for StubTrackMetadata {
+        fn fetch_single_episode(&self, _: &SpotifyUri) -> anyhow::Result<(crate::container::Track, String)> { unimplemented!() }
+        fn fetch_single_track(&self, _: &SpotifyUri) -> anyhow::Result<(crate::container::Track, String)> { unimplemented!() }
+    }
+
+    struct StubCoverFetcher;
+    #[async_trait]
+    impl CoverFetcher for StubCoverFetcher {
+        async fn fetch_cover(&self, _: &str) -> anyhow::Result<Vec<u8>> { unimplemented!() }
+    }
+
+    fn stub_apis() -> WorkerApis {
+        WorkerApis {
+            collection_metadata: Arc::new(StubCollectionMetadata),
+            track_metadata: Arc::new(StubTrackMetadata),
+            cover: Arc::new(StubCoverFetcher),
+        }
+    }
+
+    fn fake_collection(uris: &[&str]) -> Arc<TrackCollection> {
+        Arc::new(TrackCollection {
+            uri_str: "spotify:album:test".to_string(),
+            spotify_id: "test".to_string(),
+            collection_type: CollectionType::Album,
+            title: "Test".to_string(),
+            artists: vec![],
+            cover_id: None,
+            upc: None,
+            total_tracks: uris.len(),
+            popularity: None,
+            label: None,
+            date: None,
+            track_uris: uris.iter().map(|s| s.to_string()).collect(),
+        })
+    }
+
+    struct OkRunner;
+    impl JobRunner for OkRunner {
+        fn run(&self, _: &QueueEntry, _: &WorkerApis) -> anyhow::Result<()> { Ok(()) }
+    }
+
+    struct FailRunner;
+    impl JobRunner for FailRunner {
+        fn run(&self, _: &QueueEntry, _: &WorkerApis) -> anyhow::Result<()> {
+            anyhow::bail!("intentional failure")
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // InMemoryStorage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn storage_pop_on_empty_returns_none() {
+        let s = InMemoryStorage::new();
+        assert!(s.pop().unwrap().is_none());
+    }
+
+    #[test]
+    fn storage_preserves_fifo_order() {
+        let s = InMemoryStorage::new();
+        let col = fake_collection(&["uri:a", "uri:b", "uri:c"]);
+        for uri in ["uri:a", "uri:b", "uri:c"] {
+            s.push(QueueEntry::new(uri, Arc::clone(&col))).unwrap();
+        }
+        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:a");
+        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:b");
+        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:c");
+        assert!(s.pop().unwrap().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // TokioQueue::add_collection
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn add_collection_returns_one_task_id_per_track_uri() {
+        let queue = TokioQueue::new(stub_apis(), OkRunner);
+        let ids = queue.add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]));
+        assert_eq!(ids.len(), 3);
+        let unique: HashSet<_> = ids.iter().collect();
+        assert_eq!(unique.len(), 3, "task IDs must be unique");
+    }
+
+    #[tokio::test]
+    async fn add_collection_pushes_entries_to_storage_in_order() {
+        let queue = TokioQueue::new(stub_apis(), OkRunner);
+        queue.add_collection(fake_collection(&["uri:x", "uri:y"]));
+        // access storage directly – test submodule can see private fields
+        assert_eq!(queue.storage.pop().unwrap().unwrap().track_uri, "uri:x");
+        assert_eq!(queue.storage.pop().unwrap().unwrap().track_uri, "uri:y");
+        assert!(queue.storage.pop().unwrap().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Worker loop – progress events
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn worker_sends_running_then_done_on_success() {
+        let queue = Arc::new(TokioQueue::new(stub_apis(), OkRunner));
+        let mut rx = queue.subscribe_progress();
+        queue.start();
+
+        let ids: HashSet<_> = queue
+            .add_collection(fake_collection(&["uri:1"]))
+            .into_iter()
+            .collect();
+
+        let running = timeout(Duration::from_secs(2), rx.recv()).await
+            .expect("timed out waiting for Running").unwrap();
+        let done = timeout(Duration::from_secs(2), rx.recv()).await
+            .expect("timed out waiting for Done").unwrap();
+
+        assert!(ids.contains(&running.task_id));
+        assert_eq!(running.status, TaskStatus::Running);
+        assert!(ids.contains(&done.task_id));
+        assert_eq!(done.status, TaskStatus::Done);
+    }
+
+    #[tokio::test]
+    async fn worker_sends_running_then_failed_on_error() {
+        let queue = Arc::new(TokioQueue::new(stub_apis(), FailRunner));
+        let mut rx = queue.subscribe_progress();
+        queue.start();
+
+        let ids: HashSet<_> = queue
+            .add_collection(fake_collection(&["uri:1"]))
+            .into_iter()
+            .collect();
+
+        let running = timeout(Duration::from_secs(2), rx.recv()).await
+            .expect("timed out waiting for Running").unwrap();
+        let failed = timeout(Duration::from_secs(2), rx.recv()).await
+            .expect("timed out waiting for Failed").unwrap();
+
+        assert!(ids.contains(&running.task_id));
+        assert_eq!(running.status, TaskStatus::Running);
+        assert!(ids.contains(&failed.task_id));
+        assert!(
+            matches!(failed.status, TaskStatus::Failed { ref reason } if reason.contains("intentional")),
+            "unexpected status: {:?}", failed.status
+        );
+    }
+
+    #[tokio::test]
+    async fn worker_sends_progress_for_every_track_in_collection() {
+        let queue = Arc::new(TokioQueue::new(stub_apis(), OkRunner));
+        let mut rx = queue.subscribe_progress();
+        queue.start();
+
+        let ids: HashSet<_> = queue
+            .add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]))
+            .into_iter()
+            .collect();
+
+        let mut done_ids = HashSet::new();
+        while done_ids.len() < 3 {
+            let update = timeout(Duration::from_secs(5), rx.recv()).await
+                .expect("timed out").unwrap();
+            if ids.contains(&update.task_id) && update.status == TaskStatus::Done {
+                done_ids.insert(update.task_id);
+            }
+        }
+        assert_eq!(done_ids, ids);
+    }
+
+    // -----------------------------------------------------------------------
+    // Single-concurrency contract
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn worker_runs_at_most_one_job_at_a_time() {
+        let concurrent = Arc::new(AtomicUsize::new(0));
+        let max_seen = Arc::new(AtomicUsize::new(0));
+
+        struct CountingRunner {
+            concurrent: Arc<AtomicUsize>,
+            max_seen: Arc<AtomicUsize>,
+        }
+        impl JobRunner for CountingRunner {
+            fn run(&self, _: &QueueEntry, _: &WorkerApis) -> anyhow::Result<()> {
+                let c = self.concurrent.fetch_add(1, Ordering::SeqCst) + 1;
+                self.max_seen.fetch_max(c, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(20));
+                self.concurrent.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let runner = CountingRunner {
+            concurrent,
+            max_seen: Arc::clone(&max_seen),
+        };
+        let queue = Arc::new(TokioQueue::new(stub_apis(), runner));
+        let mut rx = queue.subscribe_progress();
+        queue.start();
+
+        let ids: HashSet<_> = queue
+            .add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]))
+            .into_iter()
+            .collect();
+
+        let mut done_count = 0;
+        while done_count < 3 {
+            let update = timeout(Duration::from_secs(5), rx.recv()).await
+                .expect("timed out").unwrap();
+            if ids.contains(&update.task_id) && update.status == TaskStatus::Done {
+                done_count += 1;
+            }
+        }
+
+        assert_eq!(
+            max_seen.load(Ordering::SeqCst), 1,
+            "more than one job ran concurrently"
+        );
     }
 }
