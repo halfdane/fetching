@@ -1,3 +1,5 @@
+pub mod audio;
+pub mod audio_librespot;
 pub mod container;
 pub mod librespot_impl;
 pub mod queue;

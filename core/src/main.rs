@@ -2,6 +2,7 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use fetching_core_lib::{
+    audio_librespot::LibrespotAudioDownloader,
     librespot_impl::{
         collection_metadata::LibrespotCollectionMetadataFetcher,
         cover_fetcher::LibrespotCoverFetcher,
@@ -24,9 +25,8 @@ impl JobRunner for PlaygroundRunner {
     fn run(&self, entry: &QueueEntry, apis: &WorkerApis) -> anyhow::Result<()> {
         let handle = tokio::runtime::Handle::current();
 
-        // 1. Fetch track metadata (sync librespot call)
+        // 1. Fetch track metadata
         let (track, cover_id) = apis.track_metadata.fetch_by_uri(&entry.track_uri)?;
-
         println!(
             "  [worker] {} – {} ({}s)",
             entry.task_id,
@@ -34,13 +34,21 @@ impl JobRunner for PlaygroundRunner {
             track.duration_ms / 1000
         );
 
-        // 2. Fetch cover image (async librespot call, driven from blocking thread)
-        let cover_bytes = handle.block_on(apis.cover.fetch_cover(&cover_id))?;
+        // 2. Download audio → temp file (decrypt + header strip handled inside)
+        let downloaded = apis.audio.download(&entry.track_uri)?;
+        let audio_bytes = downloaded.file.as_file().metadata()?.len();
+        println!(
+            "  [worker] audio: {} bytes in {}",
+            audio_bytes,
+            downloaded.file.path().display()
+        );
+        // TODO: tag with lofty, then rename to final path
 
-        // 3. Write cover to disk
-        let filename = format!("cover_{}.jpg", track.spotify_id);
-        std::fs::write(&filename, &cover_bytes)?;
-        println!("  [worker] saved {} ({} bytes)", filename, cover_bytes.len());
+        // 3. Fetch and save cover image
+        let cover_bytes = handle.block_on(apis.cover.fetch_cover(&cover_id))?;
+        let cover_filename = format!("cover_{}.jpg", track.spotify_id);
+        std::fs::write(&cover_filename, &cover_bytes)?;
+        println!("  [worker] cover: {} ({} bytes)", cover_filename, cover_bytes.len());
 
         Ok(())
     }
@@ -92,6 +100,7 @@ async fn main() -> anyhow::Result<()> {
         )),
         track_metadata: Arc::new(LibrespotTrackMetadataFetcher { session: session.clone() }),
         cover: Arc::new(cover_fetcher),
+        audio: Arc::new(LibrespotAudioDownloader::new(session.clone())),
     };
 
     let queue = Arc::new(TokioQueue::new(apis, PlaygroundRunner));

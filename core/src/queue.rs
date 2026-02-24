@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::audio::AudioFileDownloader;
 use crate::container::TrackCollection;
 use crate::spotify_api::{SpotifyCollectionMetadata, SpotifyTrackMetadata};
 
@@ -109,6 +110,7 @@ pub struct WorkerApis {
     pub collection_metadata: Arc<dyn SpotifyCollectionMetadata + Send + Sync>,
     pub track_metadata: Arc<dyn SpotifyTrackMetadata + Send + Sync>,
     pub cover: Arc<dyn CoverFetcher>,
+    pub audio: Arc<dyn AudioFileDownloader>,
 }
 
 // ---------------------------------------------------------------------------

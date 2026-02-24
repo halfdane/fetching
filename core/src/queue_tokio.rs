@@ -313,11 +313,17 @@ mod tests {
         async fn fetch_cover(&self, _: &str) -> anyhow::Result<Vec<u8>> { unimplemented!() }
     }
 
+    struct StubAudioDownloader;
+    impl crate::audio::AudioFileDownloader for StubAudioDownloader {
+        fn download(&self, _: &str) -> anyhow::Result<crate::audio::DownloadedTrack> { unimplemented!() }
+    }
+
     fn stub_apis() -> WorkerApis {
         WorkerApis {
             collection_metadata: Arc::new(StubCollectionMetadata),
             track_metadata: Arc::new(StubTrackMetadata),
             cover: Arc::new(StubCoverFetcher),
+            audio: Arc::new(StubAudioDownloader),
         }
     }
 
