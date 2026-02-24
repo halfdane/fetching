@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use librespot_core::session::Session;
 use librespot_core::{FileId, SpotifyUri};
 use librespot_metadata::{Metadata};
+use moka::future::Cache;
 
 use crate::container::{TrackCollection, Track};
 use crate::spotify_api::{SpotifyCollectionMetadata, SpotifyCover, SpotifyTrackMetadata};
@@ -9,7 +12,6 @@ use crate::spotify_api::{SpotifyCollectionMetadata, SpotifyCover, SpotifyTrackMe
 pub struct LibrespotTrackMetadataFetcher {
     session: Session,
 }
-
 
 impl LibrespotTrackMetadataFetcher {
     pub async fn new(session: &Session) -> anyhow::Result<Self> {
@@ -205,23 +207,34 @@ impl<'a, T: SpotifyTrackMetadata> SpotifyCollectionMetadata for LibrespotCollect
 #[derive(Clone)]
 pub struct LibrespotCoverFetcher {
     session: Session,
+    cover_cache: Arc<Cache<String, Vec<u8>>>
 }
 
 impl LibrespotCoverFetcher {
     pub async fn new(session: &Session) -> anyhow::Result<Self> {
-        Ok(Self { session: session.clone() })
+        let cover_cache: Arc<Cache<String, Vec<u8>>> = Arc::new(Cache::new(1000));
+        Ok(Self { session: session.clone(), cover_cache })
     }
 }
+
 
 #[async_trait]
 impl SpotifyCover for LibrespotCoverFetcher {
     async fn fetch_cover(&self, cover_id: &str) -> anyhow::Result<Vec<u8>> {
-        let bytes = hex::decode(&cover_id).expect("valid hex");
-        let file_id = FileId::from_raw(&bytes);
-
-        let image_bytes = futures::executor::block_on(
-        self.session.spclient().get_image(&file_id))?;
-        Ok(image_bytes.to_vec())
+        match self.cover_cache.try_get_with::<_, anyhow::Error>(cover_id.to_string(), async move {
+            let bytes = hex::decode(&cover_id).map_err(|e| anyhow::Error::msg(e.to_string()))?;
+            let file_id = FileId::from_raw(&bytes);
+            let image_bytes = self.session
+                .spclient()
+                .get_image(&file_id)
+                .await
+                .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+            Ok(image_bytes.to_vec())
+        }).await {
+            Ok(cover_data) => Ok(cover_data),
+            Err(e) => Err(anyhow::Error::msg(format!("Failed to fetch cover {}: {}", cover_id, e))),
+        }
     }
 }
+
 

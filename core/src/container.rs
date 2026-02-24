@@ -48,7 +48,6 @@ pub struct TrackCollection {
 #[cfg(test)]
 mod tests {
     use crate::spotify_api::SpotifyCollectionMetadata;
-    use crate::spotify_api::fetch_collection;
 
     use super::*;
     use librespot_core::FileId;
@@ -120,7 +119,7 @@ mod tests {
     #[test]
     fn test_dispatch_single_track() {
         let fetcher = MockFetcher;
-        let container = fetch_collection(&format!("spotify:track:{}", TRACK_ID_1), &fetcher).unwrap(); 
+        let container = fetcher.fetch_by_uri(&format!("spotify:track:{}", TRACK_ID_1)).unwrap(); 
 
         println!("Container: {:?}", container);
 
@@ -135,7 +134,7 @@ mod tests {
     #[test]
     fn test_serde() {
         let fetcher = MockFetcher;
-        let container = fetch_collection(&format!("spotify:track:{}", TRACK_ID_1), &fetcher).unwrap();
+        let container = fetcher.fetch_by_uri(&format!("spotify:track:{}", TRACK_ID_1)).unwrap();
         let serialized = serde_json::to_vec(&container).unwrap();
         let deserialized: TrackCollection = serde_json::from_slice(&serialized).unwrap();
         assert_eq!(deserialized, container);

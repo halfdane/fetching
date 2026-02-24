@@ -6,8 +6,14 @@ use fetching_core_lib::{
     container::Track, 
     librespot_fetcher::{
         LibrespotCollectionMetadataFetcher, 
-        LibrespotTrackMetadataFetcher}, 
-    spotify_api::{SpotifyTrackMetadata, SpotifyCollectionMetadata}
+        LibrespotTrackMetadataFetcher,
+        LibrespotCoverFetcher,
+    }, 
+    spotify_api::{
+        SpotifyTrackMetadata, 
+        SpotifyCollectionMetadata,
+        SpotifyCover,
+    },
 };
 
 // Updated main.rs CLI
@@ -42,16 +48,19 @@ async fn main() -> anyhow::Result<()> {
         .collect::<Result<Vec<_>, _>>()?;
     // Print metadata (same as before)
     println!("Container: {} ({:?} tracks)", container.title, container.total_tracks);
-    for track in tracks2 {
+    for track in &tracks2 {
         println!("  Track: {} ({}s)", track.title, track.duration_ms / 1000);
     }
     println!(">> {:#?}", &container);
-        
-    // if args.fetch_covers && args.covers_dir.is_some() {
-    //     let cache = CoverCache::new(args.covers_dir.unwrap())?;
-    //     cache.warm_from_container(&container).await?;
-    //     println!("Covers saved!");
-    // }
+    
+    let cover_fetcher = LibrespotCoverFetcher::new(&session).await?;
+    let cover_id = &tracks2.first()
+        .and_then(|t| t.cover_id.as_ref())
+        .ok_or_else(|| anyhow::anyhow!("No cover ID found for the first track"))?;
+
+    let cover_data = cover_fetcher
+        .fetch_cover(cover_id.as_str()).await?;
+    tokio::fs::write("cover.jpg", cover_data).await?;
     
     Ok(())
 }
