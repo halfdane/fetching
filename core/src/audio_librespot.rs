@@ -103,10 +103,20 @@ fn data_rate_bytes_per_sec(fmt: AudioFileFormat) -> usize {
 }
 
 /// Pick the best available format from an `AudioFiles` map.
+///
+/// Prefers formats in `FORMAT_PREFERENCE` quality order. If Spotify serves an
+/// unrecognised format not yet in the table, falls back to whatever is available
+/// rather than returning `None` — audio of unknown quality beats no audio.
 fn best_format(files: &AudioFiles) -> Option<(FileId, AudioFileFormat)> {
     FORMAT_PREFERENCE
         .iter()
         .find_map(|(fmt, _)| files.0.get(fmt).copied().map(|id| (id, *fmt)))
+        .or_else(|| {
+            files.0.iter().next().map(|(fmt, id)| {
+                warn!("Selecting unrecognised audio format {fmt:?} — not in FORMAT_PREFERENCE table");
+                (*id, *fmt)
+            })
+        })
 }
 
 // ---------------------------------------------------------------------------
