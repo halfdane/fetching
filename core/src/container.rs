@@ -84,10 +84,8 @@ pub struct TrackCollection {
 
 #[cfg(test)]
 mod tests {
-    use crate::spotify_api::SpotifyCollectionMetadata;
-
     use super::*;
-    use librespot_core::FileId;
+    use crate::spotify_api::SpotifyCollectionMetadata;
     use librespot_core::SpotifyUri;
     use pretty_assertions::assert_eq;
 
@@ -121,7 +119,7 @@ mod tests {
             title: "Test Album".to_string(),
             artists: vec!["Album Artist".to_string()],
             cover_id: Some("album_cover_id".to_string()),
-            total_tracks: 1,
+            total_tracks: track_uris.len(),
             track_uris,
             upc: Some("albumUPC".to_string()),
             popularity: Some(80),
@@ -134,93 +132,227 @@ mod tests {
     struct MockFetcher;
     impl SpotifyCollectionMetadata for MockFetcher {
         fn fetch_album(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![format!(
-                "spotify:track:{}",
-                TRACK_ID_1
-            )]))
+            Ok(TrackCollection {
+                collection_type: CollectionType::Album,
+                ..fake_collection(vec![
+                    format!("spotify:track:{}", TRACK_ID_1),
+                    format!("spotify:track:{}", TRACK_ID_2),
+                ])
+            })
         }
-
         fn fetch_track(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![
-                format!("spotify:track:{}", TRACK_ID_1),
-                format!("spotify:track:{}", TRACK_ID_2),
-            ]))
+            Ok(TrackCollection {
+                collection_type: CollectionType::SingleTrack,
+                ..fake_collection(vec![format!("spotify:track:{}", TRACK_ID_1)])
+            })
         }
-
         fn fetch_playlist(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![
-                format!("spotify:track:{}", TRACK_ID_1),
-                format!("spotify:track:{}", TRACK_ID_2),
-            ]))
+            Ok(TrackCollection {
+                collection_type: CollectionType::Playlist,
+                ..fake_collection(vec![
+                    format!("spotify:track:{}", TRACK_ID_1),
+                    format!("spotify:track:{}", TRACK_ID_2),
+                ])
+            })
         }
-
         fn fetch_show(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![
-                format!("spotify:track:{}", TRACK_ID_1),
-                format!("spotify:track:{}", TRACK_ID_2),
-            ]))
+            Ok(TrackCollection {
+                collection_type: CollectionType::Show,
+                ..fake_collection(vec![
+                    format!("spotify:track:{}", TRACK_ID_1),
+                    format!("spotify:track:{}", TRACK_ID_2),
+                ])
+            })
         }
-
         fn fetch_episode(&self, _uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-            Ok(fake_collection(vec![format!(
-                "spotify:track:{}",
-                TRACK_ID_1
-            )]))
+            Ok(TrackCollection {
+                collection_type: CollectionType::SingleEpisode,
+                ..fake_collection(vec![format!("spotify:track:{}", TRACK_ID_1)])
+            })
         }
     }
 
+    // --- fetch_by_uri dispatch ---
+
     #[test]
-    fn test_dispatch_single_track() {
+    fn should_dispatch_album_uri_to_fetch_album() {
+        // given
         let fetcher = MockFetcher;
-        let container = fetcher
-            .fetch_by_uri(&format!("spotify:track:{}", TRACK_ID_1))
-            .unwrap();
-
-        println!("Container: {:?}", container);
-
-        assert_eq!(container.total_tracks, 1);
-        assert_eq!(container.uri_str, format!("spotify:album:{}", ALBUM_ID));
-        assert_eq!(container.spotify_id, ALBUM_ID);
-        assert_eq!(container.title, "Test Album");
-
-        assert_eq!(
-            container.track_uris[0],
-            format!("spotify:track:{}", TRACK_ID_1)
-        );
+        // when
+        let result = fetcher.fetch_by_uri(&format!("spotify:album:{}", ALBUM_ID)).unwrap();
+        // then
+        assert_eq!(result.collection_type, CollectionType::Album);
+        assert_eq!(result.total_tracks, 2);
     }
 
     #[test]
-    fn test_serde() {
+    fn should_dispatch_track_uri_to_fetch_single_track() {
+        // given
         let fetcher = MockFetcher;
-        let container = fetcher
-            .fetch_by_uri(&format!("spotify:track:{}", TRACK_ID_1))
-            .unwrap();
-        let serialized = serde_json::to_vec(&container).unwrap();
-        let deserialized: TrackCollection = serde_json::from_slice(&serialized).unwrap();
-        assert_eq!(deserialized, container);
+        // when
+        let result = fetcher.fetch_by_uri(&format!("spotify:track:{}", TRACK_ID_1)).unwrap();
+        // then
+        assert_eq!(result.collection_type, CollectionType::SingleTrack);
+        assert_eq!(result.total_tracks, 1);
     }
 
     #[test]
-    fn test_fileid() {
-        let bytes: [u8; 20] = [
-            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
-            0x0F, 0x10, 0x11, 0x12, 0x13, 0x14,
+    fn should_dispatch_playlist_uri_to_fetch_playlist() {
+        // given
+        let fetcher = MockFetcher;
+        // when
+        let result = fetcher.fetch_by_uri(&format!("spotify:playlist:{}", ALBUM_ID)).unwrap();
+        // then
+        assert_eq!(result.collection_type, CollectionType::Playlist);
+        assert_eq!(result.total_tracks, 2);
+    }
+
+    #[test]
+    fn should_dispatch_show_uri_to_fetch_show() {
+        // given
+        let fetcher = MockFetcher;
+        // when
+        let result = fetcher.fetch_by_uri(&format!("spotify:show:{}", ALBUM_ID)).unwrap();
+        // then
+        assert_eq!(result.collection_type, CollectionType::Show);
+        assert_eq!(result.total_tracks, 2);
+    }
+
+    #[test]
+    fn should_dispatch_episode_uri_to_fetch_episode() {
+        // given
+        let fetcher = MockFetcher;
+        // when
+        let result = fetcher.fetch_by_uri(&format!("spotify:episode:{}", TRACK_ID_1)).unwrap();
+        // then
+        assert_eq!(result.collection_type, CollectionType::SingleEpisode);
+        assert_eq!(result.total_tracks, 1);
+    }
+
+    #[test]
+    fn should_reject_unsupported_uri_type() {
+        // given
+        let fetcher = MockFetcher;
+        // when
+        let result = fetcher.fetch_by_uri(&format!("spotify:artist:{}", ALBUM_ID));
+        // then
+        assert!(result.is_err());
+    }
+
+    // --- to_track_type ---
+
+    #[test]
+    fn should_classify_track_and_episode_uris_as_track_types() {
+        // given / when / then
+        let track_uri = SpotifyUri::from_uri(&format!("spotify:track:{}", TRACK_ID_1)).unwrap();
+        assert_eq!(to_track_type(&track_uri).unwrap(), TrackType::Track);
+
+        let episode_uri = SpotifyUri::from_uri(&format!("spotify:episode:{}", TRACK_ID_1)).unwrap();
+        assert_eq!(to_track_type(&episode_uri).unwrap(), TrackType::Episode);
+    }
+
+    #[test]
+    fn should_reject_album_uri_as_track_type() {
+        // given
+        let album_uri = SpotifyUri::from_uri(&format!("spotify:album:{}", ALBUM_ID)).unwrap();
+        // when
+        let result = to_track_type(&album_uri);
+        // then
+        assert!(result.is_err());
+    }
+
+    // --- to_collection_type ---
+
+    #[test]
+    fn should_classify_all_collection_uri_types() {
+        // given / when / then
+        let cases = [
+            (format!("spotify:album:{}", ALBUM_ID),    CollectionType::Album),
+            (format!("spotify:playlist:{}", ALBUM_ID), CollectionType::Playlist),
+            (format!("spotify:show:{}", ALBUM_ID),     CollectionType::Show),
+            (format!("spotify:track:{}", TRACK_ID_1),  CollectionType::SingleTrack),
+            (format!("spotify:episode:{}", TRACK_ID_1), CollectionType::SingleEpisode),
         ];
-        let file_id = FileId(bytes);
-        // let file_id = FileId([/* 20 bytes */]);
-        let hex_str = file_id.to_string(); // e.g. "abcdef123456..."
+        for (uri_str, expected) in cases {
+            let uri = SpotifyUri::from_uri(&uri_str).unwrap();
+            assert_eq!(to_collection_type(&uri).unwrap(), expected, "failed for {uri_str}");
+        }
+    }
 
-        use hex;
+    // --- serde ---
 
-        // Convert hex string back to FileId
-        let bytes = hex::decode(&hex_str).expect("valid hex");
-        let new_file_id = FileId::from_raw(&bytes);
+    #[test]
+    fn should_round_trip_track_serde() {
+        // given
+        let track = fake_track(TRACK_ID_1);
+        // when
+        let serialized = serde_json::to_vec(&track).unwrap();
+        let deserialized: Track = serde_json::from_slice(&serialized).unwrap();
+        // then
+        assert_eq!(deserialized, track);
+    }
 
-        // new_file_id is now equivalent to the original file_id
-        println!("Original FileId: {:?}", file_id);
-        println!("Hex String: {}", hex_str);
-        println!("Reconstructed FileId: {:?}", new_file_id);
+    #[test]
+    fn should_round_trip_track_serde_with_no_optional_fields() {
+        // given
+        let track = Track {
+            spotify_id: TRACK_ID_1.to_string(),
+            uri_str: format!("spotify:track:{}", TRACK_ID_1),
+            title: "Minimal".to_string(),
+            artists: vec![],
+            duration_ms: 0,
+            explicit: false,
+            cover_id: None,
+            language: vec![],
+            isrc: None,
+            date: "".to_string(),
+            popularity: None,
+            disc_number: None,
+            number: 1,
+            track_type: TrackType::Episode,
+        };
+        // when
+        let serialized = serde_json::to_vec(&track).unwrap();
+        let deserialized: Track = serde_json::from_slice(&serialized).unwrap();
+        // then
+        assert_eq!(deserialized, track);
+    }
 
-        assert_eq!(file_id, new_file_id);
+    #[test]
+    fn should_round_trip_collection_serde() {
+        // given
+        let collection = fake_collection(vec![
+            format!("spotify:track:{}", TRACK_ID_1),
+            format!("spotify:track:{}", TRACK_ID_2),
+        ]);
+        // when
+        let serialized = serde_json::to_vec(&collection).unwrap();
+        let deserialized: TrackCollection = serde_json::from_slice(&serialized).unwrap();
+        // then
+        assert_eq!(deserialized, collection);
+    }
+
+    #[test]
+    fn should_round_trip_collection_serde_with_no_optional_fields() {
+        // given
+        let collection = TrackCollection {
+            spotify_id: ALBUM_ID.to_string(),
+            uri_str: format!("spotify:album:{}", ALBUM_ID),
+            collection_type: CollectionType::Album,
+            title: "Minimal".to_string(),
+            artists: vec![],
+            cover_id: None,
+            upc: None,
+            total_tracks: 0,
+            popularity: None,
+            label: None,
+            date: None,
+            track_uris: vec![],
+        };
+        // when
+        let serialized = serde_json::to_vec(&collection).unwrap();
+        let deserialized: TrackCollection = serde_json::from_slice(&serialized).unwrap();
+        // then
+        assert_eq!(deserialized, collection);
     }
 }
