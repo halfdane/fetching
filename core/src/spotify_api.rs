@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use librespot_core::SpotifyUri;
 
-use crate::container::{Track, TrackCollection};
+use crate::container::{CollectionType, Track, TrackCollection, to_collection_type};
 
 pub trait SpotifyCollectionMetadata {
     fn fetch_album(&self, uri: &SpotifyUri) -> anyhow::Result<TrackCollection>;
@@ -13,13 +13,12 @@ pub trait SpotifyCollectionMetadata {
     fn fetch_by_uri(&self, uri_str: &str) -> anyhow::Result<TrackCollection> {
         let spotify_uri = &SpotifyUri::from_uri(uri_str)?;
 
-        let collection = match spotify_uri.item_type() {
-            "album" => self.fetch_album(spotify_uri)?,
-            "track" => self.fetch_track(spotify_uri)?,
-            "playlist" => self.fetch_playlist(spotify_uri)?,
-            "show" => self.fetch_show(spotify_uri)?,
-            "episode" => self.fetch_episode(spotify_uri)?,
-            _ => anyhow::bail!("Unsupported URI type: {}", uri_str),
+        let collection = match to_collection_type(spotify_uri)? {
+            CollectionType::Album => self.fetch_album(spotify_uri)?,
+            CollectionType::SingleTrack => self.fetch_track(spotify_uri)?,
+            CollectionType::Playlist => self.fetch_playlist(spotify_uri)?,
+            CollectionType::Show => self.fetch_show(spotify_uri)?,
+            CollectionType::SingleEpisode => self.fetch_episode(spotify_uri)?,
         };
 
         Ok(collection)

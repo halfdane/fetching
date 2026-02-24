@@ -4,8 +4,7 @@ use clap::Parser;
 use fetching_core_lib::{
     auth::session::create_session,
     container::Track,
-    librespot_fetcher::{LibrespotCollectionMetadataFetcher, LibrespotTrackMetadataFetcher},
-    librespot_impl::cover_fetcher::LibrespotCoverFetcher,
+    librespot_impl::{collection_metadata::LibrespotCollectionMetadataFetcher, cover_fetcher::LibrespotCoverFetcher, track_metadata::LibrespotTrackMetadataFetcher},
     spotify_api::{SpotifyCollectionMetadata, SpotifyCover, SpotifyTrackMetadata},
 };
 
@@ -30,9 +29,13 @@ async fn main() -> anyhow::Result<()> {
     let credentials_file = "/home/user/halfdane/.spotify_access_token";
     let (raw_session, _refresher, _refresh_handle) = create_session(&credentials_file).await?;
     let session = Arc::new(raw_session);
-    let track_fetcher = LibrespotTrackMetadataFetcher::new(&session).await?;
+    let track_fetcher = 
+        LibrespotTrackMetadataFetcher { session: session.clone() };
     let collection_fetcher =
-        LibrespotCollectionMetadataFetcher::new(&session, &track_fetcher).await?;
+        LibrespotCollectionMetadataFetcher::<'_, LibrespotTrackMetadataFetcher> {
+            session: session.clone(),
+            track_fetcher: &track_fetcher,
+        };
 
     let container = collection_fetcher.fetch_by_uri(&args.uri)?;
     let tracks2: Vec<Track> = container

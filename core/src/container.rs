@@ -1,10 +1,48 @@
+use librespot_core::SpotifyUri;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+
+pub enum TrackType {
+    Track,
+    Episode,
+}
+
+
+pub fn to_track_type(spotify_uri: &SpotifyUri) -> anyhow::Result<TrackType> {
+    match spotify_uri.item_type().to_lowercase().as_str() {
+        "track" => Ok(TrackType::Track),
+        "episode" => Ok(TrackType::Episode),
+        _ => anyhow::bail!("Unsupported URI type for Track: {}", spotify_uri),
+    }
+}
+
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+
+pub enum CollectionType {
+    Album, Playlist, Show, SingleTrack, SingleEpisode,
+}
+
+pub fn to_collection_type(spotify_uri: &SpotifyUri) -> anyhow::Result<CollectionType> {
+    match spotify_uri.item_type().to_lowercase().as_str() {
+        "album" => Ok(CollectionType::Album),
+        "playlist" => Ok(CollectionType::Playlist),
+        "show" => Ok(CollectionType::Show),
+        "track" => Ok(CollectionType::SingleTrack),
+        "episode" => Ok(CollectionType::SingleEpisode),
+        _ => anyhow::bail!("Unsupported URI type for Track-Collection: {}", spotify_uri),
+
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Track {
     // Identifiers
     pub uri_str: String,
     pub spotify_id: String,
+
+    pub track_type: TrackType,
 
     // Metadata
     pub title: String,
@@ -28,6 +66,8 @@ pub struct TrackCollection {
     // Identifiers
     pub uri_str: String,
     pub spotify_id: String,
+
+    pub collection_type: CollectionType,
 
     // Metadata
     pub title: String,
@@ -70,6 +110,7 @@ mod tests {
             popularity: Some(50),
             disc_number: Some(1),
             number: 7,
+            track_type: TrackType::Track,
         }
     }
 
@@ -86,6 +127,7 @@ mod tests {
             popularity: Some(80),
             label: Some("Test Label".to_string()),
             date: Some("2020-01-01".to_string()),
+            collection_type: CollectionType::Album,
         }
     }
 
