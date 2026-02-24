@@ -27,21 +27,18 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let credentials_file = "/home/user/halfdane/.spotify_access_token";
-    let raw_session = create_session(&credentials_file).await?;
-    let session = Arc::new(raw_session);
-    let track_fetcher = 
-        LibrespotTrackMetadataFetcher { session: session.clone() };
+
+    let session = Arc::new(create_session(&credentials_file).await?);
+    let track_fetcher = LibrespotTrackMetadataFetcher { session: session.clone() };
     let collection_fetcher =
-        LibrespotCollectionMetadataFetcher::<'_, LibrespotTrackMetadataFetcher> {
-            session: session.clone(),
-            track_fetcher: &track_fetcher,
-        };
+        LibrespotCollectionMetadataFetcher::new(session.clone(), track_fetcher);
+    let cover_fetcher = LibrespotCoverFetcher::new(&session).await?;
 
     let container = collection_fetcher.fetch_by_uri(&args.uri)?;
     let tracks2: Vec<Track> = container
         .track_uris
         .iter()
-        .map(|uri| track_fetcher.fetch_by_uri(uri).map(|(track, _)| track))
+        .map(|uri| collection_fetcher.track_fetcher.fetch_by_uri(uri).map(|(track, _)| track))
         .collect::<Result<Vec<_>, _>>()?;
     // Print metadata (same as before)
     println!(
@@ -53,7 +50,6 @@ async fn main() -> anyhow::Result<()> {
     }
     println!(">> {:#?}", &container);
 
-    let cover_fetcher = LibrespotCoverFetcher::new(&session).await?;
     let cover_id = &tracks2
         .first()
         .and_then(|t| t.cover_id.as_ref())

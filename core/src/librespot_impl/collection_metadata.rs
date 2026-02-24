@@ -8,13 +8,19 @@ use crate::container::{CollectionType, TrackCollection};
 use crate::spotify_api::{SpotifyCollectionMetadata, SpotifyTrackMetadata};
 
 
-pub struct LibrespotCollectionMetadataFetcher<'a, T: SpotifyTrackMetadata> {
+pub struct LibrespotCollectionMetadataFetcher<T: SpotifyTrackMetadata> {
     pub session: Arc<Session>,
-    pub track_fetcher: &'a T,
+    pub track_fetcher: T,
 }
 
-impl<'a, T: SpotifyTrackMetadata> SpotifyCollectionMetadata
-    for LibrespotCollectionMetadataFetcher<'a, T>
+impl<T: SpotifyTrackMetadata> LibrespotCollectionMetadataFetcher<T> {
+    pub fn new(session: Arc<Session>, track_fetcher: T) -> Self {
+        Self { session, track_fetcher }
+    }
+}
+
+impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
+    for LibrespotCollectionMetadataFetcher<T>
 {
     fn fetch_album(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
         let l_album = futures::executor::block_on(librespot_metadata::album::Album::get(

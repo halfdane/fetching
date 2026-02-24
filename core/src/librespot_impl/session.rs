@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn should_round_trip_token_data_through_disk() {
         // given: a token written to a temp file
-        let mut file = NamedTempFile::new().unwrap();
+        let file = NamedTempFile::new().unwrap();
         let token = TokenData {
             access_token: "my_acc".to_string(),
             refresh_token: "my_ref".to_string(),
