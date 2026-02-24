@@ -92,7 +92,10 @@ pub(crate) fn read_token_data(token_path: &str) -> Option<super::oauth::TokenDat
 }
 
 /// Save token data to file
-pub(crate) fn save_token_data(token_path: &str, token_data: &super::oauth::TokenData) -> anyhow::Result<()> {
+pub(crate) fn save_token_data(
+    token_path: &str,
+    token_data: &super::oauth::TokenData,
+) -> anyhow::Result<()> {
     let json = serde_json::to_string_pretty(token_data)?;
     std::fs::write(token_path, json)?;
     Ok(())
@@ -131,7 +134,7 @@ mod tests {
         save_token_data(temp_file, &token_data).unwrap();
         let result = read_token_data(temp_file);
         assert!(result.is_some());
-        
+
         let loaded = result.unwrap();
         assert_eq!(loaded.access_token, "test_access_token");
         assert_eq!(loaded.refresh_token, "test_refresh_token");
@@ -139,7 +142,8 @@ mod tests {
 
         // Cleanup
         std::fs::remove_file(temp_file).ok();
-    }    #[test]
+    }
+    #[test]
     fn test_is_token_expired() {
         // Token expired 1 hour ago
         let past = SystemTime::now()

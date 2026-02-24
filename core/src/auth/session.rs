@@ -10,7 +10,13 @@ use tracing::info;
 use super::token::TokenRefresher;
 
 /// Create a Spotify session with automatic token refresh and retry on bad credentials
-pub async fn create_session(token_path: &str) -> anyhow::Result<(librespot_core::session::Session, std::sync::Arc<TokenRefresher>, tokio::task::JoinHandle<()>)> {
+pub async fn create_session(
+    token_path: &str,
+) -> anyhow::Result<(
+    librespot_core::session::Session,
+    std::sync::Arc<TokenRefresher>,
+    tokio::task::JoinHandle<()>,
+)> {
     use anyhow::Context;
     loop {
         match create_session_with_auto_refresh(token_path).await {
@@ -80,7 +86,7 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::NamedTempFile;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     #[tokio::test]
     async fn test_create_authenticated_session() {
@@ -107,7 +113,8 @@ mod tests {
             expires_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_secs() + 3600,
+                .as_secs()
+                + 3600,
         };
 
         crate::auth::token::save_token_data(token_path, &token_data).unwrap();
@@ -115,8 +122,9 @@ mod tests {
         // This will fail in test environment, but we can test the structure
         let result = timeout(
             Duration::from_secs(5), // Timeout to prevent hanging
-            create_session_with_auto_refresh(token_path)
-        ).await;
+            create_session_with_auto_refresh(token_path),
+        )
+        .await;
 
         // The timeout might trigger, or it might fail with a connection error
         // Either way, we're testing that the function is structured correctly
