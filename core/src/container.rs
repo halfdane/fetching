@@ -52,8 +52,8 @@ pub struct Track {
 
     pub duration_ms: i32,
     pub disc_number: Option<i32>,
-    pub number: i32,
-    pub date: String,
+    pub number: Option<i32>,
+    pub date: Option<String>,
     pub popularity: Option<i32>,
 
     // Spotify extras
@@ -104,10 +104,10 @@ mod tests {
             cover_id: Some("track_cover_id".to_string()),
             language: vec!["en".to_string()],
             isrc: Some("trackISRC".to_string()),
-            date: "2020-01-01".to_string(),
+            date: Some("2020-01-01".to_string()),
             popularity: Some(50),
             disc_number: Some(1),
-            number: 7,
+            number: Some(7),
             track_type: TrackType::Track,
         }
     }
@@ -305,10 +305,10 @@ mod tests {
             cover_id: None,
             language: vec![],
             isrc: None,
-            date: "".to_string(),
+            date: None,
             popularity: None,
             disc_number: None,
-            number: 1,
+            number: Some(1),
             track_type: TrackType::Episode,
         };
         // when

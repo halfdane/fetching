@@ -29,7 +29,7 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
             spotify_id: spotify_uri.to_id()?,
             uri_str: spotify_uri.to_string(),
             title: l_episode.name,
-            artists: vec![],
+            artists: vec![l_episode.show_name.clone()],
             duration_ms: l_episode.duration,
             cover_id: Some(cover_id.clone()),
             explicit: l_episode.is_explicit,
@@ -37,10 +37,13 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
             language: vec![],
             isrc: None,
 
-            date: l_episode.publish_time.to_string(),
+            date: {
+                let s = l_episode.publish_time.to_string();
+                if s.starts_with("0000") { None } else { Some(s) }
+            },
             popularity: None,
             disc_number: None,
-            number: l_episode.number,
+            number: if l_episode.number == 0 { None } else { Some(l_episode.number) },
         };
         Ok((track, cover_id))
     }
@@ -77,10 +80,10 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
                 .find(|id| id.external_type == "isrc")
                 .map(|id| id.id.clone()),
 
-            date: l_track.album.date.to_string(),
+            date: Some(l_track.album.date.to_string()),
             popularity: Some(l_track.popularity),
             disc_number: Some(l_track.disc_number),
-            number: l_track.number,
+            number: Some(l_track.number),
         };
         Ok((track, cover_id))
     }

@@ -62,29 +62,35 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
     }
 
     fn fetch_track(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-        let l_album = futures::executor::block_on(librespot_metadata::album::Album::get(
-            &self.session,
-            spotify_uri,
-        ))?;
+        // Fetch the track — album name, covers and date are embedded in l_track.album,
+        // so no separate Album::get call is needed (and passing a track URI to Album::get
+        // causes librespot to hang trying to resolve it as an album ID).
+        let l_track = futures::executor::block_on(
+            librespot_metadata::track::Track::get(&self.session, spotify_uri),
+        )?;
 
-        let (track, cover_id) = self.track_fetcher.fetch_single_track(spotify_uri)?;
+        tracing::info!("Fetched single-track metadata: {}", l_track.name);
+
+        let cover_id = l_track
+            .album
+            .covers
+            .first()
+            .map(|c| c.id.to_string())
+            .unwrap_or_default();
+
         Ok(TrackCollection {
-            uri_str: l_album.id.to_string(),
-            spotify_id: l_album.id.to_id()?,
+            uri_str: spotify_uri.to_string(),
+            spotify_id: spotify_uri.to_id()?,
             collection_type: CollectionType::SingleTrack,
-            title: l_album.name,
-            artists: track.artists.clone(),
+            title: l_track.name,
+            artists: l_track.artists.iter().map(|a| a.name.clone()).collect(),
             total_tracks: 1,
-            cover_id: Some(cover_id.clone()),
-            track_uris: vec![track.uri_str.clone()],
-            upc: l_album
-                .external_ids
-                .iter()
-                .find(|id| id.external_type == "upc")
-                .map(|id| id.id.clone()),
-            popularity: Some(l_album.popularity),
-            label: Some(l_album.label),
-            date: Some(l_album.date.to_string()),
+            cover_id: Some(cover_id),
+            track_uris: vec![spotify_uri.to_string()],
+            upc: None, // UPC is an album-level identifier; not available on track metadata
+            popularity: Some(l_track.popularity),
+            label: None, // label requires a full album fetch; not needed for a single track
+            date: Some(l_track.album.date.to_string()),
         })
     }
 
@@ -153,11 +159,15 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
     }
 
     fn fetch_episode(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-        let (track, cover_id) = self.track_fetcher.fetch_single_track(spotify_uri)?;
+        let (track, cover_id) = self.track_fetcher.fetch_single_episode(spotify_uri)?;
+        // Use the show name (stored in track.artists[0]) as the collection title so the
+        // directory mirrors a full-show download. Falls back to the episode title if the
+        // show name is somehow absent.
+        let show_name = track.artists.first().cloned().unwrap_or_else(|| track.title.clone());
         Ok(TrackCollection {
             uri_str: track.uri_str.clone(),
             spotify_id: track.spotify_id,
-            title: track.title.clone(),
+            title: show_name,
             artists: track.artists.clone(),
             total_tracks: 1,
             cover_id: Some(cover_id.clone()),
@@ -165,7 +175,7 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
             upc: None,
             popularity: None,
             label: None,
-            date: None,
+            date: track.date.clone(),
             collection_type: CollectionType::SingleEpisode,
         })
     }

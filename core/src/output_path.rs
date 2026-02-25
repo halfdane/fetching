@@ -105,14 +105,16 @@ pub fn build_output_dir(
         .date
         .as_deref()
         .and_then(|d| d.get(..4))
-        .unwrap_or("0000")
-        .to_string();
+        .filter(|y| *y != "0000");
 
     let album = safe_component(&collection.title);
 
     let mut path = base.to_path_buf();
     path.push(artist);
-    path.push(format!("{year} - {album}"));
+    match year {
+        Some(y) => path.push(format!("{y} - {album}")),
+        None => path.push(album),
+    }
     path
 }
 
@@ -137,20 +139,42 @@ pub fn build_output_path(
     collection: &TrackCollection,
     fmt: AudioFileFormat,
 ) -> PathBuf {
-    let track_component = match track.disc_number {
-        Some(d) if d > 1 => format!(
-            "{}-{:02} - {}.{}",
-            d,
-            track.number,
-            safe_component(&track.title),
-            ext_for_format(fmt),
-        ),
-        _ => format!(
-            "{:02} - {}.{}",
-            track.number,
-            safe_component(&track.title),
-            ext_for_format(fmt),
-        ),
+    let track_component = match track.number {
+        Some(n) => match track.disc_number {
+            Some(d) if d > 1 => format!(
+                "{}-{:02} - {}.{}",
+                d, n,
+                safe_component(&track.title),
+                ext_for_format(fmt),
+            ),
+            _ => format!(
+                "{:02} - {}.{}",
+                n,
+                safe_component(&track.title),
+                ext_for_format(fmt),
+            ),
+        },
+        None => {
+            // No track number (e.g. podcast episodes where itunes:episode is unset).
+            // Use a compact date prefix so the file sorts chronologically.
+            let date_prefix = track.date.as_deref().and_then(|d| {
+                let digits: String = d.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
+                if digits.is_empty() { None } else { Some(digits) }
+            });
+            match date_prefix {
+                Some(prefix) => format!(
+                    "{} - {}.{}",
+                    prefix,
+                    safe_component(&track.title),
+                    ext_for_format(fmt),
+                ),
+                None => format!(
+                    "{}.{}",
+                    safe_component(&track.title),
+                    ext_for_format(fmt),
+                ),
+            }
+        }
     };
 
     let mut path = build_output_dir(base, track, collection);
@@ -185,7 +209,7 @@ mod tests {
         }
     }
 
-    fn make_track(title: &str, artist: &str, number: i32, disc: Option<i32>) -> Track {
+    fn make_track(title: &str, artist: &str, number: Option<i32>, disc: Option<i32>) -> Track {
         Track {
             uri_str: "spotify:track:test".to_string(),
             spotify_id: "test".to_string(),
@@ -197,7 +221,7 @@ mod tests {
             duration_ms: 180_000,
             disc_number: disc,
             number,
-            date: "2000".to_string(),
+            date: Some("2000".to_string()),
             popularity: None,
             explicit: false,
             language: vec![],
@@ -207,7 +231,7 @@ mod tests {
     #[test]
     fn normal_path_is_correct() {
         let col = make_collection("Flood", Some("1990-01-15"));
-        let track = make_track("Birdhouse in Your Soul", "They Might Be Giants", 2, None);
+        let track = make_track("Birdhouse in Your Soul", "They Might Be Giants", Some(2), None);
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::OGG_VORBIS_320);
         assert_eq!(
             path,
@@ -218,7 +242,7 @@ mod tests {
     #[test]
     fn primary_artist_only_not_all_artists() {
         let col = make_collection("Album", Some("2000"));
-        let mut track = make_track("Track", "Primary Artist", 1, None);
+        let mut track = make_track("Track", "Primary Artist", Some(1), None);
         track.artists = vec!["Primary Artist".to_string(), "Featured Artist".to_string()];
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::OGG_VORBIS_320);
         assert!(path.to_str().unwrap().contains("Primary Artist"));
@@ -228,7 +252,7 @@ mod tests {
     #[test]
     fn traversal_attack_is_neutralised() {
         let col = make_collection("../etc", Some("2000"));
-        let track = make_track("passwd", "../etc/passwd", 1, None);
+        let track = make_track("passwd", "../etc/passwd", Some(1), None);
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::OGG_VORBIS_320);
         let s = path.to_str().unwrap();
         assert!(!s.contains("/etc/passwd"), "traversal not neutralised: {s}");
@@ -242,7 +266,7 @@ mod tests {
         // The important guarantee is that the path stays under base and no
         // filesystem-illegal characters are introduced regardless of platform.
         let col = make_collection("CON", Some("2000"));
-        let track = make_track("NUL", "CON", 1, None);
+        let track = make_track("NUL", "CON", Some(1), None);
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::MP3_320);
         let s = path.to_str().unwrap();
         // Must always stay under base — no traversal regardless of OS
@@ -254,7 +278,7 @@ mod tests {
     #[test]
     fn multi_disc_prefixes_disc_number() {
         let col = make_collection("Double Album", Some("2005"));
-        let track = make_track("Side B Opener", "Band", 1, Some(2));
+        let track = make_track("Side B Opener", "Band", Some(1), Some(2));
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::FLAC_FLAC);
         assert!(path.file_name().unwrap().to_str().unwrap().starts_with("2-01"));
     }
@@ -262,26 +286,48 @@ mod tests {
     #[test]
     fn disc_1_has_no_disc_prefix() {
         let col = make_collection("Album", Some("2005"));
-        let track = make_track("Opener", "Band", 1, Some(1));
+        let track = make_track("Opener", "Band", Some(1), Some(1));
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::FLAC_FLAC);
         assert!(path.file_name().unwrap().to_str().unwrap().starts_with("01"));
     }
 
     #[test]
-    fn missing_date_falls_back_to_0000() {
+    fn missing_date_omits_year_prefix() {
         let col = make_collection("Dateless", None);
-        let track = make_track("Track", "Artist", 1, None);
+        let track = make_track("Track", "Artist", Some(1), None);
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::OGG_VORBIS_160);
-        assert!(path.to_str().unwrap().contains("0000 - Dateless"));
+        let s = path.to_str().unwrap();
+        assert!(!s.contains("0000"), "unexpected 0000 in path: {s}");
+        assert!(s.contains("Artist/Dateless/"), "expected 'Artist/Dateless/' in path: {s}");
     }
 
     #[test]
     fn empty_artist_falls_back_to_unknown() {
         let col = make_collection("Album", Some("2000"));
-        let mut track = make_track("Track", "Artist", 1, None);
+        let mut track = make_track("Track", "Artist", Some(1), None);
         track.artists = vec![];
         let path = build_output_path(Path::new("/music"), &track, &col, AudioFileFormat::OGG_VORBIS_320);
         assert!(path.to_str().unwrap().contains("Unknown Artist"));
+    }
+
+    #[test]
+    fn no_number_uses_date_prefix() {
+        let col = make_collection("Crime Junkie", Some("2026"));
+        let mut track = make_track("MURDERED Bobby Moore", "Crime Junkie", None, None);
+        track.date = Some("2026-02-09".to_string());
+        let path = build_output_path(Path::new("/podcasts"), &track, &col, AudioFileFormat::OGG_VORBIS_320);
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(filename, "20260209 - MURDERED Bobby Moore.ogg");
+    }
+
+    #[test]
+    fn no_number_no_date_uses_title_only() {
+        let col = make_collection("Show", None);
+        let mut track = make_track("Episode Title", "Show", None, None);
+        track.date = None;
+        let path = build_output_path(Path::new("/podcasts"), &track, &col, AudioFileFormat::OGG_VORBIS_320);
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(filename, "Episode Title.ogg");
     }
 
     #[test]
