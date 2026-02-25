@@ -36,6 +36,7 @@ pub fn write_tags(
     track: &Track,
     collection: &TrackCollection,
     cover_bytes: Option<&[u8]>,
+    replay_gain: Option<crate::audio::ReplayGain>,
 ) -> anyhow::Result<()> {
     // Open and identify the audio file.
     let mut tagged_file = Probe::open(path)?.guess_file_type()?.read()?;
@@ -135,6 +136,32 @@ pub fn write_tags(
         ItemKey::Comment,
         format!("spotify_uri={}", track.uri_str),
     );
+
+    // -----------------------------------------------------------------------
+    // ReplayGain
+    // -----------------------------------------------------------------------
+
+    // Values follow the ReplayGain 2.0 string convention:
+    //   gain  → "+3.14 dB" (signed, two decimal places, " dB" suffix)
+    //   peak  → "0.997654" (linear ratio, no unit)
+    if let Some(rg) = replay_gain {
+        tag.insert_text(
+            ItemKey::ReplayGainTrackGain,
+            format!("{:+.2} dB", rg.track_gain_db),
+        );
+        tag.insert_text(
+            ItemKey::ReplayGainTrackPeak,
+            format!("{:.6}", rg.track_peak),
+        );
+        tag.insert_text(
+            ItemKey::ReplayGainAlbumGain,
+            format!("{:+.2} dB", rg.album_gain_db),
+        );
+        tag.insert_text(
+            ItemKey::ReplayGainAlbumPeak,
+            format!("{:.6}", rg.album_peak),
+        );
+    }
 
     // -----------------------------------------------------------------------
     // Spotify extras
@@ -243,7 +270,7 @@ mod tests {
         let mut tmp = NamedTempFile::new().unwrap();
         // Write some non-audio bytes so the file exists but isn't parseable.
         tmp.write_all(b"not an audio file").unwrap();
-        let result = write_tags(tmp.path(), &make_track(), &make_collection(), None);
+        let result = write_tags(tmp.path(), &make_track(), &make_collection(), None, None);
         assert!(result.is_err(), "expected error for non-audio file");
     }
 }

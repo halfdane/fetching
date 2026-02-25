@@ -31,6 +31,21 @@ use tempfile::NamedTempFile;
 // Public types
 // ---------------------------------------------------------------------------
 
+/// ReplayGain / normalisation data extracted from Spotify's custom OGG Vorbis header.
+///
+/// Spotify stores these as four little-endian `f32` values starting at byte 144 of
+/// the 167-byte proprietary prefix it prepends to every OGG Vorbis file.  They are
+/// semantically identical to the ReplayGain 2.0 fields of the same name and should
+/// be written back as standard Vorbis Comments / ID3v2 frames so players and tools
+/// like beets, foobar2000, and MusicBrainz Picard can consume them normally.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReplayGain {
+    pub track_gain_db: f32,
+    pub track_peak:    f32,
+    pub album_gain_db: f32,
+    pub album_peak:    f32,
+}
+
 /// Result of a successful audio download, ready for lofty tagging.
 ///
 /// The file contains decoded audio with Spotify's proprietary header already
@@ -42,6 +57,9 @@ pub struct DownloadedTrack {
     pub format: AudioFileFormat,
     /// Seekable, writable temp file on the same filesystem as the final destination.
     pub file: NamedTempFile,
+    /// ReplayGain data parsed from Spotify's OGG header, if present and parseable.
+    /// Always `None` for non-OGG formats (MP3, AAC, FLAC).
+    pub replay_gain: Option<ReplayGain>,
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use std::io::Read;
+
 use librespot_audio::{AudioDecrypt, AudioFile};
 use librespot_core::{file_id::FileId, session::Session, SpotifyUri};
 use librespot_metadata::audio::{AudioFileFormat, AudioFiles, AudioItem};
@@ -29,7 +31,7 @@ use tokio::runtime::Handle;
 use tracing::{debug, info, warn};
 
 use crate::audio::{
-    strip_header_and_copy, AudioFileDownloader, DownloadedTrack, RetryConfig,
+    strip_header_and_copy, AudioFileDownloader, DownloadedTrack, ReplayGain, RetryConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -255,6 +257,33 @@ async fn resolve_best_audio(
 }
 
 // ---------------------------------------------------------------------------
+// Spotify OGG normalisation header
+// ---------------------------------------------------------------------------
+
+/// Length of the proprietary Spotify header prepended to every OGG Vorbis file.
+const SPOTIFY_OGG_HEADER_LEN: usize = 0xa7; // 167 bytes
+
+/// Byte offset within the header at which the four normalisation f32s start.
+const NORMALIZATION_OFFSET: usize = 144;
+
+/// Parse the four ReplayGain values from Spotify's OGG header.
+///
+/// Layout (starting at byte 144): four little-endian `f32` values:
+/// `track_gain_db`, `track_peak`, `album_gain_db`, `album_peak`.
+///
+/// Source: librespot-playback/src/player.rs `NormalisationData::parse_from_ogg`.
+fn parse_spotify_normalisation(header: &[u8]) -> Option<ReplayGain> {
+    const SIZE: usize = 16; // 4 × 4 bytes
+    let buf = header.get(NORMALIZATION_OFFSET..NORMALIZATION_OFFSET + SIZE)?;
+    Some(ReplayGain {
+        track_gain_db: f32::from_le_bytes(buf[0..4].try_into().ok()?),
+        track_peak:    f32::from_le_bytes(buf[4..8].try_into().ok()?),
+        album_gain_db: f32::from_le_bytes(buf[8..12].try_into().ok()?),
+        album_peak:    f32::from_le_bytes(buf[12..16].try_into().ok()?),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Stream → AudioDecrypt → strip header (OGG only) → NamedTempFile
 // ---------------------------------------------------------------------------
 
@@ -294,19 +323,18 @@ fn stream_to_tempfile(
     // The 167-byte Spotify header exists ONLY in OGG Vorbis files.
     // MP3, AAC, and FLAC start with their own native headers at byte 0.
     //
-    // TODO(lofty): Before skipping, parse the header into a ReplayGain struct
-    // and store it in DownloadedTrack so the lofty tagging step can write it
-    // back as standard Vorbis Comments (REPLAYGAIN_TRACK_GAIN, REPLAYGAIN_TRACK_PEAK,
-    // REPLAYGAIN_ALBUM_GAIN, REPLAYGAIN_ALBUM_PEAK). The byte layout is documented
-    // in librespot-playback/src/normalisation.rs (NormalisationData — four f32, big-endian).
-    let header_len = if AudioFiles::is_ogg_vorbis(format) { 0xa7 } else { 0 };
+    // For OGG, we read the header into a buffer so we can extract the
+    // ReplayGain / normalisation data before discarding the header bytes.
+    let replay_gain = if AudioFiles::is_ogg_vorbis(format) {
+        let mut header = [0u8; SPOTIFY_OGG_HEADER_LEN];
+        decrypted.read_exact(&mut header)?;
+        parse_spotify_normalisation(&header)
+    } else {
+        None
+    };
 
-    let bytes = strip_header_and_copy(
-        &mut decrypted,
-        temp_file.as_file_mut(),
-        header_len,
-        8_192,
-    )?;
+    // Header bytes already consumed above for OGG; header_len is 0 in all cases.
+    let bytes = strip_header_and_copy(&mut decrypted, temp_file.as_file_mut(), 0, 8_192)?;
 
     info!("Downloaded {bytes} bytes ({format:?}) for {original_uri_str}");
 
@@ -314,5 +342,6 @@ fn stream_to_tempfile(
         track_uri: original_uri_str.to_string(),
         format,
         file: temp_file,
+        replay_gain,
     })
 }

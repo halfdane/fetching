@@ -171,6 +171,7 @@ impl JobRunner for DownloadRunner {
             &track,
             &entry.collection,
             cover_bytes.as_deref(),
+            downloaded.replay_gain,
         ) {
             warn!("Failed to write tags to {}: {}", final_path.display(), e);
         } else {
