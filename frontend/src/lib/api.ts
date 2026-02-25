@@ -1,4 +1,5 @@
-import { mockFetchStatus, mockSubscribeEvents } from './mock';
+import { mockFetchStatus, mockSubscribeEvents, mockSubscribeRawEvents } from './mock';
+import type { RawEvent } from './types';
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -16,6 +17,25 @@ export function subscribeEvents(
   const es = new EventSource('/events');
   es.onmessage = (event) => {
     try { onUpdate(JSON.parse(event.data)); } catch {}
+  };
+  return () => es.close();
+}
+
+/**
+ * Subscribe to every raw SSE event verbatim — including events the main UI
+ * doesn't act on (session token refreshes, audio key timings, CDN chunks, etc.).
+ * Intended for the developer drawer only.
+ */
+export function subscribeRawEvents(
+  onEvent: (event: RawEvent) => void
+): () => void {
+  if (IS_DEV) return mockSubscribeRawEvents(onEvent);
+  const es = new EventSource('/events');
+  es.onmessage = (msg) => {
+    onEvent({
+      timestamp: new Date().toISOString().slice(11, 23),
+      raw: msg.data,
+    });
   };
   return () => es.close();
 }
