@@ -15,8 +15,9 @@
 //!    hint instead of a hardcoded 160 kbps value.
 //! 5. Strips Spotify's proprietary 167-byte header **only for OGG Vorbis** files.
 //!    MP3/AAC files do not carry this header and must not be truncated.
-//! 6. Treats audio key failures as **survivable** (some content is unencrypted).
-//!    Key errors no longer fire the retry loop; missing key → `AudioDecrypt(None)`.
+//! 6. Treats audio key failures as **retriable transient errors**. The error
+//!    message matches [`is_retriable_error`] so the retry loop retries after
+//!    backoff. Proceeding without a key would write raw ciphertext to disk.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -139,9 +140,8 @@ impl AudioFileDownloader for LibrespotAudioDownloader {
 
         for attempt in 0..self.retry_config.max_attempts {
             if attempt > 0 {
-                let delay = Duration::from_millis(
-                    self.retry_config.base_delay_ms * 2u64.pow(attempt - 1),
-                );
+                let delay_ms = (self.retry_config.base_delay_ms * 2u64.pow(attempt - 1))
+                    .min(self.retry_config.max_delay_ms);
                 info!(
                     "Retrying audio download for {} (attempt {}/{}) after: {}",
                     track_uri,
@@ -149,7 +149,7 @@ impl AudioFileDownloader for LibrespotAudioDownloader {
                     self.retry_config.max_attempts,
                     last_err.as_ref().map(|e| e.to_string()).unwrap_or_default()
                 );
-                std::thread::sleep(delay);
+                std::thread::sleep(Duration::from_millis(delay_ms));
             }
 
             match stream_to_tempfile(
@@ -279,25 +279,20 @@ fn stream_to_tempfile(
         _ => anyhow::bail!("Cannot request audio key for URI: {}", track_uri),
     };
 
-    // Audio key failure is survivable: some content (previews, podcasts) is
-    // unencrypted. Pass None to AudioDecrypt instead of failing the whole download.
-    let key = match handle.block_on(session.audio_key().request(spotify_id, *file_id)) {
-        Ok(k) => {
-            debug!("Audio key obtained for {original_uri_str}");
-            Some(k)
-        }
-        Err(e) => {
-            warn!("Audio key request failed for {original_uri_str}, proceeding without decryption: {e}");
-            None
-        }
-    };
+    // Audio key failure is a transient CDN error — NOT an indicator that content
+    // is unencrypted. Proceeding without a key writes raw ciphertext to disk.
+    // Return an error so the outer retry loop handles it with exponential backoff.
+    let key = handle
+        .block_on(session.audio_key().request(spotify_id, *file_id))
+        .map_err(|e| anyhow::anyhow!("Audio key request failed for {original_uri_str}: {e}"))?;
+    debug!("Audio key obtained for {original_uri_str}");
 
     let raw_reader: Box<dyn std::io::Read> = match audio_file {
         AudioFile::Streaming(stream) => Box::new(stream),
         AudioFile::Cached(file) => Box::new(file),
     };
 
-    let mut decrypted = AudioDecrypt::new(key, raw_reader);
+    let mut decrypted = AudioDecrypt::new(Some(key), raw_reader);
     let mut temp_file = NamedTempFile::new()?;
 
     // The 167-byte Spotify header exists ONLY in OGG Vorbis files.
@@ -321,6 +316,7 @@ fn stream_to_tempfile(
 
     Ok(DownloadedTrack {
         track_uri: original_uri_str.to_string(),
+        format,
         file: temp_file,
     })
 }

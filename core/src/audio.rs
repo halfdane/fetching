@@ -24,6 +24,7 @@
 
 use std::io::{Read, Write};
 
+use librespot_metadata::audio::AudioFileFormat;
 use tempfile::NamedTempFile;
 
 // ---------------------------------------------------------------------------
@@ -32,11 +33,13 @@ use tempfile::NamedTempFile;
 
 /// Result of a successful audio download, ready for lofty tagging.
 ///
-/// The file contains standard OGG Vorbis audio — Spotify's proprietary
-/// 167-byte header has already been stripped. Drop this value to delete the
-/// temp file, or call `file.persist(final_path)` to move it into place.
+/// The file contains decoded audio with Spotify's proprietary header already
+/// stripped (OGG only). Drop this value to delete the temp file, or call
+/// `file.persist(final_path)` to move it into place atomically.
 pub struct DownloadedTrack {
     pub track_uri: String,
+    /// The audio format, used to derive the correct file extension.
+    pub format: AudioFileFormat,
     /// Seekable, writable temp file on the same filesystem as the final destination.
     pub file: NamedTempFile,
 }
@@ -48,13 +51,15 @@ pub struct DownloadedTrack {
 /// Controls retry behaviour for transient audio download errors.
 ///
 /// Pass to `LibrespotAudioDownloader::with_retry` or accept the `Default`
-/// which mirrors the settings that worked in `core-old`.
+/// Retry parameters for transient audio download failures.
 #[derive(Clone, Debug)]
 pub struct RetryConfig {
     /// Maximum number of attempts (includes the first try).
     pub max_attempts: u32,
-    /// Base delay in milliseconds; actual delay is `base_delay_ms * 2^(attempt-1)`.
+    /// Base delay in milliseconds; actual delay is `min(base_delay_ms * 2^(attempt-1), max_delay_ms)`.
     pub base_delay_ms: u64,
+    /// Hard ceiling on the computed delay in milliseconds.
+    pub max_delay_ms: u64,
 }
 
 impl Default for RetryConfig {
@@ -62,6 +67,7 @@ impl Default for RetryConfig {
         Self {
             max_attempts: 5,
             base_delay_ms: 5_000,
+            max_delay_ms: 30_000,
         }
     }
 }
@@ -201,5 +207,6 @@ mod tests {
         let cfg = RetryConfig::default();
         assert_eq!(cfg.max_attempts, 5);
         assert_eq!(cfg.base_delay_ms, 5_000);
+        assert_eq!(cfg.max_delay_ms, 30_000);
     }
 }

@@ -9,6 +9,7 @@ use fetching_core_lib::{
         session::create_session,
         track_metadata::LibrespotTrackMetadataFetcher,
     },
+    output_path::build_output_path,
     queue::{JobRunner, QueueEntry, TaskStatus, WorkerApis},
     queue_tokio::TokioQueue,
     spotify_api::SpotifyCollectionMetadata,
@@ -19,7 +20,9 @@ use tokio::sync::broadcast;
 // Playground runner – fetches track metadata + cover and saves the cover
 // ---------------------------------------------------------------------------
 
-struct PlaygroundRunner;
+struct PlaygroundRunner {
+    pub output_dir: PathBuf,
+}
 
 impl JobRunner for PlaygroundRunner {
     fn run(&self, entry: &QueueEntry, apis: &WorkerApis) -> anyhow::Result<()> {
@@ -42,9 +45,17 @@ impl JobRunner for PlaygroundRunner {
             audio_bytes,
             downloaded.file.path().display()
         );
-        // TODO: tag with lofty, then rename to final path
 
-        // 3. Fetch and save cover image
+        // 3. Persist to final path (TODO: tag with lofty before persisting)
+        let final_path = build_output_path(&self.output_dir, &track, &entry.collection, downloaded.format);
+        if let Some(parent) = final_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        downloaded.file.persist(&final_path)
+            .map_err(|e| anyhow::anyhow!("Failed to persist audio to {}: {}", final_path.display(), e))?;
+        println!("  [worker] saved: {}", final_path.display());
+
+        // 4. Fetch and save cover image
         let cover_bytes = handle.block_on(apis.cover.fetch_cover(&cover_id))?;
         let cover_filename = format!("cover_{}.jpg", track.spotify_id);
         std::fs::write(&cover_filename, &cover_bytes)?;
@@ -61,8 +72,9 @@ impl JobRunner for PlaygroundRunner {
 #[derive(Parser)]
 struct Args {
     uri: String,
-    #[arg(short, long)]
-    covers_dir: Option<PathBuf>,
+    /// Directory to store downloaded tracks under (default: /tmp/fetching-out)
+    #[arg(short, long, default_value = "/tmp/fetching-out")]
+    output_dir: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
         audio: Arc::new(LibrespotAudioDownloader::new(session.clone())),
     };
 
-    let queue = Arc::new(TokioQueue::new(apis, PlaygroundRunner));
+    let queue = Arc::new(TokioQueue::new(apis, PlaygroundRunner { output_dir: args.output_dir.clone() }));
     let mut progress_rx = queue.subscribe_progress();
     queue.start();
 

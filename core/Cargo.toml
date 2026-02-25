@@ -33,6 +33,7 @@ moka = { version = "0.12.13", features = ["future"]}
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = "0.4.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sanitize-filename = "0.6"
 
 
 [dev-dependencies]
