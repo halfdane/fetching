@@ -5,4 +5,5 @@ pub mod librespot_impl;
 pub mod output_path;
 pub mod queue;
 pub mod queue_tokio;
+pub mod runner;
 pub mod spotify_api;

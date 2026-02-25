@@ -9,61 +9,12 @@ use fetching_core_lib::{
         session::create_session,
         track_metadata::LibrespotTrackMetadataFetcher,
     },
-    output_path::build_output_path,
-    queue::{JobRunner, QueueEntry, TaskStatus, WorkerApis},
+    queue::{TaskStatus, WorkerApis},
     queue_tokio::TokioQueue,
+    runner::DownloadRunner,
     spotify_api::SpotifyCollectionMetadata,
 };
 use tokio::sync::broadcast;
-
-// ---------------------------------------------------------------------------
-// Playground runner – fetches track metadata + cover and saves the cover
-// ---------------------------------------------------------------------------
-
-struct PlaygroundRunner {
-    pub output_dir: PathBuf,
-}
-
-impl JobRunner for PlaygroundRunner {
-    fn run(&self, entry: &QueueEntry, apis: &WorkerApis) -> anyhow::Result<()> {
-        let handle = tokio::runtime::Handle::current();
-
-        // 1. Fetch track metadata
-        let (track, cover_id) = apis.track_metadata.fetch_by_uri(&entry.track_uri)?;
-        println!(
-            "  [worker] {} – {} ({}s)",
-            entry.task_id,
-            track.title,
-            track.duration_ms / 1000
-        );
-
-        // 2. Download audio → temp file (decrypt + header strip handled inside)
-        let downloaded = apis.audio.download(&entry.track_uri)?;
-        let audio_bytes = downloaded.file.as_file().metadata()?.len();
-        println!(
-            "  [worker] audio: {} bytes in {}",
-            audio_bytes,
-            downloaded.file.path().display()
-        );
-
-        // 3. Persist to final path (TODO: tag with lofty before persisting)
-        let final_path = build_output_path(&self.output_dir, &track, &entry.collection, downloaded.format);
-        if let Some(parent) = final_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        downloaded.file.persist(&final_path)
-            .map_err(|e| anyhow::anyhow!("Failed to persist audio to {}: {}", final_path.display(), e))?;
-        println!("  [worker] saved: {}", final_path.display());
-
-        // 4. Fetch and save cover image
-        let cover_bytes = handle.block_on(apis.cover.fetch_cover(&cover_id))?;
-        let cover_filename = format!("cover_{}.jpg", track.spotify_id);
-        std::fs::write(&cover_filename, &cover_bytes)?;
-        println!("  [worker] cover: {} ({} bytes)", cover_filename, cover_bytes.len());
-
-        Ok(())
-    }
-}
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -120,7 +71,7 @@ async fn main() -> anyhow::Result<()> {
         audio: Arc::new(LibrespotAudioDownloader::new(session.clone())),
     };
 
-    let queue = Arc::new(TokioQueue::new(apis, PlaygroundRunner { output_dir: args.output_dir.clone() }));
+    let queue = Arc::new(TokioQueue::new(apis, DownloadRunner::new(args.output_dir.clone())));
     let mut progress_rx = queue.subscribe_progress();
     queue.start();
 
