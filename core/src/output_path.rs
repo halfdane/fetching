@@ -193,20 +193,18 @@ pub fn build_output_stem(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::container::{CollectionType, TrackCollection, TrackType};
+    use crate::container::{CollectionType, TrackCollection};
     use std::path::Path;
 
     fn make_collection(title: &str, date: Option<&str>) -> TrackCollection {
         TrackCollection {
             uri_str: "spotify:album:test".to_string(),
-            spotify_id: "test".to_string(),
             collection_type: CollectionType::Album,
             title: title.to_string(),
             artists: vec!["Artist".to_string()],
             cover_id: None,
             upc: None,
             total_tracks: 1,
-            popularity: None,
             label: None,
             date: date.map(str::to_string),
             track_uris: vec![],
@@ -216,8 +214,6 @@ mod tests {
     fn make_track(title: &str, artist: &str, number: Option<i32>, disc: Option<i32>) -> Track {
         Track {
             uri_str: "spotify:track:test".to_string(),
-            spotify_id: "test".to_string(),
-            track_type: TrackType::Track,
             title: title.to_string(),
             artists: vec![artist.to_string()],
             cover_id: None,
@@ -226,7 +222,6 @@ mod tests {
             disc_number: disc,
             number,
             date: Some("2000".to_string()),
-            popularity: None,
             explicit: false,
             language: vec![],
         }

@@ -1,22 +1,6 @@
 use librespot_core::SpotifyUri;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-
-pub enum TrackType {
-    Track,
-    Episode,
-}
-
-
-pub fn to_track_type(spotify_uri: &SpotifyUri) -> anyhow::Result<TrackType> {
-    match spotify_uri.item_type().to_lowercase().as_str() {
-        "track" => Ok(TrackType::Track),
-        "episode" => Ok(TrackType::Episode),
-        _ => anyhow::bail!("Unsupported URI type for Track: {}", spotify_uri),
-    }
-}
-
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 
@@ -40,9 +24,6 @@ pub fn to_collection_type(spotify_uri: &SpotifyUri) -> anyhow::Result<Collection
 pub struct Track {
     // Identifiers
     pub uri_str: String,
-    pub spotify_id: String,
-
-    pub track_type: TrackType,
 
     // Metadata
     pub title: String,
@@ -54,7 +35,6 @@ pub struct Track {
     pub disc_number: Option<i32>,
     pub number: Option<i32>,
     pub date: Option<String>,
-    pub popularity: Option<i32>,
 
     // Spotify extras
     pub explicit: bool,
@@ -65,7 +45,6 @@ pub struct Track {
 pub struct TrackCollection {
     // Identifiers
     pub uri_str: String,
-    pub spotify_id: String,
 
     pub collection_type: CollectionType,
 
@@ -75,7 +54,6 @@ pub struct TrackCollection {
     pub cover_id: Option<String>,
     pub upc: Option<String>,
     pub total_tracks: usize,
-    pub popularity: Option<i32>,
     pub label: Option<String>,
     pub date: Option<String>,
 
@@ -95,7 +73,6 @@ mod tests {
 
     fn fake_track(track_id: &str) -> Track {
         Track {
-            spotify_id: track_id.to_string(),
             uri_str: format!("spotify:track:{}", track_id),
             title: "Test Track".to_string(),
             artists: vec!["Track Artist".to_string()],
@@ -105,16 +82,13 @@ mod tests {
             language: vec!["en".to_string()],
             isrc: Some("trackISRC".to_string()),
             date: Some("2020-01-01".to_string()),
-            popularity: Some(50),
             disc_number: Some(1),
             number: Some(7),
-            track_type: TrackType::Track,
         }
     }
 
     fn fake_collection(track_uris: Vec<String>) -> TrackCollection {
         TrackCollection {
-            spotify_id: ALBUM_ID.to_string(),
             uri_str: format!("spotify:album:{}", ALBUM_ID),
             title: "Test Album".to_string(),
             artists: vec!["Album Artist".to_string()],
@@ -122,7 +96,6 @@ mod tests {
             total_tracks: track_uris.len(),
             track_uris,
             upc: Some("albumUPC".to_string()),
-            popularity: Some(80),
             label: Some("Test Label".to_string()),
             date: Some("2020-01-01".to_string()),
             collection_type: CollectionType::Album,
@@ -239,28 +212,6 @@ mod tests {
         assert!(result.is_err());
     }
 
-    // --- to_track_type ---
-
-    #[test]
-    fn should_classify_track_and_episode_uris_as_track_types() {
-        // given / when / then
-        let track_uri = SpotifyUri::from_uri(&format!("spotify:track:{}", TRACK_ID_1)).unwrap();
-        assert_eq!(to_track_type(&track_uri).unwrap(), TrackType::Track);
-
-        let episode_uri = SpotifyUri::from_uri(&format!("spotify:episode:{}", TRACK_ID_1)).unwrap();
-        assert_eq!(to_track_type(&episode_uri).unwrap(), TrackType::Episode);
-    }
-
-    #[test]
-    fn should_reject_album_uri_as_track_type() {
-        // given
-        let album_uri = SpotifyUri::from_uri(&format!("spotify:album:{}", ALBUM_ID)).unwrap();
-        // when
-        let result = to_track_type(&album_uri);
-        // then
-        assert!(result.is_err());
-    }
-
     // --- to_collection_type ---
 
     #[test]
@@ -296,7 +247,6 @@ mod tests {
     fn should_round_trip_track_serde_with_no_optional_fields() {
         // given
         let track = Track {
-            spotify_id: TRACK_ID_1.to_string(),
             uri_str: format!("spotify:track:{}", TRACK_ID_1),
             title: "Minimal".to_string(),
             artists: vec![],
@@ -306,10 +256,8 @@ mod tests {
             language: vec![],
             isrc: None,
             date: None,
-            popularity: None,
             disc_number: None,
             number: Some(1),
-            track_type: TrackType::Episode,
         };
         // when
         let serialized = serde_json::to_vec(&track).unwrap();
@@ -336,7 +284,6 @@ mod tests {
     fn should_round_trip_collection_serde_with_no_optional_fields() {
         // given
         let collection = TrackCollection {
-            spotify_id: ALBUM_ID.to_string(),
             uri_str: format!("spotify:album:{}", ALBUM_ID),
             collection_type: CollectionType::Album,
             title: "Minimal".to_string(),
@@ -344,7 +291,6 @@ mod tests {
             cover_id: None,
             upc: None,
             total_tracks: 0,
-            popularity: None,
             label: None,
             date: None,
             track_uris: vec![],

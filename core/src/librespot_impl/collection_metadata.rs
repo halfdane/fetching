@@ -43,7 +43,6 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
 
         Ok(TrackCollection {
             uri_str: l_album.id.to_string(),
-            spotify_id: l_album.id.to_id()?,
             collection_type: CollectionType::Album,
             title: l_album.name,
             artists: l_album.artists.iter().map(|a| a.name.clone()).collect(),
@@ -55,7 +54,6 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
                 .iter()
                 .find(|id| id.external_type == "upc")
                 .map(|id| id.id.clone()),
-            popularity: Some(l_album.popularity),
             label: Some(l_album.label),
             date: Some(l_album.date.to_string()),
         })
@@ -80,7 +78,6 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
 
         Ok(TrackCollection {
             uri_str: spotify_uri.to_string(),
-            spotify_id: spotify_uri.to_id()?,
             collection_type: CollectionType::SingleTrack,
             title: l_track.name,
             artists: l_track.artists.iter().map(|a| a.name.clone()).collect(),
@@ -88,7 +85,6 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
             cover_id: Some(cover_id),
             track_uris: vec![spotify_uri.to_string()],
             upc: None, // UPC is an album-level identifier; not available on track metadata
-            popularity: Some(l_track.popularity),
             label: None, // label requires a full album fetch; not needed for a single track
             date: Some(l_track.album.date.to_string()),
         })
@@ -108,7 +104,6 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
             .collect::<Vec<_>>();
         Ok(TrackCollection {
             uri_str: l_playlist.id.to_string(),
-            spotify_id: l_playlist.id.to_id()?,
             collection_type: CollectionType::Playlist,
             title: l_playlist.attributes.name.clone(),
             artists: vec![],
@@ -116,7 +111,6 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
             cover_id: None,
             track_uris: track_uris,
             upc: None,
-            popularity: None,
             label: None,
             date: None,
         })
@@ -144,14 +138,12 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
 
         Ok(TrackCollection {
             uri_str: l_show.id.to_string(),
-            spotify_id: l_show.id.to_id()?,
             title: l_show.name.clone(),
             artists: vec![],
             total_tracks: track_uris.len(),
             cover_id: Some(cover_id),
             track_uris: track_uris,
             upc: None,
-            popularity: None,
             label: Some(l_show.publisher.clone()),
             date: None,
             collection_type: CollectionType::Show,
@@ -159,21 +151,19 @@ impl<T: SpotifyTrackMetadata> SpotifyCollectionMetadata
     }
 
     fn fetch_episode(&self, spotify_uri: &SpotifyUri) -> anyhow::Result<TrackCollection> {
-        let (track, cover_id) = self.track_fetcher.fetch_single_episode(spotify_uri)?;
+        let track = self.track_fetcher.fetch_single_episode(spotify_uri)?;
         // Use the show name (stored in track.artists[0]) as the collection title so the
         // directory mirrors a full-show download. Falls back to the episode title if the
         // show name is somehow absent.
         let show_name = track.artists.first().cloned().unwrap_or_else(|| track.title.clone());
         Ok(TrackCollection {
             uri_str: track.uri_str.clone(),
-            spotify_id: track.spotify_id,
             title: show_name,
             artists: track.artists.clone(),
             total_tracks: 1,
-            cover_id: Some(cover_id.clone()),
+            cover_id: track.cover_id.clone(),
             track_uris: vec![track.uri_str.clone()],
             upc: None,
-            popularity: None,
             label: None,
             date: track.date.clone(),
             collection_type: CollectionType::SingleEpisode,

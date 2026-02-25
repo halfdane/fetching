@@ -137,6 +137,21 @@ pub fn write_tags(
     );
 
     // -----------------------------------------------------------------------
+    // Spotify extras
+    // -----------------------------------------------------------------------
+
+    // Explicit flag: "1" = explicit, "0" = clean
+    tag.insert_text(
+        ItemKey::ParentalAdvisory,
+        if track.explicit { "1" } else { "0" }.to_string(),
+    );
+
+    // Language(s): join with "/" so multi-language tracks still fit one field
+    if !track.language.is_empty() {
+        tag.insert_text(ItemKey::Language, track.language.join("/"));
+    }
+
+    // -----------------------------------------------------------------------
     // Cover art
     // -----------------------------------------------------------------------
 
@@ -176,15 +191,13 @@ fn primary_tag_type_for(tagged_file: &lofty::file::TaggedFile) -> TagType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::container::{CollectionType, TrackType};
+    use crate::container::CollectionType;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
     fn make_track() -> Track {
         Track {
             uri_str: "spotify:track:abc".to_string(),
-            spotify_id: "abc".to_string(),
-            track_type: TrackType::Track,
             title: "Blue in Green".to_string(),
             artists: vec!["Miles Davis".to_string(), "Bill Evans".to_string()],
             cover_id: None,
@@ -193,7 +206,6 @@ mod tests {
             disc_number: Some(1),
             number: Some(2),
             date: Some("1959-08-17".to_string()),
-            popularity: Some(80),
             explicit: false,
             language: vec!["en".to_string()],
         }
@@ -202,14 +214,12 @@ mod tests {
     fn make_collection() -> TrackCollection {
         TrackCollection {
             uri_str: "spotify:album:xyz".to_string(),
-            spotify_id: "xyz".to_string(),
             collection_type: CollectionType::Album,
             title: "Kind of Blue".to_string(),
             artists: vec!["Miles Davis".to_string()],
             cover_id: None,
             upc: Some("074646443026".to_string()),
             total_tracks: 5,
-            popularity: Some(90),
             label: Some("Columbia".to_string()),
             date: Some("1959-08-17".to_string()),
             track_uris: vec![],

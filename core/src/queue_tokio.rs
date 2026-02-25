@@ -320,8 +320,8 @@ mod tests {
 
     struct StubTrackMetadata;
     impl crate::spotify_api::SpotifyTrackMetadata for StubTrackMetadata {
-        fn fetch_single_episode(&self, _: &SpotifyUri) -> anyhow::Result<(crate::container::Track, String)> { unimplemented!() }
-        fn fetch_single_track(&self, _: &SpotifyUri) -> anyhow::Result<(crate::container::Track, String)> { unimplemented!() }
+        fn fetch_single_episode(&self, _: &SpotifyUri) -> anyhow::Result<crate::container::Track> { unimplemented!() }
+        fn fetch_single_track(&self, _: &SpotifyUri) -> anyhow::Result<crate::container::Track> { unimplemented!() }
     }
 
     struct StubCoverFetcher;
@@ -347,14 +347,12 @@ mod tests {
     fn fake_collection(uris: &[&str]) -> Arc<TrackCollection> {
         Arc::new(TrackCollection {
             uri_str: "spotify:album:test".to_string(),
-            spotify_id: "test".to_string(),
             collection_type: CollectionType::Album,
             title: "Test".to_string(),
             artists: vec![],
             cover_id: None,
             upc: None,
             total_tracks: uris.len(),
-            popularity: None,
             label: None,
             date: None,
             track_uris: uris.iter().map(|s| s.to_string()).collect(),

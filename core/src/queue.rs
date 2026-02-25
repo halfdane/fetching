@@ -170,14 +170,12 @@ mod tests {
     fn fake_collection() -> Arc<TrackCollection> {
         Arc::new(TrackCollection {
             uri_str: "spotify:album:test".to_string(),
-            spotify_id: "test".to_string(),
             collection_type: CollectionType::Album,
             title: "Test".to_string(),
             artists: vec![],
             cover_id: None,
             upc: None,
             total_tracks: 1,
-            popularity: None,
             label: None,
             date: None,
             track_uris: vec!["spotify:track:aaa".to_string()],

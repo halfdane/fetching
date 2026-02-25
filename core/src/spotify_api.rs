@@ -29,18 +29,18 @@ pub trait SpotifyTrackMetadata {
     fn fetch_single_episode(
         &self,
         spotify_uri: &SpotifyUri,
-    ) -> Result<(Track, String), anyhow::Error>;
+    ) -> anyhow::Result<Track>;
     fn fetch_single_track(
         &self,
         spotify_uri: &SpotifyUri,
-    ) -> Result<(Track, String), anyhow::Error>;
+    ) -> anyhow::Result<Track>;
 
-    fn fetch_by_uri(&self, uri_str: &str) -> anyhow::Result<(Track, String)> {
+    fn fetch_by_uri(&self, uri_str: &str) -> anyhow::Result<Track> {
         let spotify_uri = &SpotifyUri::from_uri(uri_str)?;
 
         match spotify_uri.item_type() {
-            "track" => Ok(self.fetch_single_track(spotify_uri)?),
-            "episode" => Ok(self.fetch_single_episode(spotify_uri)?),
+            "track" => self.fetch_single_track(spotify_uri),
+            "episode" => self.fetch_single_episode(spotify_uri),
             _ => anyhow::bail!("Unsupported URI type: {}", uri_str),
         }
     }

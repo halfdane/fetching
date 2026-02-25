@@ -2,7 +2,7 @@ use std::sync::Arc;
 use librespot_core::{Session, SpotifyUri};
 use librespot_metadata::Metadata;
 
-use crate::{container::{Track, TrackType}, spotify_api::SpotifyTrackMetadata};
+use crate::{container::Track, spotify_api::SpotifyTrackMetadata};
 
 
 pub struct LibrespotTrackMetadataFetcher {
@@ -14,7 +14,7 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
     fn fetch_single_episode(
         &self,
         spotify_uri: &SpotifyUri,
-    ) -> Result<(Track, String), anyhow::Error> {
+    ) -> anyhow::Result<Track> {
         let l_episode = futures::executor::block_on(
             librespot_metadata::episode::Episode::get(&self.session, spotify_uri),
         )?;
@@ -26,14 +26,12 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
             .unwrap_or_default();
 
         let track = Track {
-            spotify_id: spotify_uri.to_id()?,
             uri_str: spotify_uri.to_string(),
             title: l_episode.name,
             artists: vec![l_episode.show_name.clone()],
             duration_ms: l_episode.duration,
             cover_id: Some(cover_id.clone()),
             explicit: l_episode.is_explicit,
-            track_type: TrackType::Episode,
             language: vec![],
             isrc: None,
 
@@ -41,17 +39,16 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
                 let s = l_episode.publish_time.to_string();
                 if s.starts_with("0000") { None } else { Some(s) }
             },
-            popularity: None,
             disc_number: None,
             number: if l_episode.number == 0 { None } else { Some(l_episode.number) },
         };
-        Ok((track, cover_id))
+        Ok(track)
     }
 
     fn fetch_single_track(
         &self,
         spotify_uri: &SpotifyUri,
-    ) -> Result<(Track, String), anyhow::Error> {
+    ) -> anyhow::Result<Track> {
         let l_track = futures::executor::block_on(
             librespot_metadata::track::Track::get(&self.session, spotify_uri),
         )?;
@@ -65,9 +62,7 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
             .map(|c| c.id.to_string())
             .unwrap_or_default();
         let track: Track = Track {
-            spotify_id: spotify_uri.to_id()?,
             uri_str: spotify_uri.to_string(),
-            track_type: TrackType::Track,
             title: l_track.name,
             artists: l_track.artists.iter().map(|a| a.name.clone()).collect(),
             duration_ms: l_track.duration,
@@ -81,11 +76,10 @@ impl SpotifyTrackMetadata for LibrespotTrackMetadataFetcher {
                 .map(|id| id.id.clone()),
 
             date: Some(l_track.album.date.to_string()),
-            popularity: Some(l_track.popularity),
             disc_number: Some(l_track.disc_number),
             number: Some(l_track.number),
         };
-        Ok((track, cover_id))
+Ok(track)
     }
 }
 

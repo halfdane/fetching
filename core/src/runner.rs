@@ -103,7 +103,8 @@ impl JobRunner for DownloadRunner {
         }
 
         // ── 1. Fetch track metadata ──────────────────────────────────────────
-        let (track, cover_id) = apis.track_metadata.fetch_by_uri(&entry.track_uri)?;
+        let track = apis.track_metadata.fetch_by_uri(&entry.track_uri)?;
+        let cover_id = track.cover_id.clone().unwrap_or_default();
         info!(
             task_id = %entry.task_id,
             title = %track.title,
