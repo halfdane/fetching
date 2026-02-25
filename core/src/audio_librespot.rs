@@ -21,7 +21,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::stream::{FuturesUnordered, StreamExt};
 use librespot_audio::{AudioDecrypt, AudioFile};
 use librespot_core::{file_id::FileId, session::Session, SpotifyUri};
 use librespot_metadata::audio::{AudioFileFormat, AudioFiles, AudioItem};
@@ -38,69 +37,47 @@ use crate::audio::{
 // ---------------------------------------------------------------------------
 
 /// All known Spotify audio formats ordered by descending quality.
-///
-/// Within the same perceptual quality tier, OGG Vorbis is listed first because:
-/// - It is Spotify's primary container
-/// - Its Vorbis Comments are the easiest target for lofty tagging
-/// - The 167-byte header strip logic is well-understood for OGG
-const FORMAT_PREFERENCE: &[(AudioFileFormat, u8)] = &[
+/// Position in this slice is the quality rank (lower = better).
+/// Within the same perceptual tier, OGG Vorbis is listed first:
+/// it is Spotify's primary container and the easiest target for lofty tagging.
+const FORMAT_PREFERENCE: &[AudioFileFormat] = &[
     // — Lossless ————————————————————————————————————————
-    (AudioFileFormat::FLAC_FLAC, 0),
-    (AudioFileFormat::FLAC_FLAC_24BIT, 1),
+    AudioFileFormat::FLAC_FLAC,
+    AudioFileFormat::FLAC_FLAC_24BIT,
     // — 320 kbps ————————————————————————————————————————
-    (AudioFileFormat::OGG_VORBIS_320, 2),
-    (AudioFileFormat::AAC_320, 3),
-    (AudioFileFormat::MP3_320, 4),
-    (AudioFileFormat::OTHER5, 5), // treated as ~320 by Spotify
+    AudioFileFormat::OGG_VORBIS_320,
+    AudioFileFormat::AAC_320,
+    AudioFileFormat::MP3_320,
+    AudioFileFormat::OTHER5, // treated as ~320 by Spotify
     // — 256 kbps ————————————————————————————————————————
-    (AudioFileFormat::MP3_256, 6),
+    AudioFileFormat::MP3_256,
     // — 160 kbps ————————————————————————————————————————
-    (AudioFileFormat::OGG_VORBIS_160, 7),
-    (AudioFileFormat::AAC_160, 8),
-    (AudioFileFormat::MP3_160, 9),
-    (AudioFileFormat::MP3_160_ENC, 10),
-    (AudioFileFormat::MP4_128, 11), // ~128 kbps, slotted with the 160 tier
+    AudioFileFormat::OGG_VORBIS_160,
+    AudioFileFormat::AAC_160,
+    AudioFileFormat::MP3_160,
+    AudioFileFormat::MP3_160_ENC,
+    AudioFileFormat::MP4_128, // ~128 kbps, slotted with the 160 tier
     // — 96 kbps ————————————————————————————————————————
-    (AudioFileFormat::OGG_VORBIS_96, 12),
-    (AudioFileFormat::MP3_96, 13),
+    AudioFileFormat::OGG_VORBIS_96,
+    AudioFileFormat::MP3_96,
     // — Low bitrate ————————————————————————————————————
-    (AudioFileFormat::AAC_48, 14),
-    (AudioFileFormat::AAC_24, 15),
-    (AudioFileFormat::XHE_AAC_24, 16),
-    (AudioFileFormat::XHE_AAC_16, 17),
-    (AudioFileFormat::XHE_AAC_12, 18),
+    AudioFileFormat::AAC_48,
+    AudioFileFormat::AAC_24,
+    AudioFileFormat::XHE_AAC_24,
+    AudioFileFormat::XHE_AAC_16,
+    AudioFileFormat::XHE_AAC_12,
 ];
 
-/// Quality rank for a format (lower = better). `u8::MAX` = unknown/unsupported.
-fn format_rank(fmt: AudioFileFormat) -> u8 {
+/// Quality rank for a format (lower = better). `usize::MAX` = unknown/unsupported.
+fn format_rank(fmt: AudioFileFormat) -> usize {
     FORMAT_PREFERENCE
         .iter()
-        .find_map(|(f, rank)| if *f == fmt { Some(*rank) } else { None })
-        .unwrap_or(u8::MAX)
+        .position(|f| *f == fmt)
+        .unwrap_or(usize::MAX)
 }
 
-/// Buffer hint bytes/sec for `AudioFile::open` — derived from the format's actual bitrate.
-fn data_rate_bytes_per_sec(fmt: AudioFileFormat) -> usize {
-    let kbps: f32 = match fmt {
-        AudioFileFormat::FLAC_FLAC | AudioFileFormat::FLAC_FLAC_24BIT => 112.0,
-        AudioFileFormat::OGG_VORBIS_320
-        | AudioFileFormat::AAC_320
-        | AudioFileFormat::MP3_320
-        | AudioFileFormat::OTHER5 => 40.0,
-        AudioFileFormat::MP3_256 => 32.0,
-        AudioFileFormat::OGG_VORBIS_160
-        | AudioFileFormat::AAC_160
-        | AudioFileFormat::MP3_160
-        | AudioFileFormat::MP3_160_ENC => 20.0,
-        AudioFileFormat::MP4_128 => 16.0,
-        AudioFileFormat::OGG_VORBIS_96 | AudioFileFormat::MP3_96 => 12.0,
-        AudioFileFormat::AAC_48 => 6.0,
-        AudioFileFormat::AAC_24 | AudioFileFormat::XHE_AAC_24 => 3.0,
-        AudioFileFormat::XHE_AAC_16 => 2.0,
-        AudioFileFormat::XHE_AAC_12 => 1.5,
-    };
-    (kbps * 1024.0).ceil() as usize
-}
+/// Buffer hint for `AudioFile::open` — 320 kbps in bytes/sec, adequate for all formats.
+const AUDIO_BUFFER_HINT: usize = 320 * 1024 / 8; // 40_960 bytes/sec
 
 /// Pick the best available format from an `AudioFiles` map.
 ///
@@ -110,7 +87,7 @@ fn data_rate_bytes_per_sec(fmt: AudioFileFormat) -> usize {
 fn best_format(files: &AudioFiles) -> Option<(FileId, AudioFileFormat)> {
     FORMAT_PREFERENCE
         .iter()
-        .find_map(|(fmt, _)| files.0.get(fmt).copied().map(|id| (id, *fmt)))
+        .find_map(|fmt| files.0.get(fmt).copied().map(|id| (id, *fmt)))
         .or_else(|| {
             files.0.iter().next().map(|(fmt, id)| {
                 warn!("Selecting unrecognised audio format {fmt:?} — not in FORMAT_PREFERENCE table");
@@ -247,16 +224,10 @@ async fn resolve_best_audio(
         debug!("Primary track unavailable: {:?}", primary.availability.as_ref().err());
     }
 
-    // Fetch all alternatives in parallel
+    // Try alternatives sequentially until lossless is found or all exhausted
     if let Some(alternatives) = primary.alternatives {
-        let futures: FuturesUnordered<_> = alternatives
-            .iter()
-            .map(|alt_uri| AudioItem::get_file(session, alt_uri.clone()))
-            .collect();
-
-        let mut stream = futures;
-        while let Some(result) = stream.next().await {
-            match result {
+        for alt_uri in alternatives.iter() {
+            match AudioItem::get_file(session, alt_uri.clone()).await {
                 Ok(item) if item.availability.is_ok() => {
                     if let Some((file_id, fmt)) = best_format(&item.files) {
                         let owning_uri = item.track_id.clone();
@@ -300,10 +271,7 @@ fn stream_to_tempfile(
     original_uri_str: &str,
     handle: &Handle,
 ) -> anyhow::Result<DownloadedTrack> {
-    // Buffer hint is derived from the actual format bitrate.
-    let buf_hint = data_rate_bytes_per_sec(format);
-
-    let audio_file = handle.block_on(AudioFile::open(session, *file_id, buf_hint))?;
+    let audio_file = handle.block_on(AudioFile::open(session, *file_id, AUDIO_BUFFER_HINT))?;
 
     let spotify_id = match track_uri {
         SpotifyUri::Track { id } => *id,
