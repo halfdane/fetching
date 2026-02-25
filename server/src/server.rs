@@ -1,57 +1,152 @@
 use axum::response::sse::{Event, Sse};
 use axum::{
     extract::{Json, State},
+    http::StatusCode,
     response::IntoResponse,
     routing::get,
     Router,
 };
-use fetching_core_old::SharedQueue;
-use serde::Deserialize;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use fetching_core_lib::{
+    container::TrackCollection,
+    queue::CoverFetcher,
+    queue_tokio::TokioQueue,
+    spotify_api::SpotifyCollectionMetadata,
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use uuid::Uuid;
 
 use crate::handlers::pwa_handler;
 
+// ---------------------------------------------------------------------------
+// AppState
+// ---------------------------------------------------------------------------
+
 #[derive(Clone)]
 pub struct AppState {
-    pub queue: Arc<SharedQueue>,
+    pub queue: Arc<TokioQueue>,
+    /// Shared with the worker — same Arc<Cache> so cover fetches are deduplicated.
+    pub cover: Arc<dyn CoverFetcher>,
+    /// Used in the POST handler to resolve a URI before queuing.
+    pub collection_metadata: Arc<dyn SpotifyCollectionMetadata + Send + Sync>,
 }
+
+// ---------------------------------------------------------------------------
+// API types
+// ---------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct QueueRequest {
     url: String,
 }
 
+#[derive(Serialize)]
+pub struct QueueResponse {
+    pub collection: TrackCollection,
+    /// Base64-encoded JPEG as `data:image/jpeg;base64,…`, or `null` if unavailable.
+    pub cover_data_url: Option<String>,
+    /// Task IDs, in the same order as `collection.track_uris`.
+    /// The frontend stores these as `TrackItem.id` values so it can match
+    /// incoming SSE `ProgressUpdate` events to individual tracks.
+    pub task_ids: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
 async fn queue_url(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<QueueRequest>,
-) -> impl axum::response::IntoResponse {
-    let task_id = Uuid::new_v4();
-    tracing::info!("Web: queued task {}: {}", task_id, payload.url);
+) -> impl IntoResponse {
+    let url = payload.url.clone();
 
-    state.queue.add_tasks(vec![payload.url.clone()]).await;
+    // Step 1: resolve URI → TrackCollection (blocking librespot call)
+    let meta = Arc::clone(&state.collection_metadata);
+    let collection = match tokio::task::spawn_blocking(move || meta.fetch_by_uri(&url)).await {
+        Ok(Ok(c)) => Arc::new(c),
+        Ok(Err(e)) => {
+            tracing::warn!("Failed to resolve '{}': {e}", payload.url);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            tracing::error!("Panic resolving '{}': {e}", payload.url);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            )
+                .into_response();
+        }
+    };
 
-    axum::http::StatusCode::ACCEPTED
+    // Step 2: fetch cover art inside spawn_blocking — LibrespotCoverFetcher
+    // calls futures::executor::block_on internally, which blocks the OS thread.
+    // Running it in spawn_blocking keeps the async executor free.
+    let cover_data_url = match &collection.cover_id {
+        Some(cover_id) => {
+            let cover = Arc::clone(&state.cover);
+            let cid = cover_id.clone();
+            let handle = tokio::runtime::Handle::current();
+            match tokio::task::spawn_blocking(move || {
+                handle.block_on(cover.fetch_cover(&cid))
+            })
+            .await
+            {
+                Ok(Ok(bytes)) => Some(format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes))),
+                Ok(Err(e)) => {
+                    tracing::warn!("Cover fetch failed for '{}': {e}", collection.title);
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!("Cover fetch panicked for '{}': {e}", collection.title);
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
+    // Step 3: enqueue — downloads start here, after the response is ready
+    let task_ids: Vec<String> = state
+        .queue
+        .add_collection(Arc::clone(&collection))
+        .into_iter()
+        .map(|id| id.to_string())
+        .collect();
+
+    tracing::info!("Queued '{}' ({} tracks)", collection.title, task_ids.len());
+
+    (
+        StatusCode::OK,
+        Json(QueueResponse {
+            collection: (*collection).clone(),
+            cover_data_url,
+            task_ids,
+        }),
+    )
+        .into_response()
 }
-async fn get_status(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // TODO: return JSON status
-    axum::response::Html("<pre>Status: TODO yeah</pre>")
+
+async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let pending = state.queue.len();
+    axum::response::Html(format!("<pre>Status: ok — {pending} track(s) pending</pre>"))
 }
 
 async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let mut rx = state.queue.as_ref().progress_tx().subscribe();
+    let mut rx = state.queue.subscribe_progress();
     let stream = async_stream::stream! {
         loop {
             match rx.recv().await {
                 Ok(update) => {
-                    if update.status == "end" {
-                        break;
-                    }
                     if let Ok(json) = serde_json::to_string(&update) {
                         yield Ok::<_, std::convert::Infallible>(Event::default().data(json));
                     }
-                },
+                }
                 Err(broadcast::error::RecvError::Closed) => break,
                 Err(broadcast::error::RecvError::Lagged(_)) => continue,
             }
@@ -69,5 +164,3 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/events", get(events))
         .with_state(state)
 }
-
-// Remove all test code below

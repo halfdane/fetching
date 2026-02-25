@@ -1,5 +1,5 @@
 import { mockFetchStatus, mockSubscribeEvents, mockSubscribeRawEvents, mockQueueUrl } from './mock';
-import type { RawEvent, QueueResponse } from './types';
+import type { RawEvent, QueueResponse, SseEvent } from './types';
 
 const IS_DEV = import.meta.env.DEV;
 
@@ -22,12 +22,12 @@ export async function fetchStatus(): Promise<string> {
 }
 
 export function subscribeEvents(
-  onUpdate: (data: { id: string; status: string; progress: number }) => void
+  onUpdate: (event: SseEvent) => void
 ): () => void {
   if (IS_DEV) return mockSubscribeEvents(onUpdate);
   const es = new EventSource('/events');
-  es.onmessage = (event) => {
-    try { onUpdate(JSON.parse(event.data)); } catch {}
+  es.onmessage = (msg) => {
+    try { onUpdate(JSON.parse(msg.data)); } catch {}
   };
   return () => es.close();
 }

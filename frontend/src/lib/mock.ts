@@ -3,7 +3,7 @@
  * Covers every visual state: done, running (animated), pending, failed.
  * Automatically excluded from production builds via import.meta.env.DEV guards in api.ts.
  */
-import type { QueueItem, TrackItem, RawEvent, QueueResponse } from './types';
+import type { QueueItem, TrackItem, RawEvent, QueueResponse, SseEvent } from './types';
 
 // Real Spotify cover CDN URLs (stable for demo purposes)
 const FLOOD_COVER =
@@ -123,22 +123,26 @@ export function mockFetchStatus(): Promise<string> {
 
 /**
  * Simulates live SSE progress updates for the running item.
- * Progress bar bounces so animations are always visible during dev.
+ * Advances Apollo tracks one-by-one so the progress bar animates during dev.
  * Returns a cleanup function matching the real subscribeEvents contract.
  */
 export function mockSubscribeEvents(
-  onUpdate: (data: { id: string; status: string; progress: number }) => void
+  onUpdate: (event: SseEvent) => void
 ): () => void {
-  const RUNNING_ID = 'task-running-1';
-  let progress = 35;
-  let direction = 1;
+  // ap-03 is the currently-running track; cycle through ap-03 … ap-11
+  const trackIds = ['ap-03', 'ap-04', 'ap-05', 'ap-06', 'ap-07', 'ap-08', 'ap-09', 'ap-10', 'ap-11'];
+  let idx = 0;
+
+  // Immediately mark the first track as running
+  onUpdate({ task_id: trackIds[0], status: { type: 'running' } });
 
   const interval = setInterval(() => {
-    progress += direction * (3 + Math.random() * 4);
-    if (progress >= 100) { progress = 100; direction = -1; }
-    if (progress <= 15) { direction = 1; }
-    onUpdate({ id: RUNNING_ID, status: 'running', progress: Math.round(progress) });
-  }, 800);
+    const doneId = trackIds[idx];
+    idx = (idx + 1) % trackIds.length;
+    const nextId = trackIds[idx];
+    onUpdate({ task_id: doneId,  status: { type: 'done' } });
+    onUpdate({ task_id: nextId, status: { type: 'running' } });
+  }, 1000);
 
   return () => clearInterval(interval);
 }
@@ -168,7 +172,8 @@ const KIND_OF_BLUE: QueueResponse = {
     label: 'Columbia',
     date: '1959-08-17',
   },
-  cover_url: 'https://i.scdn.co/image/ab67616d0000b273e2e352d89826aef6dbd5ff8f',
+  cover_data_url: null, // mock: no base64 image
+  task_ids: ['kob-01', 'kob-02', 'kob-03', 'kob-04', 'kob-05'],
 };
 
 /** Returns a fake QueueResponse for any URL entered in dev. */

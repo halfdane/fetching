@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use fetching_core_lib::{
     audio_librespot::LibrespotAudioDownloader,
     librespot_impl::{
+        cached_cover_fetcher::CachedCoverProvider,
         collection_metadata::LibrespotCollectionMetadataFetcher,
         cover_fetcher::LibrespotCoverFetcher,
         session::create_session,
@@ -14,6 +15,7 @@ use fetching_core_lib::{
     runner::DownloadRunner,
     spotify_api::SpotifyCollectionMetadata,
 };
+use server_lib::server::{app, AppState};
 use tokio::sync::broadcast;
 
 #[derive(Parser)]
@@ -166,11 +168,39 @@ async fn main() -> anyhow::Result<()> {
             tracing::info!("All done.");
         }
 
-        Commands::Server { port, credentials_file: _, output_dir: _ } => {
-            tracing::warn!(
-                "Server on port {port} — not yet migrated to new core. Coming in Phase 2."
-            );
-            todo!("Server branch migration to new core (Phase 2)");
+        Commands::Server { port, credentials_file, output_dir } => {
+            let session = Arc::new(create_session(&credentials_file).await?);
+
+            // CachedCoverProvider wraps Arc<Cache> internally — cloning is cheap
+            // and shares the same cache between the worker and the HTTP handler.
+            let raw_cover = LibrespotCoverFetcher::new(&session).await?;
+            let cover = CachedCoverProvider::new(Arc::new(raw_cover));
+
+            let apis = WorkerApis {
+                collection_metadata: Arc::new(LibrespotCollectionMetadataFetcher::new(
+                    session.clone(),
+                    LibrespotTrackMetadataFetcher { session: session.clone() },
+                )),
+                track_metadata: Arc::new(LibrespotTrackMetadataFetcher { session: session.clone() }),
+                cover: Arc::new(cover.clone()),
+                audio: Arc::new(LibrespotAudioDownloader::new(session.clone())),
+            };
+
+            let queue = Arc::new(TokioQueue::new(apis, DownloadRunner::new(output_dir)));
+            queue.start();
+
+            let app_state = Arc::new(AppState {
+                queue: Arc::clone(&queue),
+                collection_metadata: Arc::new(LibrespotCollectionMetadataFetcher::new(
+                    session.clone(),
+                    LibrespotTrackMetadataFetcher { session: session.clone() },
+                )),
+                cover: Arc::new(cover),
+            });
+
+            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+            tracing::info!("Server listening on http://0.0.0.0:{port}");
+            axum::serve(listener, app(app_state)).await?;
         }
     }
 

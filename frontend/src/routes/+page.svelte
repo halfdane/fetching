@@ -16,12 +16,40 @@
     try {
       await fetchStatus();
       queue = import.meta.env.DEV ? [...MOCK_QUEUE] : [];
-      unsubscribe = subscribeEvents((update) => {
-        queue = queue.map((item) =>
-          item.id === update.id
-            ? { ...item, status: update.status, progress: update.progress }
-            : item
-        );
+      unsubscribe = subscribeEvents((event) => {
+        queue = queue.map((item) => {
+          if (!item.tracks) return item;
+          const trackIdx = item.tracks.findIndex((t) => t.id === event.task_id);
+          if (trackIdx === -1) return item;
+
+          const newStatus = event.status.type;
+          const newProgress =
+            newStatus === 'done' ? 100
+            : newStatus === 'running' ? item.tracks[trackIdx].progress
+            : 0;
+          const failureReason =
+            newStatus === 'failed' ? (event.status.reason ?? 'Unknown error') : undefined;
+
+          const updatedTracks = item.tracks.map((t, i) =>
+            i === trackIdx
+              ? { ...t, status: newStatus, progress: newProgress, failureReason }
+              : t
+          );
+
+          // Derive collection-level status and progress from individual tracks
+          const anyRunning = updatedTracks.some((t) => t.status === 'running');
+          const anyFailed  = updatedTracks.some((t) => t.status === 'failed');
+          const allDone    = updatedTracks.every((t) => t.status === 'done');
+          const collectionStatus = anyRunning ? 'running'
+            : allDone    ? 'done'
+            : anyFailed  ? 'failed'
+            : 'pending';
+          const collectionProgress = Math.round(
+            updatedTracks.reduce((sum, t) => sum + t.progress, 0) / updatedTracks.length
+          );
+
+          return { ...item, tracks: updatedTracks, status: collectionStatus, progress: collectionProgress };
+        });
       });
       loading = false;
     } catch (e: unknown) {
@@ -34,8 +62,6 @@
 
   function handleQueued(item: QueueItem) {
     if (queue.some((q) => q.id === item.id)) {
-      // Already queued — surface a brief visual hint by re-expanding that card
-      // (the queue list itself doesn't need to change)
       return;
     }
     queue = [...queue, item];

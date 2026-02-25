@@ -9,17 +9,17 @@
   let error = $state('');
 
   function responseToQueueItem(res: QueueResponse): QueueItem {
-    const { collection, cover_url } = res;
+    const { collection, cover_data_url, task_ids } = res;
     return {
       id: collection.uri_str,
-      cover: cover_url,
+      cover: cover_data_url ?? '',
       title: collection.title,
       artist: collection.artists[0] ?? '',
       trackCount: collection.total_tracks,
       status: 'pending',
       progress: 0,
-      tracks: collection.track_uris.map((uri, i) => ({
-        id: uri,
+      tracks: task_ids.map((taskId, i) => ({
+        id: taskId,
         number: i + 1,
         title: `Track ${i + 1}`,
         status: 'pending',

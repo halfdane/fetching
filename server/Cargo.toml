@@ -15,7 +15,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tower-http = { version = "0.5", features = ["fs"] }
 uuid = { version = "1", features = ["v4"] }
-fetching-core-old = { path = "../core-old" }
+fetching-core = { path = "../core" }
+base64 = "0.22"
 hyper = "1"
 futures-util = "0.3.32"
 async-stream = "0.3.6"
