@@ -152,6 +152,14 @@ pub trait QueueStorage: Send + Sync + 'static {
 
     /// Remove and return the entry at the front of the queue, or `None` if empty.
     fn pop(&self) -> anyhow::Result<Option<QueueEntry>>;
+
+    /// Return the number of entries currently waiting in the queue.
+    fn len(&self) -> usize;
+
+    /// Returns `true` if the queue is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[cfg(test)]

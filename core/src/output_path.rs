@@ -85,7 +85,38 @@ pub fn safe_component(s: &str) -> String {
 // Path builder
 // ---------------------------------------------------------------------------
 
-/// Build the output path for a downloaded track.
+/// Return the album directory that all tracks in a collection land in:
+/// `{base}/{primary_artist}/{year} - {album}`
+///
+/// Use this to create the directory and derive the temp-file location before
+/// the audio format (and therefore the track filename) is known.
+pub fn build_output_dir(
+    base: &Path,
+    track: &Track,
+    collection: &TrackCollection,
+) -> PathBuf {
+    let artist = safe_component(
+        track.artists.first()
+            .map(String::as_str)
+            .unwrap_or("Unknown Artist"),
+    );
+
+    let year = collection
+        .date
+        .as_deref()
+        .and_then(|d| d.get(..4))
+        .unwrap_or("0000")
+        .to_string();
+
+    let album = safe_component(&collection.title);
+
+    let mut path = base.to_path_buf();
+    path.push(artist);
+    path.push(format!("{year} - {album}"));
+    path
+}
+
+/// Full output path including the track filename.
 ///
 /// # Structure
 /// ```text
@@ -106,21 +137,6 @@ pub fn build_output_path(
     collection: &TrackCollection,
     fmt: AudioFileFormat,
 ) -> PathBuf {
-    let artist = safe_component(
-        track.artists.first()
-            .map(String::as_str)
-            .unwrap_or("Unknown Artist"),
-    );
-
-    let year = collection
-        .date
-        .as_deref()
-        .and_then(|d| d.get(..4))
-        .unwrap_or("0000")
-        .to_string();
-
-    let album = safe_component(&collection.title);
-
     let track_component = match track.disc_number {
         Some(d) if d > 1 => format!(
             "{}-{:02} - {}.{}",
@@ -137,9 +153,7 @@ pub fn build_output_path(
         ),
     };
 
-    let mut path = base.to_path_buf();
-    path.push(artist);
-    path.push(format!("{year} - {album}"));
+    let mut path = build_output_dir(base, track, collection);
     path.push(track_component);
     path
 }

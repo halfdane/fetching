@@ -25,7 +25,6 @@ use std::time::Duration;
 use librespot_audio::{AudioDecrypt, AudioFile};
 use librespot_core::{file_id::FileId, session::Session, SpotifyUri};
 use librespot_metadata::audio::{AudioFileFormat, AudioFiles, AudioItem};
-use tempfile::NamedTempFile;
 use tokio::runtime::Handle;
 use tracing::{debug, info, warn};
 
@@ -127,7 +126,7 @@ impl LibrespotAudioDownloader {
 // ---------------------------------------------------------------------------
 
 impl AudioFileDownloader for LibrespotAudioDownloader {
-    fn download(&self, track_uri: &str) -> anyhow::Result<DownloadedTrack> {
+    fn download(&self, track_uri: &str, temp_dir: &std::path::Path) -> anyhow::Result<DownloadedTrack> {
         let handle = Handle::current();
 
         // Resolve the best (file_id, format, owning_uri) — may try alternatives.
@@ -159,6 +158,7 @@ impl AudioFileDownloader for LibrespotAudioDownloader {
                 &resolved_uri,
                 track_uri,
                 &handle,
+                temp_dir,
             ) {
                 Ok(downloaded) => return Ok(downloaded),
                 Err(e) => {
@@ -265,6 +265,7 @@ fn stream_to_tempfile(
     track_uri: &SpotifyUri,
     original_uri_str: &str,
     handle: &Handle,
+    temp_dir: &std::path::Path,
 ) -> anyhow::Result<DownloadedTrack> {
     let audio_file = handle.block_on(AudioFile::open(session, *file_id, AUDIO_BUFFER_HINT))?;
 
@@ -288,7 +289,7 @@ fn stream_to_tempfile(
     };
 
     let mut decrypted = AudioDecrypt::new(Some(key), raw_reader);
-    let mut temp_file = NamedTempFile::new()?;
+    let mut temp_file = tempfile::Builder::new().tempfile_in(temp_dir)?;
 
     // The 167-byte Spotify header exists ONLY in OGG Vorbis files.
     // MP3, AAC, and FLAC start with their own native headers at byte 0.

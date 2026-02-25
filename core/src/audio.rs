@@ -89,8 +89,13 @@ impl Default for RetryConfig {
 /// within `tokio::task::spawn_blocking` as per the queue architecture.
 /// Implementations that need to drive async librespot calls should use
 /// `tokio::runtime::Handle::current().block_on(...)`.
+///
+/// `temp_dir` must be on the **same filesystem** as the final destination path
+/// so that `NamedTempFile::persist()` can use an atomic `rename(2)` rather than
+/// a cross-device copy.  Pass `final_path.parent().unwrap_or(Path::new("."))` from
+/// the [`JobRunner`].
 pub trait AudioFileDownloader: Send + Sync + 'static {
-    fn download(&self, track_uri: &str) -> anyhow::Result<DownloadedTrack>;
+    fn download(&self, track_uri: &str, temp_dir: &std::path::Path) -> anyhow::Result<DownloadedTrack>;
 }
 
 // ---------------------------------------------------------------------------

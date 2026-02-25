@@ -1,13 +1,23 @@
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
+
 use clap::{Parser, Subcommand};
-use fetching_core_old::create_session;
-use fetching_core_old::init_progress_tx;
-use fetching_core_old::{config, SharedQueue};
-use server_lib::server::{app, AppState};
-use std::sync::Arc;
-use std::time::Duration;
+use fetching_core_lib::{
+    audio_librespot::LibrespotAudioDownloader,
+    librespot_impl::{
+        collection_metadata::LibrespotCollectionMetadataFetcher,
+        cover_fetcher::LibrespotCoverFetcher,
+        session::create_session,
+        track_metadata::LibrespotTrackMetadataFetcher,
+    },
+    queue::{TaskStatus, WorkerApis},
+    queue_tokio::TokioQueue,
+    runner::DownloadRunner,
+    spotify_api::SpotifyCollectionMetadata,
+};
+use tokio::sync::broadcast;
 
 #[derive(Parser)]
-#[command(name = "fetching", version, about = "Spotify Player CLI", author)]
+#[command(name = "fetching", version, about = "Spotify downloader", author)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -15,7 +25,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Process Spotify URLs (batch mode)")]
+    #[command(about = "Download Spotify URLs (batch mode)")]
     Batch {
         #[arg(
             short = 'c',
@@ -24,8 +34,15 @@ enum Commands {
             help = "Path to the credentials file"
         )]
         credentials_file: String,
-        /// Spotify track/album/playlist URLs (or @file.txt)
-        #[arg(required = true, help = "One or more Spotify URLs")]
+        #[arg(
+            short = 'o',
+            long = "output-dir",
+            default_value = ".",
+            help = "Directory to save downloaded tracks under"
+        )]
+        output_dir: PathBuf,
+        /// One or more Spotify track/album/playlist URIs or URLs
+        #[arg(required = true, help = "One or more Spotify URIs")]
         urls: Vec<String>,
     },
     #[command(about = "Start web server + download queue")]
@@ -37,12 +54,18 @@ enum Commands {
             help = "Path to the credentials file"
         )]
         credentials_file: String,
-        /// Port to listen on
+        #[arg(
+            short = 'o',
+            long = "output-dir",
+            default_value = ".",
+            help = "Directory to save downloaded tracks under"
+        )]
+        output_dir: PathBuf,
         #[arg(
             short,
             long,
             default_value_t = 8080,
-            help = "Server port (overrides config)"
+            help = "Server port"
         )]
         port: u16,
     },
@@ -50,99 +73,104 @@ enum Commands {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 3)]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Batch {
-            urls,
-            credentials_file} => {
-            tracing_subscriber::fmt()
-                .with_env_filter(
-                    tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-                )
-                .init();
+        Commands::Batch { urls, credentials_file, output_dir } => {
+            let session = Arc::new(create_session(&credentials_file).await?);
 
-            let (raw_session, _refresher, _refresh_handle) =
-                create_session(&credentials_file).await?;
-            let session = Arc::new(raw_session);
-            let config = config::Config::from_env();
-            let (progress_tx, _) = tokio::sync::broadcast::channel(100);
-            let (shared_queue, mut progress_rx) = SharedQueue::new(session, config, progress_tx.clone());
+            // Fetcher used only for pre-resolving URIs on the main task
+            let collection_fetcher = LibrespotCollectionMetadataFetcher::new(
+                session.clone(),
+                LibrespotTrackMetadataFetcher { session: session.clone() },
+            );
+            let cover_fetcher = LibrespotCoverFetcher::new(&session).await?;
 
-            let progress_handle = tokio::spawn(async move {
-                loop {
-                    match progress_rx.recv().await {
-                        Ok(update) => {
-                            let current_status = update.status.clone();
-                            let current_user_id = update.user_visible_identifier.clone().unwrap_or_default();
-                            println!("{} {}", current_status, current_user_id);
+            // Build the queue with its own independent fetcher handles
+            let apis = WorkerApis {
+                collection_metadata: Arc::new(LibrespotCollectionMetadataFetcher::new(
+                    session.clone(),
+                    LibrespotTrackMetadataFetcher { session: session.clone() },
+                )),
+                track_metadata: Arc::new(LibrespotTrackMetadataFetcher { session: session.clone() }),
+                cover: Arc::new(cover_fetcher),
+                audio: Arc::new(LibrespotAudioDownloader::new(session.clone())),
+            };
+
+            let queue = Arc::new(TokioQueue::new(apis, DownloadRunner::new(output_dir)));
+            let mut progress_rx = queue.subscribe_progress();
+            queue.start();
+
+            // Resolve each URI and enqueue; collect all task IDs
+            let mut all_task_ids: HashSet<_> = HashSet::new();
+            for url in &urls {
+                match collection_fetcher.fetch_by_uri(url) {
+                    Ok(collection) => {
+                        let collection = Arc::new(collection);
+                        tracing::info!(
+                            "Resolved '{}': {} tracks",
+                            collection.title,
+                            collection.total_tracks
+                        );
+                        let ids = queue.add_collection(Arc::clone(&collection));
+                        tracing::info!("Queued {} track(s), queue depth: {}", ids.len(), queue.len());
+                        all_task_ids.extend(ids);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to resolve '{url}': {e}");
+                    }
+                }
+            }
+
+            let total = all_task_ids.len();
+            if total == 0 {
+                tracing::warn!("Nothing to download.");
+                return Ok(());
+            }
+
+            tracing::info!("Waiting for {total} track(s) to finish...");
+
+            // Wait until every enqueued task reaches Done or Failed
+            let mut finished = 0usize;
+            loop {
+                match progress_rx.recv().await {
+                    Ok(update) if all_task_ids.contains(&update.task_id) => {
+                        match &update.status {
+                            TaskStatus::Done => {
+                                finished += 1;
+                                tracing::info!("[{}] done ({}/{})", update.task_id, finished, total);
+                            }
+                            TaskStatus::Failed { reason } => {
+                                finished += 1;
+                                tracing::warn!("[{}] failed: {} ({}/{})", update.task_id, reason, finished, total);
+                            }
+                            _ => {}
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        if finished == total {
                             break;
                         }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            continue;
-                        }
                     }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
-                println!("Queue complete!");
-            });
+            }
 
-            tracing::info!("About to add_tasks with {} URLs", urls.len());
-            shared_queue.add_tasks(urls).await;
-            tracing::info!(
-                "add_tasks done, queue len: {}",
-                { shared_queue.tasks.read().await }.len()
-            );
-
-            // Use a short idle timeout for batch mode (e.g., 500ms)
-            let worker = shared_queue.clone().run_worker(Duration::from_millis(500));
-            worker.await.expect("Worker panicked");
-
-            // Drop all senders to close the channel and allow the progress reporter to exit
-            drop(shared_queue);
-            drop(progress_tx);
-            let _ = progress_handle.await;
+            tracing::info!("All done.");
         }
 
-        Commands::Server {
-            port,
-            credentials_file,
-        } => {
-            tracing_subscriber::fmt()
-                .with_env_filter(
-                    tracing_subscriber::EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-                )
-                .init();
-
-            let (raw_session, _refresher, _refresh_handle) =
-                create_session(&credentials_file).await?;
-            let session = Arc::new(raw_session);
-            let config = config::Config::from_env();
-            let _ = init_progress_tx(100);
-            let tx = fetching_core_old::PROGRESS_TX.get().unwrap().clone();
-            let (shared_queue, _) = SharedQueue::new(session, config, tx);
-            let queue_worker = shared_queue.clone();
-
-            let worker = queue_worker.run_worker(Duration::MAX);
-
-            let app_state = Arc::new(AppState {
-                queue: shared_queue.clone(), // Now safe
-            });
-
-            let listener = tokio::net::TcpListener::bind(&format!("0.0.0.0:{}", port)).await?;
-            tracing::info!("Server listening on http://0.0.0.0:{}", port);
-
-            tokio::select! {
-                res = axum::serve(listener, app(app_state)) => {
-                    if let Err(e) = res {
-                        tracing::warn!("Server error: {e}");
-                    }
-                }
-                _ = worker => { tracing::warn!("Worker exited"); }
-            }
+        Commands::Server { port, credentials_file: _, output_dir: _ } => {
+            tracing::warn!(
+                "Server on port {port} — not yet migrated to new core. Coming in Phase 2."
+            );
+            todo!("Server branch migration to new core (Phase 2)");
         }
     }
 

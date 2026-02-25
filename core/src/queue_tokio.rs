@@ -57,6 +57,13 @@ impl QueueStorage for InMemoryStorage {
             .expect("InMemoryStorage mutex poisoned")
             .pop_front())
     }
+
+    fn len(&self) -> usize {
+        self.entries
+            .lock()
+            .expect("InMemoryStorage mutex poisoned")
+            .len()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +156,16 @@ impl TokioQueue {
     /// the received `ProgressUpdate` values as JSON-encoded SSE events.
     pub fn subscribe_progress(&self) -> broadcast::Receiver<ProgressUpdate> {
         self.progress_tx.subscribe()
+    }
+
+    /// Return the number of entries currently waiting in the queue.
+    pub fn len(&self) -> usize {
+        self.storage.len()
+    }
+
+    /// Returns `true` if the queue has no pending entries.
+    pub fn is_empty(&self) -> bool {
+        self.storage.is_empty()
     }
 
     /// Spawn the background worker loop.
@@ -315,7 +332,7 @@ mod tests {
 
     struct StubAudioDownloader;
     impl crate::audio::AudioFileDownloader for StubAudioDownloader {
-        fn download(&self, _: &str) -> anyhow::Result<crate::audio::DownloadedTrack> { unimplemented!() }
+        fn download(&self, _: &str, _: &std::path::Path) -> anyhow::Result<crate::audio::DownloadedTrack> { unimplemented!() }
     }
 
     fn stub_apis() -> WorkerApis {

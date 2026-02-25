@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
 use crate::{
-    output_path::build_output_path,
+    output_path::{build_output_dir, build_output_path},
     queue::{JobRunner, QueueEntry, WorkerApis},
 };
 
@@ -48,8 +48,14 @@ impl JobRunner for DownloadRunner {
             "Starting download",
         );
 
-        // 2. Download audio → temp file (decrypt + header strip inside)
-        let downloaded = apis.audio.download(&entry.track_uri)?;
+        // 2. Create the output directory before downloading so the temp file
+        //    lands on the same filesystem, enabling a cheap atomic rename(2).
+        let output_dir = build_output_dir(&self.output_dir, &track, &entry.collection);
+        std::fs::create_dir_all(&output_dir)?;
+
+        // 3. Download audio → temp file placed in the output directory
+        //    (decrypt + header strip inside).
+        let downloaded = apis.audio.download(&entry.track_uri, &output_dir)?;
         debug!(
             task_id = %entry.task_id,
             bytes = downloaded.file.as_file().metadata().map(|m| m.len()).unwrap_or(0),
@@ -57,16 +63,13 @@ impl JobRunner for DownloadRunner {
             "Audio downloaded to temp file",
         );
 
-        // 3. Persist to final structured path  (TODO: lofty tagging before this step)
+        // 4. Persist to final structured path  (TODO: lofty tagging before this step)
         let final_path = build_output_path(
             &self.output_dir,
             &track,
             &entry.collection,
             downloaded.format,
         );
-        if let Some(parent) = final_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         downloaded.file.persist(&final_path).map_err(|e| {
             anyhow::anyhow!("Failed to persist audio to {}: {}", final_path.display(), e)
         })?;

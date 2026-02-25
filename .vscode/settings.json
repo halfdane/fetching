@@ -6,6 +6,7 @@
       "approve": true,
       "matchCommandLine": true
     },
-    "cargo check": true
+    "cargo check": true,
+    "cargo build": true
   }
 }

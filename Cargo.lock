@@ -986,6 +986,7 @@ dependencies = [
  "async-stream",
  "axum",
  "clap",
+ "fetching-core",
  "fetching-core-old",
  "futures-util",
  "librespot-core",
