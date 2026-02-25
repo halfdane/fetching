@@ -1,15 +1,18 @@
 <script lang="ts">
-import { onMount, onDestroy } from 'svelte';
-import { fetchStatus, subscribeEvents } from './api';
-import { MOCK_QUEUE } from './mock';
 import type { QueueItem } from './types';
 import TrackList from './TrackList.svelte';
 
-let queue: QueueItem[] = [];
-let loading = true;
-let error = '';
-let unsubscribe: (() => void) | undefined;
-let expanded: Record<string, boolean> = {};
+let {
+  queue,
+  loading = false,
+  error = '',
+}: {
+  queue: QueueItem[];
+  loading?: boolean;
+  error?: string;
+} = $props();
+
+let expanded: Record<string, boolean> = $state({});
 
 function toggle(id: string) {
   expanded = { ...expanded, [id]: !expanded[id] };
@@ -32,27 +35,6 @@ function barColor(status: string): string {
     default:        return 'bg-gray-600';
   }
 }
-
-onMount(async () => {
-  try {
-    loading = true;
-    await fetchStatus();
-    queue = import.meta.env.DEV ? [...MOCK_QUEUE] : [];
-    unsubscribe = subscribeEvents((update) => {
-      queue = queue.map((item) =>
-        item.id === update.id
-          ? { ...item, status: update.status, progress: update.progress }
-          : item
-      );
-    });
-    loading = false;
-  } catch (e: unknown) {
-    error = e instanceof Error ? e.message : 'Failed to load backend';
-    loading = false;
-  }
-});
-
-onDestroy(() => unsubscribe?.());
 </script>
 
 <div class="w-full max-w-2xl flex flex-col gap-4 mt-8">

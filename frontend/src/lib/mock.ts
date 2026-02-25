@@ -3,7 +3,7 @@
  * Covers every visual state: done, running (animated), pending, failed.
  * Automatically excluded from production builds via import.meta.env.DEV guards in api.ts.
  */
-import type { QueueItem, TrackItem, RawEvent } from './types';
+import type { QueueItem, TrackItem, RawEvent, QueueResponse } from './types';
 
 // Real Spotify cover CDN URLs (stable for demo purposes)
 const FLOOD_COVER =
@@ -141,6 +141,41 @@ export function mockSubscribeEvents(
   }, 800);
 
   return () => clearInterval(interval);
+}
+
+// ---------------------------------------------------------------------------
+// Mock POST /api/queue response
+// ---------------------------------------------------------------------------
+
+const KIND_OF_BLUE: QueueResponse = {
+  collection: {
+    uri_str: 'spotify:album:1weenld61qoidwYuZ1GESA',
+    spotify_id: '1weenld61qoidwYuZ1GESA',
+    collection_type: 'Album',
+    title: 'Kind of Blue',
+    artists: ['Miles Davis'],
+    cover_id: 'bef23e01c90f66c785a6f7771weenld61qoidwYuZ1',
+    total_tracks: 5,
+    track_uris: [
+      'spotify:track:7q3kkfAVpmcZ8g6JUThi3o',
+      'spotify:track:1YGpSCgGVi2LJz67TBw4pc',
+      'spotify:track:6vLDzbqCp6l7tObdVrPQYe',
+      'spotify:track:5FHfmFhqLfJaJDJmFjzQFV',
+      'spotify:track:7BGlUWOzXKwA2Gf7TzOhFJ',
+    ],
+    upc: '074646403723',
+    popularity: 85,
+    label: 'Columbia',
+    date: '1959-08-17',
+  },
+  cover_url: 'https://i.scdn.co/image/ab67616d0000b273e2e352d89826aef6dbd5ff8f',
+};
+
+/** Returns a fake QueueResponse for any URL entered in dev. */
+export function mockQueueUrl(_url: string): Promise<QueueResponse> {
+  return new Promise((resolve) =>
+    setTimeout(() => resolve(KIND_OF_BLUE), 600)
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,18 @@
-import { mockFetchStatus, mockSubscribeEvents, mockSubscribeRawEvents } from './mock';
-import type { RawEvent } from './types';
+import { mockFetchStatus, mockSubscribeEvents, mockSubscribeRawEvents, mockQueueUrl } from './mock';
+import type { RawEvent, QueueResponse } from './types';
 
 const IS_DEV = import.meta.env.DEV;
+
+export async function queueUrl(url: string): Promise<QueueResponse> {
+  if (IS_DEV) return mockQueueUrl(url);
+  const res = await fetch('/api/queue', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error(`Server responded ${res.status}`);
+  return res.json() as Promise<QueueResponse>;
+}
 
 export async function fetchStatus(): Promise<string> {
   if (IS_DEV) return mockFetchStatus();
