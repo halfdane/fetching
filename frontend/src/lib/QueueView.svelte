@@ -1,48 +1,34 @@
 <script lang="ts">
-import { onMount } from 'svelte';
+import { onMount, onDestroy } from 'svelte';
 import { fetchStatus, subscribeEvents } from './api';
-
-interface QueueItem {
-  id: string;
-  cover: string;
-  title: string;
-  artist: string;
-  trackCount: number;
-  status: string;
-  progress: number; // 0-100
-}
+import { MOCK_QUEUE } from './mock';
+import type { QueueItem } from './types';
 
 let queue: QueueItem[] = [];
 let loading = true;
 let error = '';
+let unsubscribe: (() => void) | undefined;
 
 onMount(async () => {
   try {
     loading = true;
-    // Fetch initial status (replace with real parsing as needed)
-    const status = await fetchStatus();
-    // For now, just show a single dummy item with backend status
-    queue = [{
-      id: 'backend',
-      cover: 'https://placehold.co/80x80?text=Backend',
-      title: 'Backend Status',
-      artist: '',
-      trackCount: 1,
-      status,
-      progress: 0,
-    }];
-    // Subscribe to SSE for progress updates
-    subscribeEvents((update) => {
-      // Update queue with progress info (replace with real logic)
-      queue[0].status = update.status;
-      queue[0].progress = update.progress || 0;
+    await fetchStatus();
+    queue = import.meta.env.DEV ? [...MOCK_QUEUE] : [];
+    unsubscribe = subscribeEvents((update) => {
+      queue = queue.map((item) =>
+        item.id === update.id
+          ? { ...item, status: update.status, progress: update.progress }
+          : item
+      );
     });
     loading = false;
-  } catch (e) {
-    error = e.message || 'Failed to load backend';
+  } catch (e: unknown) {
+    error = e instanceof Error ? e.message : 'Failed to load backend';
     loading = false;
   }
 });
+
+onDestroy(() => unsubscribe?.());
 </script>
 
 <div class="flex flex-col gap-6 mt-8">
