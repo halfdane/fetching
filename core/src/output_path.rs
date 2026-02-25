@@ -118,6 +118,29 @@ pub fn build_output_dir(
     path
 }
 
+/// Build the track filename component (without extension) from a [`Track`].
+///
+/// Returns a sanitised string like `"01 - Title"`, `"20250101 - Title"`, or
+/// just `"Title"` depending on what metadata fields are present.
+fn build_track_component(track: &Track) -> String {
+    match track.number {
+        Some(n) => match track.disc_number {
+            Some(d) if d > 1 => format!("{}-{:02} - {}", d, n, safe_component(&track.title)),
+            _ => format!("{:02} - {}", n, safe_component(&track.title)),
+        },
+        None => {
+            let date_prefix = track.date.as_deref().and_then(|d| {
+                let digits: String = d.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
+                if digits.is_empty() { None } else { Some(digits) }
+            });
+            match date_prefix {
+                Some(prefix) => format!("{} - {}", prefix, safe_component(&track.title)),
+                None => safe_component(&track.title),
+            }
+        }
+    }
+}
+
 /// Full output path including the track filename.
 ///
 /// # Structure
@@ -139,46 +162,27 @@ pub fn build_output_path(
     collection: &TrackCollection,
     fmt: AudioFileFormat,
 ) -> PathBuf {
-    let track_component = match track.number {
-        Some(n) => match track.disc_number {
-            Some(d) if d > 1 => format!(
-                "{}-{:02} - {}.{}",
-                d, n,
-                safe_component(&track.title),
-                ext_for_format(fmt),
-            ),
-            _ => format!(
-                "{:02} - {}.{}",
-                n,
-                safe_component(&track.title),
-                ext_for_format(fmt),
-            ),
-        },
-        None => {
-            // No track number (e.g. podcast episodes where itunes:episode is unset).
-            // Use a compact date prefix so the file sorts chronologically.
-            let date_prefix = track.date.as_deref().and_then(|d| {
-                let digits: String = d.chars().filter(|c| c.is_ascii_digit()).take(8).collect();
-                if digits.is_empty() { None } else { Some(digits) }
-            });
-            match date_prefix {
-                Some(prefix) => format!(
-                    "{} - {}.{}",
-                    prefix,
-                    safe_component(&track.title),
-                    ext_for_format(fmt),
-                ),
-                None => format!(
-                    "{}.{}",
-                    safe_component(&track.title),
-                    ext_for_format(fmt),
-                ),
-            }
-        }
-    };
-
+    let stem = build_track_component(track);
+    let filename = format!("{}.{}", stem, ext_for_format(fmt));
     let mut path = build_output_dir(base, track, collection);
-    path.push(track_component);
+    path.push(filename);
+    path
+}
+
+/// Output path **without** file extension — used for glob-based existence
+/// checks at the start of a download so already-present files are skipped
+/// regardless of which audio format was downloaded previously.
+///
+/// ```text
+/// {base}/{primary_artist}/{year} - {album}/{02track} - {title}
+/// ```
+pub fn build_output_stem(
+    base: &Path,
+    track: &Track,
+    collection: &TrackCollection,
+) -> PathBuf {
+    let mut path = build_output_dir(base, track, collection);
+    path.push(build_track_component(track));
     path
 }
 

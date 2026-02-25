@@ -71,8 +71,8 @@ pub fn write_tags(
         ));
     }
 
-    // Album artist (first artist on the collection, if any)
-    if let Some(album_artist) = collection.artists.first() {
+    // Album artist (all artists on the collection)
+    if !collection.artists.is_empty() {
         tag.remove_key(ItemKey::AlbumArtist);
         for artist in &collection.artists {
             tag.push(TagItem::new(
@@ -80,7 +80,6 @@ pub fn write_tags(
                 ItemValue::Text(artist.clone()),
             ));
         }
-        let _ = album_artist; // used above via collection.artists iter
     }
 
     // Track number and total
@@ -121,6 +120,21 @@ pub fn write_tags(
     if let Some(barcode) = &collection.upc {
         tag.insert_text(ItemKey::Barcode, barcode.clone());
     }
+
+    // -----------------------------------------------------------------------
+    // Spotify identifiers
+    // -----------------------------------------------------------------------
+    // lofty 0.23 has no generic "unknown/custom key" variant, so we use the
+    // closest standard fields:
+    //   • AudioSourceUrl  → ID3v2 WOAS, ignored by simpler formats
+    //   • Comment         → COMM / COMMENT= / iTunes comment — universally
+    //                       supported; stores the full URI as plain text so
+    //                       tools (beets, MusicBrainz Picard, …) can find it.
+    tag.insert_text(ItemKey::AudioSourceUrl, track.uri_str.clone());
+    tag.insert_text(
+        ItemKey::Comment,
+        format!("spotify_uri={}", track.uri_str),
+    );
 
     // -----------------------------------------------------------------------
     // Cover art
@@ -165,20 +179,6 @@ mod tests {
     use crate::container::{CollectionType, TrackType};
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-    // Minimal valid OGG Vorbis file (just enough for lofty to identify it).
-    // Generated with: ffmpeg -f lavfi -i anullsrc=r=44100:cl=mono -t 0.01 \
-    //   -c:a libvorbis -q:a 0 /tmp/tiny.ogg && xxd -i /tmp/tiny.ogg
-    // Included as a byte literal so tests have no external dependencies.
-    fn tiny_ogg() -> Vec<u8> {
-        // We use lofty's own test fixture approach: create a real tiny OGG via
-        // the ogg crate would add a dependency, so instead we check
-        // write_tags behaves correctly when given a real file from disk.
-        //
-        // For unit tests we just verify the function compiles and the helpers
-        // work correctly without needing a real audio file.
-        vec![]
-    }
 
     fn make_track() -> Track {
         Track {
