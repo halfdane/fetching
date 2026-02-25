@@ -15,9 +15,9 @@
 //!    hint instead of a hardcoded 160 kbps value.
 //! 5. Strips Spotify's proprietary 167-byte header **only for OGG Vorbis** files.
 //!    MP3/AAC files do not carry this header and must not be truncated.
-//! 6. Treats audio key failures as **retriable transient errors**. The error
-//!    message matches [`is_retriable_error`] so the retry loop retries after
-//!    backoff. Proceeding without a key would write raw ciphertext to disk.
+//! 6. Treats all errors as **retriable transient errors** — every failure is
+//!    retried with exponential backoff. Proceeding without a key would write
+//!    raw ciphertext to disk.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,7 +30,7 @@ use tokio::runtime::Handle;
 use tracing::{debug, info, warn};
 
 use crate::audio::{
-    is_retriable_error, strip_header_and_copy, AudioFileDownloader, DownloadedTrack, RetryConfig,
+    strip_header_and_copy, AudioFileDownloader, DownloadedTrack, RetryConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -162,13 +162,8 @@ impl AudioFileDownloader for LibrespotAudioDownloader {
             ) {
                 Ok(downloaded) => return Ok(downloaded),
                 Err(e) => {
-                    let msg = e.to_string();
-                    if is_retriable_error(&msg) {
-                        warn!("Retriable error on attempt {}: {}", attempt + 1, msg);
-                        last_err = Some(e);
-                    } else {
-                        return Err(e);
-                    }
+                    warn!("Retriable error on attempt {}: {}", attempt + 1, e);
+                    last_err = Some(e);
                 }
             }
         }

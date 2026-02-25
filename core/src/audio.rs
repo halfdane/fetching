@@ -97,14 +97,6 @@ pub trait AudioFileDownloader: Send + Sync + 'static {
 // Shared helpers (pure, no librespot dependency — easy to unit-test)
 // ---------------------------------------------------------------------------
 
-/// Returns `true` for error messages that indicate transient, retriable failures.
-pub fn is_retriable_error(msg: &str) -> bool {
-    msg.contains("audio key error")
-        || msg.contains("Service unavailable")
-        || msg.contains("timeout")
-        || msg.contains("Deadline expired")
-}
-
 /// Skip the first `header_len` bytes, then copy the rest from `reader` into `writer`.
 ///
 /// Returns the number of content (non-header) bytes written.
@@ -148,21 +140,6 @@ pub fn strip_header_and_copy<R: Read, W: Write>(
 mod tests {
     use super::*;
     use std::io::Cursor;
-
-    #[test]
-    fn is_retriable_matches_all_known_transient_messages() {
-        assert!(is_retriable_error("audio key error: something"));
-        assert!(is_retriable_error("Service unavailable"));
-        assert!(is_retriable_error("request timeout"));
-        assert!(is_retriable_error("Deadline expired after 30s"));
-    }
-
-    #[test]
-    fn is_retriable_rejects_non_transient_messages() {
-        assert!(!is_retriable_error("disk full"));
-        assert!(!is_retriable_error("not found"));
-        assert!(!is_retriable_error("permission denied"));
-    }
 
     #[test]
     fn strip_header_skips_exactly_header_bytes() {
