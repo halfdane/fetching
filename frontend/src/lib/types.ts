@@ -2,8 +2,12 @@ export interface TrackItem {
   id: string;           // task_id (UUID) — matches SSE ProgressUpdate.task_id
   number: number;
   title: string;
+  artists?: string[];
+  duration_ms?: number;
   status: 'pending' | 'running' | 'done' | 'failed' | string;
-  progress: number; // 0-100
+  progress: number; // 0-100, kept for collection-level progress roll-up
+  /** Human-readable status message updated at each download stage. */
+  statusMessage?: string;
   failureReason?: string;
 }
 
@@ -43,11 +47,22 @@ export interface QueueResponse {
   task_ids: string[];
 }
 
+/** Resolved track metadata sent in the first `running` SSE event. */
+export interface TrackInfo {
+  title: string;
+  artists: string[];
+  number?: number;
+  disc_number?: number;
+  duration_ms: number;
+}
+
 /** Shape of SSE events emitted by GET /events. Mirrors Rust ProgressUpdate. */
 export interface SseEvent {
   task_id: string;
   status: { type: 'pending' | 'running' | 'done' | 'failed'; reason?: string };
   message?: string;
+  /** Present on the first `running` update, once Spotify metadata is resolved. */
+  track_info?: TrackInfo;
 }
 
 export interface RawEvent {

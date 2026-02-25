@@ -18,39 +18,39 @@ const DUMMY_COVER =
 // ---------------------------------------------------------------------------
 
 const FLOOD_TRACKS: TrackItem[] = [
-  { id: 'fl-01', number: 1,  title: 'Theme from Flood',                  status: 'done',    progress: 100 },
-  { id: 'fl-02', number: 2,  title: 'Birdhouse in Your Soul',            status: 'done',    progress: 100 },
-  { id: 'fl-03', number: 3,  title: 'Lucky Ball and Chain',              status: 'done',    progress: 100 },
-  { id: 'fl-04', number: 4,  title: 'Istanbul (Not Constantinople)',     status: 'done',    progress: 100 },
-  { id: 'fl-05', number: 5,  title: 'Dead',                             status: 'done',    progress: 100 },
-  { id: 'fl-06', number: 6,  title: 'Your Racist Friend',               status: 'done',    progress: 100 },
-  { id: 'fl-07', number: 7,  title: 'Particle Man',                     status: 'done',    progress: 100 },
-  { id: 'fl-08', number: 8,  title: 'Twisting',                         status: 'done',    progress: 100 },
-  { id: 'fl-09', number: 9,  title: 'We Want a Rock',                   status: 'done',    progress: 100 },
-  { id: 'fl-10', number: 10, title: 'Someone Keeps Moving My Chair',    status: 'done',    progress: 100 },
-  { id: 'fl-11', number: 11, title: 'Hearing Aid',                      status: 'done',    progress: 100 },
-  { id: 'fl-12', number: 12, title: 'Minimum Wage',                     status: 'done',    progress: 100 },
-  { id: 'fl-13', number: 13, title: 'Letterbox',                        status: 'done',    progress: 100 },
-  { id: 'fl-14', number: 14, title: 'Whistling in the Dark',            status: 'done',    progress: 100 },
-  { id: 'fl-15', number: 15, title: 'Hot Cha',                          status: 'done',    progress: 100 },
-  { id: 'fl-16', number: 16, title: 'Women & Men',                      status: 'done',    progress: 100 },
-  { id: 'fl-17', number: 17, title: 'Sapphire Bullets of Pure Love',    status: 'done',    progress: 100 },
-  { id: 'fl-18', number: 18, title: 'They Might Be Giants',             status: 'done',    progress: 100 },
-  { id: 'fl-19', number: 19, title: 'Road Movie to Berlin',             status: 'done',    progress: 100 },
+  { id: 'fl-01', number: 1,  title: 'Theme from Flood',                  status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-02', number: 2,  title: 'Birdhouse in Your Soul',            status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-03', number: 3,  title: 'Lucky Ball and Chain',              status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-04', number: 4,  title: 'Istanbul (Not Constantinople)',     status: 'done',    progress: 100, statusMessage: 'File already exists' },
+  { id: 'fl-05', number: 5,  title: 'Dead',                             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-06', number: 6,  title: 'Your Racist Friend',               status: 'done',    progress: 100, statusMessage: 'File already exists' },
+  { id: 'fl-07', number: 7,  title: 'Particle Man',                     status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-08', number: 8,  title: 'Twisting',                         status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-09', number: 9,  title: 'We Want a Rock',                   status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-10', number: 10, title: 'Someone Keeps Moving My Chair',    status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-11', number: 11, title: 'Hearing Aid',                      status: 'done',    progress: 100, statusMessage: 'File already exists' },
+  { id: 'fl-12', number: 12, title: 'Minimum Wage',                     status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-13', number: 13, title: 'Letterbox',                        status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-14', number: 14, title: 'Whistling in the Dark',            status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-15', number: 15, title: 'Hot Cha',                          status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-16', number: 16, title: 'Women & Men',                      status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-17', number: 17, title: 'Sapphire Bullets of Pure Love',    status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-18', number: 18, title: 'They Might Be Giants',             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-19', number: 19, title: 'Road Movie to Berlin',             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
 ];
 
 const APOLLO_TRACKS: TrackItem[] = [
-  { id: 'ap-01', number: 1,  title: 'The Overview',      status: 'done',    progress: 100 },
-  { id: 'ap-02', number: 2,  title: 'Weightless',         status: 'done',    progress: 100 },
-  { id: 'ap-03', number: 3,  title: 'Always Returning',   status: 'running', progress: 62  },
-  { id: 'ap-04', number: 4,  title: 'Drift',              status: 'pending', progress: 0   },
-  { id: 'ap-05', number: 5,  title: 'Silver Morning',     status: 'pending', progress: 0   },
-  { id: 'ap-06', number: 6,  title: 'For This Moment',    status: 'pending', progress: 0   },
-  { id: 'ap-07', number: 7,  title: 'Deep Blue Day',      status: 'pending', progress: 0   },
-  { id: 'ap-08', number: 8,  title: 'Sparrowfall (1)',    status: 'pending', progress: 0   },
-  { id: 'ap-09', number: 9,  title: 'Sparrowfall (2)',    status: 'pending', progress: 0   },
-  { id: 'ap-10', number: 10, title: 'Sparrowfall (3)',    status: 'pending', progress: 0   },
-  { id: 'ap-11', number: 11, title: 'Landing',            status: 'pending', progress: 0   },
+  { id: 'ap-01', number: 1,  title: 'The Overview',      status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'ap-02', number: 2,  title: 'Weightless',         status: 'done',    progress: 100, statusMessage: 'File already exists' },
+  { id: 'ap-03', number: 3,  title: 'Always Returning',   status: 'running', progress: 0,   statusMessage: 'Fetching cover art\u2026' },
+  { id: 'ap-04', number: 4,  title: 'Drift',              status: 'pending', progress: 0 },
+  { id: 'ap-05', number: 5,  title: 'Silver Morning',     status: 'pending', progress: 0 },
+  { id: 'ap-06', number: 6,  title: 'For This Moment',    status: 'pending', progress: 0 },
+  { id: 'ap-07', number: 7,  title: 'Deep Blue Day',      status: 'pending', progress: 0 },
+  { id: 'ap-08', number: 8,  title: 'Sparrowfall (1)',    status: 'pending', progress: 0 },
+  { id: 'ap-09', number: 9,  title: 'Sparrowfall (2)',    status: 'pending', progress: 0 },
+  { id: 'ap-10', number: 10, title: 'Sparrowfall (3)',    status: 'pending', progress: 0 },
+  { id: 'ap-11', number: 11, title: 'Landing',            status: 'pending', progress: 0 },
 ];
 
 const PENDING_TRACKS: TrackItem[] = Array.from({ length: 8 }, (_, i) => ({
@@ -62,8 +62,8 @@ const PENDING_TRACKS: TrackItem[] = Array.from({ length: 8 }, (_, i) => ({
 }));
 
 const FAILED_TRACKS: TrackItem[] = [
-  { id: 'fa-01', number: 1, title: 'Lost Signal',       status: 'done',   progress: 100 },
-  { id: 'fa-02', number: 2, title: 'Broken Frequency',  status: 'done',   progress: 100 },
+  { id: 'fa-01', number: 1, title: 'Lost Signal',       status: 'done',   progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fa-02', number: 2, title: 'Broken Frequency',  status: 'done',   progress: 100, statusMessage: 'File already exists' },
   { id: 'fa-03', number: 3, title: 'Static Noise',      status: 'failed', progress: 45,
     failureReason: 'Audio key error after 4 attempts' },
   { id: 'fa-04', number: 4, title: 'Distant Echo',      status: 'failed', progress: 0,
@@ -131,18 +131,29 @@ export function mockSubscribeEvents(
 ): () => void {
   // ap-03 is the currently-running track; cycle through ap-03 … ap-11
   const trackIds = ['ap-03', 'ap-04', 'ap-05', 'ap-06', 'ap-07', 'ap-08', 'ap-09', 'ap-10', 'ap-11'];
+  const stages = ['Fetching cover art\u2026', 'Downloading audio\u2026', 'Writing tags\u2026'];
   let idx = 0;
+  let stageIdx = 0;
 
-  // Immediately mark the first track as running
-  onUpdate({ task_id: trackIds[0], status: { type: 'running' } });
+  // Immediately mark the first track as running with a stage message
+  onUpdate({ task_id: trackIds[0], status: { type: 'running' }, message: stages[0] });
 
+  // Advance stage messages within a track, then move to the next track
   const interval = setInterval(() => {
-    const doneId = trackIds[idx];
-    idx = (idx + 1) % trackIds.length;
-    const nextId = trackIds[idx];
-    onUpdate({ task_id: doneId,  status: { type: 'done' } });
-    onUpdate({ task_id: nextId, status: { type: 'running' } });
-  }, 1000);
+    stageIdx++;
+    if (stageIdx < stages.length) {
+      // Still in the same track — emit next stage
+      onUpdate({ task_id: trackIds[idx], status: { type: 'running' }, message: stages[stageIdx] });
+    } else {
+      // Finish current track, start next
+      stageIdx = 0;
+      const doneId = trackIds[idx];
+      idx = (idx + 1) % trackIds.length;
+      const nextId = trackIds[idx];
+      onUpdate({ task_id: doneId,  status: { type: 'done' },    message: 'Downloaded' });
+      onUpdate({ task_id: nextId, status: { type: 'running' }, message: stages[0] });
+    }
+  }, 800);
 
   return () => clearInterval(interval);
 }

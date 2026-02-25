@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { TrackItem } from './types';
 
-  export let tracks: TrackItem[];
+  let { tracks }: { tracks: TrackItem[] } = $props();
 
   function dotClass(status: string): string {
     switch (status) {
@@ -16,6 +16,19 @@
     if (status === 'failed') return 'text-red-300';
     if (status === 'done')   return 'text-gray-500';
     return 'text-gray-200';
+  }
+
+  function statusLabel(track: TrackItem): string | null {
+    if (track.status === 'failed') return null; // handled separately
+    if (track.statusMessage) return track.statusMessage;
+    if (track.status === 'running') return 'Running\u2026';
+    return null;
+  }
+
+  function statusLabelClass(status: string): string {
+    if (status === 'done') return 'text-green-600';
+    if (status === 'running') return 'text-blue-400';
+    return 'text-gray-500';
   }
 </script>
 
@@ -34,21 +47,17 @@
       <!-- Title -->
       <span class="flex-1 truncate {titleClass(track.status)}">{track.title}</span>
 
-      <!-- Right-side indicator: mini progress bar, checkmark, or failure reason -->
-      {#if track.status === 'running'}
-        <div class="w-16 h-1 bg-gray-700 rounded-full flex-shrink-0">
-          <div
-            class="h-1 bg-blue-400 rounded-full transition-all duration-500"
-            style="width: {track.progress}%"
-          ></div>
-        </div>
-      {:else if track.status === 'done'}
-        <span class="text-xs text-green-600 flex-shrink-0">✓</span>
-      {:else if track.status === 'failed'}
+      <!-- Right-side indicator: status message (persists after completion), or failure reason -->
+      {#if track.status === 'failed'}
         <span
           class="text-xs text-red-400 flex-shrink-0 max-w-48 truncate"
           title={track.failureReason}
-        >{track.failureReason ?? 'failed'}</span>
+        >{track.failureReason ?? 'Failed'}</span>
+      {:else}
+        {@const label = statusLabel(track)}
+        {#if label}
+          <span class="text-xs flex-shrink-0 max-w-48 truncate {statusLabelClass(track.status)}">{label}</span>
+        {/if}
       {/if}
 
     </li>

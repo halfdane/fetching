@@ -22,13 +22,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 use crate::{
     container::CollectionType,
     output_path::{build_output_dir, build_output_path, build_output_stem, safe_component},
     playlist::{self, TrackEntry},
-    queue::{JobRunner, QueueEntry, WorkerApis},
+    queue::{JobRunner, ProgressUpdate, QueueEntry, TaskStatus, TrackInfo, WorkerApis},
     tagger,
 };
 
@@ -91,7 +92,21 @@ impl DownloadRunner {
 }
 
 impl JobRunner for DownloadRunner {
-    fn run(&self, entry: &QueueEntry, apis: &WorkerApis) -> anyhow::Result<()> {
+    fn run(
+        &self,
+        entry: &QueueEntry,
+        apis: &WorkerApis,
+        progress_tx: &broadcast::Sender<ProgressUpdate>,
+    ) -> anyhow::Result<Option<String>> {
+        // Convenience: fire a Running update with a plain status message.
+        let emit = |msg: &str| {
+            let _ = progress_tx.send(ProgressUpdate {
+                task_id: entry.task_id,
+                status: TaskStatus::Running,
+                message: Some(msg.to_owned()),
+                track_info: None,
+            });
+        };
         let handle = tokio::runtime::Handle::current();
 
         // ── Initialise collection state on the first task for this collection ──
@@ -112,6 +127,20 @@ impl JobRunner for DownloadRunner {
             "Starting download",
         );
 
+        // Emit resolved metadata so the frontend can replace placeholder titles.
+        let _ = progress_tx.send(ProgressUpdate {
+            task_id: entry.task_id,
+            status: TaskStatus::Running,
+            message: None,
+            track_info: Some(TrackInfo {
+                title: track.title.clone(),
+                artists: track.artists.clone(),
+                number: track.number,
+                disc_number: track.disc_number,
+                duration_ms: track.duration_ms,
+            }),
+        });
+
         // ── 2. Filesystem probe: skip if already downloaded ──────────────────
         let stem = build_output_stem(&self.output_dir, &track, &entry.collection);
         let glob_pattern = format!("{}.*", stem.display());
@@ -128,10 +157,11 @@ impl JobRunner for DownloadRunner {
                 duration_ms: track.duration_ms,
             };
             self.record_track(entry, &cover_id, te, None)?;
-            return Ok(());
+            return Ok(Some("File already exists".into()));
         }
 
         // ── 3. Fetch cover art ───────────────────────────────────────────────
+        emit("Fetching cover art…");
         let cover_bytes: Option<Vec<u8>> =
             match handle.block_on(apis.cover.fetch_cover(&cover_id)) {
                 Ok(bytes) => Some(bytes),
@@ -142,6 +172,7 @@ impl JobRunner for DownloadRunner {
             };
 
         // ── 4. Create output directory & download ────────────────────────────
+        emit("Downloading audio…");
         let output_dir = build_output_dir(&self.output_dir, &track, &entry.collection);
         std::fs::create_dir_all(&output_dir)?;
 
@@ -166,6 +197,7 @@ impl JobRunner for DownloadRunner {
         info!(path = %final_path.display(), "Saved audio");
 
         // ── 6. Embed metadata tags ───────────────────────────────────────────
+        emit("Writing tags…");
         if let Err(e) = tagger::write_tags(
             &final_path,
             &track,
@@ -186,7 +218,7 @@ impl JobRunner for DownloadRunner {
         };
         self.record_track(entry, &cover_id, te, cover_bytes.as_deref())?;
 
-        Ok(())
+        Ok(Some("Downloaded".into()))
     }
 }
 

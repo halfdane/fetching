@@ -233,6 +233,7 @@ async fn worker_loop(
                     task_id,
                     status: TaskStatus::Running,
                     message: None,
+                    track_info: None,
                 },
             );
 
@@ -242,20 +243,22 @@ async fn worker_loop(
             let runner = Arc::clone(&runner);
             let apis = Arc::clone(&apis);
             let track_uri = entry.track_uri.clone();
+            let progress_tx_for_runner = progress_tx.clone();
 
             let result = tokio::task::spawn_blocking(move || {
                 let _permit = permit; // drop permit when job finishes
-                runner.run(&entry, &apis)
+                runner.run(&entry, &apis, &progress_tx_for_runner)
             })
             .await;
 
             let update = match result {
-                Ok(Ok(())) => {
+                Ok(Ok(final_msg)) => {
                     info!("Task {task_id} done: {track_uri}");
                     ProgressUpdate {
                         task_id,
                         status: TaskStatus::Done,
-                        message: None,
+                        message: final_msg,
+                        track_info: None,
                     }
                 }
                 Ok(Err(e)) => {
@@ -266,6 +269,7 @@ async fn worker_loop(
                             reason: e.to_string(),
                         },
                         message: None,
+                        track_info: None,
                     }
                 }
                 Err(e) => {
@@ -276,6 +280,7 @@ async fn worker_loop(
                             reason: format!("worker panic: {e}"),
                         },
                         message: None,
+                        track_info: None,
                     }
                 }
             };
@@ -297,12 +302,13 @@ fn send_progress(tx: &broadcast::Sender<ProgressUpdate>, update: ProgressUpdate)
 mod tests {
     use super::*;
     use crate::container::{CollectionType, TrackCollection};
-    use crate::queue::{CoverFetcher, JobRunner, QueueEntry, TaskStatus, WorkerApis};
+    use crate::queue::{CoverFetcher, JobRunner, ProgressUpdate, QueueEntry, TaskStatus, WorkerApis};
     use async_trait::async_trait;
     use librespot_core::SpotifyUri;
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
+    use tokio::sync::broadcast;
     use tokio::time::timeout;
 
     // -----------------------------------------------------------------------
@@ -361,12 +367,12 @@ mod tests {
 
     struct OkRunner;
     impl JobRunner for OkRunner {
-        fn run(&self, _: &QueueEntry, _: &WorkerApis) -> anyhow::Result<()> { Ok(()) }
+        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &broadcast::Sender<ProgressUpdate>) -> anyhow::Result<Option<String>> { Ok(None) }
     }
 
     struct FailRunner;
     impl JobRunner for FailRunner {
-        fn run(&self, _: &QueueEntry, _: &WorkerApis) -> anyhow::Result<()> {
+        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &broadcast::Sender<ProgressUpdate>) -> anyhow::Result<Option<String>> {
             anyhow::bail!("intentional failure")
         }
     }
@@ -504,12 +510,12 @@ mod tests {
             max_seen: Arc<AtomicUsize>,
         }
         impl JobRunner for CountingRunner {
-            fn run(&self, _: &QueueEntry, _: &WorkerApis) -> anyhow::Result<()> {
+            fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &broadcast::Sender<ProgressUpdate>) -> anyhow::Result<Option<String>> {
                 let c = self.concurrent.fetch_add(1, Ordering::SeqCst) + 1;
                 self.max_seen.fetch_max(c, Ordering::SeqCst);
                 std::thread::sleep(Duration::from_millis(20));
                 self.concurrent.fetch_sub(1, Ordering::SeqCst);
-                Ok(())
+                Ok(None)
             }
         }
 

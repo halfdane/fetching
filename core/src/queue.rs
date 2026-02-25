@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::audio::AudioFileDownloader;
@@ -42,6 +43,19 @@ pub enum TaskStatus {
     Failed { reason: String },
 }
 
+/// Track metadata resolved during download — sent in the `Running` update so
+/// the frontend can replace placeholder titles with real information.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TrackInfo {
+    pub title: String,
+    pub artists: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disc_number: Option<i32>,
+    pub duration_ms: i32,
+}
+
 /// Minimal progress payload sent over the SSE broadcast channel.
 ///
 /// Intentionally kept narrow – add fields here when the frontend needs them,
@@ -52,6 +66,9 @@ pub struct ProgressUpdate {
     pub status: TaskStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Populated on the first `Running` update, once track metadata is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_info: Option<TrackInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -121,8 +138,19 @@ pub struct WorkerApis {
 ///
 /// `run` is **synchronous** on purpose: librespot's audio I/O blocks, so the queue
 /// calls this inside `tokio::task::spawn_blocking` to keep the async executor free.
+///
+/// `progress_tx` is provided so the runner can emit mid-job updates (e.g. a
+/// `Running` event carrying resolved [`TrackInfo`] or a stage description).
+///
+/// The returned `Option<String>` is a short human-readable message attached to the
+/// final `Done` SSE event — e.g. `"Downloaded"` or `"File already exists"`.
 pub trait JobRunner: Send + Sync + 'static {
-    fn run(&self, entry: &QueueEntry, apis: &WorkerApis) -> anyhow::Result<()>;
+    fn run(
+        &self,
+        entry: &QueueEntry,
+        apis: &WorkerApis,
+        progress_tx: &broadcast::Sender<ProgressUpdate>,
+    ) -> anyhow::Result<Option<String>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +253,7 @@ mod tests {
             task_id: Uuid::new_v4(),
             status: TaskStatus::Running,
             message: Some("fetching".to_string()),
+            track_info: None,
         };
         let json = serde_json::to_string(&update).unwrap();
         let back: ProgressUpdate = serde_json::from_str(&json).unwrap();
@@ -239,6 +268,7 @@ mod tests {
             task_id: Uuid::new_v4(),
             status: TaskStatus::Done,
             message: None,
+            track_info: None,
         };
         let json = serde_json::to_string(&update).unwrap();
         assert!(!json.contains("message"), "message field should be omitted: {json}");

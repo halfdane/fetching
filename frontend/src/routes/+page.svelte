@@ -30,11 +30,21 @@
           const failureReason =
             newStatus === 'failed' ? (event.status.reason ?? 'Unknown error') : undefined;
 
-          const updatedTracks = item.tracks.map((t, i) =>
-            i === trackIdx
-              ? { ...t, status: newStatus, progress: newProgress, failureReason }
-              : t
-          );
+          const updatedTracks = item.tracks.map((t, i) => {
+            if (i !== trackIdx) return t;
+            const infoUpdate = event.track_info
+              ? {
+                  title: event.track_info.title,
+                  artists: event.track_info.artists,
+                  number: event.track_info.number ?? t.number,
+                  duration_ms: event.track_info.duration_ms,
+                }
+              : {};
+            const msgUpdate = event.message !== undefined
+              ? { statusMessage: event.message }
+              : {};
+            return { ...t, status: newStatus, progress: newProgress, failureReason, ...infoUpdate, ...msgUpdate };
+          });
 
           // Derive collection-level status and progress from individual tracks
           const anyRunning = updatedTracks.some((t) => t.status === 'running');

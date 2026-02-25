@@ -3,11 +3,6 @@ name = "fetching-core"
 version = "1.0.1"
 edition = "2024"
 
-[[bin]]
-name = "test"
-path = "src/main.rs"
-
-
 [lib]
 name = "fetching_core_lib"
 path = "src/lib.rs"

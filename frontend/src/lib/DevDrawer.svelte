@@ -6,13 +6,14 @@
   const MAX_EVENTS = 200;
 
   let open = false;
-  let events: RawEvent[] = [];
+  let seq = 0;
+  let events: Array<RawEvent & { seq: number }> = [];
   let unsubscribe: (() => void) | undefined;
 
   onMount(() => {
     unsubscribe = subscribeRawEvents((e) => {
       // Prepend so newest is always at the top; cap to avoid unbounded growth.
-      events = [e, ...events.slice(0, MAX_EVENTS - 1)];
+      events = [{ ...e, seq: seq++ }, ...events.slice(0, MAX_EVENTS - 1)];
     });
   });
 
@@ -39,7 +40,7 @@
       {#if events.length === 0}
         <p class="text-gray-600 italic p-3">Waiting for events…</p>
       {:else}
-        {#each events as event (event.timestamp + event.raw.slice(0, 20))}
+        {#each events as event (event.seq)}
           <div class="px-3 py-1 flex gap-2 border-b border-gray-900 hover:bg-gray-900">
             <span class="text-gray-600 flex-shrink-0 tabular-nums">{event.timestamp}</span>
             <span class="text-green-300 break-all">{event.raw}</span>
