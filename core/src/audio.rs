@@ -96,24 +96,17 @@ impl Default for RetryConfig {
 
 /// Object-safe trait for downloading a single Spotify track's audio data.
 ///
-/// Implementations handle:
-/// - Resolving the best available OGG Vorbis `FileId` (with alternative-track fallback)
-/// - Requesting the per-track audio decryption key
-/// - Decrypting the audio stream
-/// - Stripping Spotify's proprietary 167-byte OGG header
-/// - Writing the result into a [`NamedTempFile`]
-///
-/// `download` is **synchronous** by design: it is meant to be called from
-/// within `tokio::task::spawn_blocking` as per the queue architecture.
-/// Implementations that need to drive async librespot calls should use
-/// `tokio::runtime::Handle::current().block_on(...)`.
-///
-/// `temp_dir` must be on the **same filesystem** as the final destination path
-/// so that `NamedTempFile::persist()` can use an atomic `rename(2)` rather than
-/// a cross-device copy.  Pass `final_path.parent().unwrap_or(Path::new("."))` from
-/// the [`JobRunner`].
+/// `on_retry` is called just before each retry wait begins, giving the caller
+/// a chance to surface progress to the user.  Arguments are:
+/// `(failed_attempt, max_attempts, wait_ms)` — e.g. `(1, 5, 5000)` means
+/// attempt 1 of 5 failed; waiting 5 s before attempt 2.
 pub trait AudioFileDownloader: Send + Sync + 'static {
-    fn download(&self, track_uri: &str, temp_dir: &std::path::Path) -> anyhow::Result<DownloadedTrack>;
+    fn download(
+        &self,
+        track_uri: &str,
+        temp_dir: &std::path::Path,
+        on_retry: &dyn Fn(u32, u32, u64),
+    ) -> anyhow::Result<DownloadedTrack>;
 }
 
 // ---------------------------------------------------------------------------

@@ -232,7 +232,7 @@ async fn worker_loop(
                 ProgressUpdate {
                     task_id,
                     status: TaskStatus::Running,
-                    message: None,
+                    message: Some("Running…".to_string()),
                     track_info: None,
                 },
             );
@@ -338,7 +338,7 @@ mod tests {
 
     struct StubAudioDownloader;
     impl crate::audio::AudioFileDownloader for StubAudioDownloader {
-        fn download(&self, _: &str, _: &std::path::Path) -> anyhow::Result<crate::audio::DownloadedTrack> { unimplemented!() }
+        fn download(&self, _: &str, _: &std::path::Path, _: &dyn Fn(u32, u32, u64)) -> anyhow::Result<crate::audio::DownloadedTrack> { unimplemented!() }
     }
 
     fn stub_apis() -> WorkerApis {

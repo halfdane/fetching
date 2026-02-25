@@ -128,7 +128,12 @@ impl LibrespotAudioDownloader {
 // ---------------------------------------------------------------------------
 
 impl AudioFileDownloader for LibrespotAudioDownloader {
-    fn download(&self, track_uri: &str, temp_dir: &std::path::Path) -> anyhow::Result<DownloadedTrack> {
+    fn download(
+        &self,
+        track_uri: &str,
+        temp_dir: &std::path::Path,
+        on_retry: &dyn Fn(u32, u32, u64),
+    ) -> anyhow::Result<DownloadedTrack> {
         let handle = Handle::current();
 
         // Resolve the best (file_id, format, owning_uri) — may try alternatives.
@@ -150,6 +155,7 @@ impl AudioFileDownloader for LibrespotAudioDownloader {
                     self.retry_config.max_attempts,
                     last_err.as_ref().map(|e| e.to_string()).unwrap_or_default()
                 );
+                on_retry(attempt, self.retry_config.max_attempts, delay_ms);
                 std::thread::sleep(Duration::from_millis(delay_ms));
             }
 

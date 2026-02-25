@@ -98,13 +98,13 @@ impl JobRunner for DownloadRunner {
         apis: &WorkerApis,
         progress_tx: &broadcast::Sender<ProgressUpdate>,
     ) -> anyhow::Result<Option<String>> {
-        // Convenience: fire a Running update with a plain status message.
-        let emit = |msg: &str| {
+        // Convenience: fire a progress update with an optional track_info payload.
+        let emit = |status: TaskStatus, msg: &str, track_info: Option<TrackInfo>| {
             let _ = progress_tx.send(ProgressUpdate {
                 task_id: entry.task_id,
-                status: TaskStatus::Running,
+                status,
                 message: Some(msg.to_owned()),
-                track_info: None,
+                track_info,
             });
         };
         let handle = tokio::runtime::Handle::current();
@@ -128,18 +128,13 @@ impl JobRunner for DownloadRunner {
         );
 
         // Emit resolved metadata so the frontend can replace placeholder titles.
-        let _ = progress_tx.send(ProgressUpdate {
-            task_id: entry.task_id,
-            status: TaskStatus::Running,
-            message: None,
-            track_info: Some(TrackInfo {
-                title: track.title.clone(),
-                artists: track.artists.clone(),
-                number: track.number,
-                disc_number: track.disc_number,
-                duration_ms: track.duration_ms,
-            }),
-        });
+        emit(TaskStatus::Running, "Running…", Some(TrackInfo {
+            title: track.title.clone(),
+            artists: track.artists.clone(),
+            number: track.number,
+            disc_number: track.disc_number,
+            duration_ms: track.duration_ms,
+        }));
 
         // ── 2. Filesystem probe: skip if already downloaded ──────────────────
         let stem = build_output_stem(&self.output_dir, &track, &entry.collection);
@@ -161,7 +156,7 @@ impl JobRunner for DownloadRunner {
         }
 
         // ── 3. Fetch cover art ───────────────────────────────────────────────
-        emit("Fetching cover art…");
+        emit(TaskStatus::Running, "Fetching cover art…", None);
         let cover_bytes: Option<Vec<u8>> =
             match handle.block_on(apis.cover.fetch_cover(&cover_id)) {
                 Ok(bytes) => Some(bytes),
@@ -172,11 +167,14 @@ impl JobRunner for DownloadRunner {
             };
 
         // ── 4. Create output directory & download ────────────────────────────
-        emit("Downloading audio…");
+        emit(TaskStatus::Running, "Downloading audio…", None);
         let output_dir = build_output_dir(&self.output_dir, &track, &entry.collection);
         std::fs::create_dir_all(&output_dir)?;
 
-        let downloaded = apis.audio.download(&entry.track_uri, &output_dir)?;
+        let downloaded = apis.audio.download(&entry.track_uri, &output_dir, &|failed_attempt, max, wait_ms| {
+            let secs = (wait_ms + 999) / 1000;
+            emit(TaskStatus::Retrying, &format!("Retry ({failed_attempt}/{max}) in {secs}s"), None);
+        })?;
         debug!(
             task_id = %entry.task_id,
             bytes = downloaded.file.as_file().metadata().map(|m| m.len()).unwrap_or(0),
@@ -197,7 +195,7 @@ impl JobRunner for DownloadRunner {
         info!(path = %final_path.display(), "Saved audio");
 
         // ── 6. Embed metadata tags ───────────────────────────────────────────
-        emit("Writing tags…");
+        emit(TaskStatus::Running, "Writing tags…", None);
         if let Err(e) = tagger::write_tags(
             &final_path,
             &track,

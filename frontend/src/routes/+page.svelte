@@ -25,7 +25,7 @@
           const newStatus = event.status.type;
           const newProgress =
             newStatus === 'done' ? 100
-            : newStatus === 'running' ? item.tracks[trackIdx].progress
+            : (newStatus === 'running' || newStatus === 'retrying') ? item.tracks[trackIdx].progress
             : 0;
           const failureReason =
             newStatus === 'failed' ? (event.status.reason ?? 'Unknown error') : undefined;
@@ -47,7 +47,7 @@
           });
 
           // Derive collection-level status and progress from individual tracks
-          const anyRunning = updatedTracks.some((t) => t.status === 'running');
+          const anyRunning = updatedTracks.some((t) => t.status === 'running' || t.status === 'retrying');
           const anyFailed  = updatedTracks.some((t) => t.status === 'failed');
           const allDone    = updatedTracks.every((t) => t.status === 'done');
           const collectionStatus = anyRunning ? 'running'

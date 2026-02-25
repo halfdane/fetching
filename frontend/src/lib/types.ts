@@ -59,7 +59,10 @@ export interface TrackInfo {
 /** Shape of SSE events emitted by GET /events. Mirrors Rust ProgressUpdate. */
 export interface SseEvent {
   task_id: string;
-  status: { type: 'pending' | 'running' | 'done' | 'failed'; reason?: string };
+  status: {
+    type: 'pending' | 'running' | 'retrying' | 'done' | 'failed';
+    reason?: string;
+  };
   message?: string;
   /** Present on the first `running` update, once Spotify metadata is resolved. */
   track_info?: TrackInfo;

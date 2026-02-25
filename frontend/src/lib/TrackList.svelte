@@ -5,10 +5,11 @@
 
   function dotClass(status: string): string {
     switch (status) {
-      case 'done':    return 'bg-green-400';
-      case 'running': return 'bg-blue-400 animate-pulse';
-      case 'failed':  return 'bg-red-400';
-      default:        return 'bg-gray-600';
+      case 'done':     return 'bg-green-400';
+      case 'running':  return 'bg-blue-400 animate-pulse';
+      case 'retrying': return 'bg-red-400 animate-pulse';
+      case 'failed':   return 'bg-red-400';
+      default:         return 'bg-gray-600';
     }
   }
 
@@ -21,11 +22,11 @@
   function statusLabel(track: TrackItem): string | null {
     if (track.status === 'failed') return null; // handled separately
     if (track.statusMessage) return track.statusMessage;
-    if (track.status === 'running') return 'Running\u2026';
     return null;
   }
 
   function statusLabelClass(status: string): string {
+    if (status === 'retrying') return 'text-red-400';
     if (status === 'done') return 'text-green-600';
     if (status === 'running') return 'text-blue-400';
     return 'text-gray-500';

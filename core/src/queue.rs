@@ -38,6 +38,7 @@ pub type TaskId = Uuid;
 pub enum TaskStatus {
     Pending,
     Running,
+    Retrying,
     Done,
     /// `reason` is a human-readable error string.
     Failed { reason: String },

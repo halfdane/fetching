@@ -18,6 +18,21 @@ function toggle(id: string) {
   expanded = { ...expanded, [id]: !expanded[id] };
 }
 
+function statusPriority(status: string): number {
+  switch (status) {
+    case 'running':  return 0;
+    case 'retrying': return 0;
+    case 'pending':  return 1;
+    case 'failed':   return 2;
+    case 'done':     return 3;
+    default:         return 4;
+  }
+}
+
+const sortedQueue = $derived(
+  [...queue].sort((a, b) => statusPriority(a.status) - statusPriority(b.status))
+);
+
 function statusColor(status: string): string {
   switch (status) {
     case 'done':    return 'text-green-400';
@@ -45,7 +60,10 @@ function barColor(status: string): string {
   {:else if queue.length === 0}
     <p class="text-gray-600 text-center py-16">No downloads queued.</p>
   {:else}
-    {#each queue as item (item.id)}
+    {#each sortedQueue as item, i (item.id)}
+      {#if i > 0 && statusPriority(item.status) === 1 && statusPriority(sortedQueue[i - 1].status) === 0}
+        <hr class="border-gray-700" />
+      {/if}
       <div class="bg-gray-900 bg-opacity-70 rounded-xl shadow-lg overflow-hidden">
 
         <!-- Clickable header -->
