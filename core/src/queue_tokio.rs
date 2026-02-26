@@ -6,65 +6,14 @@
 //!
 //! The worker loop enforces **single active download** via a `Semaphore(1)`.
 
-use std::collections::VecDeque;
 use std::sync::Arc;
 
-use std::sync::Mutex;
 use tokio::sync::{broadcast, Notify, Semaphore};
 use tracing::{error, info, warn};
 
 use crate::container::TrackCollection;
 use crate::queue::{JobRunner, ProgressUpdate, QueueEntry, QueueStorage, TaskId, TaskStatus, WorkerApis};
-
-// ---------------------------------------------------------------------------
-// InMemoryStorage  (the default, replaceable backend)
-// ---------------------------------------------------------------------------
-
-/// FIFO in-memory queue storage. Replace with `SledStorage` or `YaqueStorage`
-/// by implementing `QueueStorage` in a new file and passing it to
-/// `TokioQueue::with_storage`.
-pub struct InMemoryStorage {
-    entries: Mutex<VecDeque<QueueEntry>>,
-}
-
-impl InMemoryStorage {
-    pub fn new() -> Self {
-        Self {
-            entries: Mutex::new(VecDeque::new()),
-        }
-    }
-}
-
-impl Default for InMemoryStorage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl QueueStorage for InMemoryStorage {
-    fn push(&self, entry: QueueEntry) -> anyhow::Result<()> {
-        self.entries
-            .lock()
-            .expect("InMemoryStorage mutex poisoned")
-            .push_back(entry);
-        Ok(())
-    }
-
-    fn pop(&self) -> anyhow::Result<Option<QueueEntry>> {
-        Ok(self
-            .entries
-            .lock()
-            .expect("InMemoryStorage mutex poisoned")
-            .pop_front())
-    }
-
-    fn len(&self) -> usize {
-        self.entries
-            .lock()
-            .expect("InMemoryStorage mutex poisoned")
-            .len()
-    }
-}
+use crate::queue_memory::InMemoryStorage;
 
 // ---------------------------------------------------------------------------
 // TokioQueue
@@ -375,29 +324,6 @@ mod tests {
         fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &broadcast::Sender<ProgressUpdate>) -> anyhow::Result<Option<String>> {
             anyhow::bail!("intentional failure")
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // InMemoryStorage
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn storage_pop_on_empty_returns_none() {
-        let s = InMemoryStorage::new();
-        assert!(s.pop().unwrap().is_none());
-    }
-
-    #[test]
-    fn storage_preserves_fifo_order() {
-        let s = InMemoryStorage::new();
-        let col = fake_collection(&["uri:a", "uri:b", "uri:c"]);
-        for uri in ["uri:a", "uri:b", "uri:c"] {
-            s.push(QueueEntry::new(uri, Arc::clone(&col))).unwrap();
-        }
-        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:a");
-        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:b");
-        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:c");
-        assert!(s.pop().unwrap().is_none());
     }
 
     // -----------------------------------------------------------------------

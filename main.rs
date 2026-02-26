@@ -11,12 +11,40 @@ use fetching_core_lib::{
         track_metadata::LibrespotTrackMetadataFetcher,
     },
     queue::{TaskStatus, WorkerApis},
+    queue_sled::SledStorage,
     queue_tokio::TokioQueue,
     runner::DownloadRunner,
     spotify_api::SpotifyCollectionMetadata,
 };
 use server_lib::server::{app, AppState};
 use tokio::sync::broadcast;
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+fn collection_fetcher(
+    session: Arc<librespot_core::Session>,
+) -> LibrespotCollectionMetadataFetcher<LibrespotTrackMetadataFetcher> {
+    LibrespotCollectionMetadataFetcher::new(
+        session.clone(),
+        LibrespotTrackMetadataFetcher { session },
+    )
+}
+
+fn build_apis(
+    session: Arc<librespot_core::Session>,
+    cover: Arc<dyn fetching_core_lib::queue::CoverFetcher>,
+    output_dir: PathBuf,
+) -> (WorkerApis, DownloadRunner) {
+    let apis = WorkerApis {
+        collection_metadata: Arc::new(collection_fetcher(session.clone())),
+        track_metadata: Arc::new(LibrespotTrackMetadataFetcher { session: session.clone() }),
+        cover,
+        audio: Arc::new(LibrespotAudioDownloader::new(session)),
+    };
+    (apis, DownloadRunner::new(output_dir))
+}
 
 #[derive(Parser)]
 #[command(name = "fetching", version, about = "Spotify downloader", author)]
@@ -91,31 +119,18 @@ async fn main() -> anyhow::Result<()> {
             let session = Arc::new(create_session(&credentials_file).await?);
 
             // Fetcher used only for pre-resolving URIs on the main task
-            let collection_fetcher = LibrespotCollectionMetadataFetcher::new(
-                session.clone(),
-                LibrespotTrackMetadataFetcher { session: session.clone() },
-            );
-            let cover_fetcher = LibrespotCoverFetcher::new(&session).await?;
+            let resolver = collection_fetcher(session.clone());
+            let cover = CachedCoverProvider::new(Arc::new(LibrespotCoverFetcher::new(&session).await?));
+            let (apis, runner) = build_apis(session, Arc::new(cover), output_dir);
 
-            // Build the queue with its own independent fetcher handles
-            let apis = WorkerApis {
-                collection_metadata: Arc::new(LibrespotCollectionMetadataFetcher::new(
-                    session.clone(),
-                    LibrespotTrackMetadataFetcher { session: session.clone() },
-                )),
-                track_metadata: Arc::new(LibrespotTrackMetadataFetcher { session: session.clone() }),
-                cover: Arc::new(cover_fetcher),
-                audio: Arc::new(LibrespotAudioDownloader::new(session.clone())),
-            };
-
-            let queue = Arc::new(TokioQueue::new(apis, DownloadRunner::new(output_dir)));
+            let queue = Arc::new(TokioQueue::new(apis, runner));
             let mut progress_rx = queue.subscribe_progress();
             queue.start();
 
             // Resolve each URI and enqueue; collect all task IDs
             let mut all_task_ids: HashSet<_> = HashSet::new();
             for url in &urls {
-                match collection_fetcher.fetch_by_uri(url) {
+                match resolver.fetch_by_uri(url) {
                     Ok(collection) => {
                         let collection = Arc::new(collection);
                         tracing::info!(
@@ -173,30 +188,21 @@ async fn main() -> anyhow::Result<()> {
         Commands::Server { port, credentials_file, output_dir } => {
             let session = Arc::new(create_session(&credentials_file).await?);
 
-            // CachedCoverProvider wraps Arc<Cache> internally — cloning is cheap
-            // and shares the same cache between the worker and the HTTP handler.
-            let raw_cover = LibrespotCoverFetcher::new(&session).await?;
-            let cover = CachedCoverProvider::new(Arc::new(raw_cover));
+            // CachedCoverProvider is cheap to clone — both the worker and the
+            // HTTP handler share the same underlying Arc<Cache>.
+            let cover = CachedCoverProvider::new(Arc::new(LibrespotCoverFetcher::new(&session).await?));
+            let (apis, runner) = build_apis(session.clone(), Arc::new(cover.clone()), output_dir);
 
-            let apis = WorkerApis {
-                collection_metadata: Arc::new(LibrespotCollectionMetadataFetcher::new(
-                    session.clone(),
-                    LibrespotTrackMetadataFetcher { session: session.clone() },
-                )),
-                track_metadata: Arc::new(LibrespotTrackMetadataFetcher { session: session.clone() }),
-                cover: Arc::new(cover.clone()),
-                audio: Arc::new(LibrespotAudioDownloader::new(session.clone())),
-            };
-
-            let queue = Arc::new(TokioQueue::new(apis, DownloadRunner::new(output_dir)));
+            let queue = Arc::new(TokioQueue::with_storage(
+                SledStorage::open("queue.sled")?,
+                apis,
+                runner,
+            ));
             queue.start();
 
             let app_state = Arc::new(AppState {
                 queue: Arc::clone(&queue),
-                collection_metadata: Arc::new(LibrespotCollectionMetadataFetcher::new(
-                    session.clone(),
-                    LibrespotTrackMetadataFetcher { session: session.clone() },
-                )),
+                collection_metadata: Arc::new(collection_fetcher(session)),
                 cover: Arc::new(cover),
             });
 

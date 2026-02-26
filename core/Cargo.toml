@@ -32,6 +32,7 @@ sanitize-filename = "0.6"
 lofty = "0.23"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
 glob = "0.3"
+sled = "0.34"
 
 
 [dev-dependencies]
