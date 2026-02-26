@@ -87,6 +87,26 @@ pub trait SpotifyCover: Clone + Send + Sync {
     async fn fetch_cover(&self, cover_id: &str) -> anyhow::Result<Vec<u8>>;
 }
 
+/// Object-safe cover-fetching trait.
+///
+/// [`SpotifyCover`] carries a `Clone` supertrait which makes it non-object-safe.
+/// This thin trait drops `Clone` so that `Arc<dyn CoverFetcher>` compiles.
+/// A blanket impl is provided for every `T: SpotifyCover`.
+#[async_trait]
+pub trait CoverFetcher: Send + Sync + 'static {
+    async fn fetch_cover(&self, cover_id: &str) -> anyhow::Result<Vec<u8>>;
+}
+
+#[async_trait]
+impl<T> CoverFetcher for T
+where
+    T: SpotifyCover + 'static,
+{
+    async fn fetch_cover(&self, cover_id: &str) -> anyhow::Result<Vec<u8>> {
+        SpotifyCover::fetch_cover(self, cover_id).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::normalise_uri;

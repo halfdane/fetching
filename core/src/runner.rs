@@ -27,9 +27,11 @@ use tracing::{debug, info, warn};
 
 use crate::{
     container::CollectionType,
+    coordinator::{JobRunner, ProgressUpdate, TrackInfo, WorkerApis},
     output_path::{build_output_dir, build_output_path, build_output_stem, safe_component},
     playlist::{self, TrackEntry},
-    queue::{JobRunner, ProgressUpdate, QueueEntry, TaskStatus, TrackInfo, WorkerApis},
+    queue::QueueEntry,
+    registry::TaskStatus,
     tagger,
 };
 

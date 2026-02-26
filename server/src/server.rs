@@ -9,9 +9,9 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fetching_core_lib::{
     container::TrackCollection,
-    queue::{CoverFetcher, TaskStatus},
-    queue_tokio::TokioQueue,
-    spotify_api::SpotifyCollectionMetadata,
+    coordinator::DownloadCoordinator,
+    registry::TaskStatus,
+    spotify_api::{CoverFetcher, SpotifyCollectionMetadata},
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -25,7 +25,7 @@ use crate::handlers::pwa_handler;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub queue: Arc<TokioQueue>,
+    pub queue: Arc<DownloadCoordinator>,
     /// Shared with the worker — same Arc<Cache> so cover fetches are deduplicated.
     pub cover: Arc<dyn CoverFetcher>,
     /// Used in the POST handler to resolve a URI before queuing.

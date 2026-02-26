@@ -3,6 +3,7 @@ use std::{collections::HashSet, env, path::PathBuf, sync::Arc};
 use clap::{Parser, Subcommand};
 use fetching_core_lib::{
     audio_librespot::LibrespotAudioDownloader,
+    coordinator::{DownloadCoordinator, WorkerApis},
     librespot_impl::{
         cached_cover_fetcher::CachedCoverProvider,
         collection_metadata::LibrespotCollectionMetadataFetcher,
@@ -10,11 +11,9 @@ use fetching_core_lib::{
         session::create_session,
         track_metadata::LibrespotTrackMetadataFetcher,
     },
-    queue::{TaskStatus, WorkerApis},
-    queue_sled::SledStorage,
-    queue_tokio::TokioQueue,
+    registry::{SledRegistry, TaskStatus},
     runner::DownloadRunner,
-    spotify_api::SpotifyCollectionMetadata,
+    spotify_api::{CoverFetcher, SpotifyCollectionMetadata},
 };
 use server_lib::server::{app, AppState};
 use tokio::sync::broadcast;
@@ -34,7 +33,7 @@ fn collection_fetcher(
 
 fn build_apis(
     session: Arc<librespot_core::Session>,
-    cover: Arc<dyn fetching_core_lib::queue::CoverFetcher>,
+    cover: Arc<dyn CoverFetcher>,
     output_dir: PathBuf,
 ) -> (WorkerApis, DownloadRunner) {
     let apis = WorkerApis {
@@ -123,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
             let cover = CachedCoverProvider::new(Arc::new(LibrespotCoverFetcher::new(&session).await?));
             let (apis, runner) = build_apis(session, Arc::new(cover), output_dir);
 
-            let queue = Arc::new(TokioQueue::new(apis, runner));
+            let queue = Arc::new(DownloadCoordinator::new(apis, runner));
             let mut progress_rx = queue.subscribe_progress();
             queue.start();
 
@@ -193,13 +192,16 @@ async fn main() -> anyhow::Result<()> {
             let cover = CachedCoverProvider::new(Arc::new(LibrespotCoverFetcher::new(&session).await?));
             let (apis, runner) = build_apis(session.clone(), Arc::new(cover.clone()), output_dir);
 
-            let sled = std::sync::Arc::new(SledStorage::open("queue.sled")?);
-            let queue = Arc::new(TokioQueue::with_registry(
-                sled.clone(),
-                sled,
+            let registry = std::sync::Arc::new(SledRegistry::open("queue.sled")?);
+            let queue = Arc::new(DownloadCoordinator::with_registry(
+                registry.clone(),
                 apis,
                 runner,
             ));
+            // Re-queue any tasks that were pending or mid-flight at shutdown.
+            for entry in registry.recover_interrupted()? {
+                queue.enqueue(entry);
+            }
             queue.start();
 
             let app_state = Arc::new(AppState {

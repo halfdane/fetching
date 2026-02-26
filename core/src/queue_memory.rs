@@ -1,65 +1,60 @@
-//! In-memory `QueueStorage` implementation.
+//! In-memory FIFO track queue.
 //!
-//! Backed by a `Mutex<VecDeque>` — no persistence, entries are lost on restart.
-//! Useful for tests and the `batch` subcommand where durability isn't needed.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! let queue = TokioQueue::new(apis, runner); // uses InMemoryStorage by default
-//! // or explicitly:
-//! let queue = TokioQueue::with_storage(InMemoryStorage::new(), apis, runner);
-//! ```
+//! Backed by a `Mutex<VecDeque>` — entries are lost on restart.
+//! On the server path, the `TaskRegistry` (sled) is the durable source of
+//! truth; entries recovered at startup are re-pushed into this queue by the
+//! coordinator.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use crate::queue::{QueueEntry, QueueStorage};
+use crate::queue::QueueEntry;
 
-/// FIFO in-memory queue storage.
-///
-/// Replace with [`SledStorage`](crate::queue_sled::SledStorage) for durable
-/// storage that survives server restarts.
-pub struct InMemoryStorage {
+/// Thread-safe, in-memory FIFO queue of track download entries.
+pub struct TrackQueue {
     entries: Mutex<VecDeque<QueueEntry>>,
 }
 
-impl InMemoryStorage {
+impl TrackQueue {
     pub fn new() -> Self {
         Self {
             entries: Mutex::new(VecDeque::new()),
         }
     }
+
+    /// Append an entry to the back of the queue.
+    pub fn push(&self, entry: QueueEntry) {
+        self.entries
+            .lock()
+            .expect("TrackQueue mutex poisoned")
+            .push_back(entry);
+    }
+
+    /// Remove and return the entry at the front, or `None` if empty.
+    pub fn pop(&self) -> Option<QueueEntry> {
+        self.entries
+            .lock()
+            .expect("TrackQueue mutex poisoned")
+            .pop_front()
+    }
+
+    /// Number of entries currently waiting.
+    pub fn len(&self) -> usize {
+        self.entries
+            .lock()
+            .expect("TrackQueue mutex poisoned")
+            .len()
+    }
+
+    /// Returns `true` if the queue has no pending entries.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
-impl Default for InMemoryStorage {
+impl Default for TrackQueue {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl QueueStorage for InMemoryStorage {
-    fn push(&self, entry: QueueEntry) -> anyhow::Result<()> {
-        self.entries
-            .lock()
-            .expect("InMemoryStorage mutex poisoned")
-            .push_back(entry);
-        Ok(())
-    }
-
-    fn pop(&self) -> anyhow::Result<Option<QueueEntry>> {
-        Ok(self
-            .entries
-            .lock()
-            .expect("InMemoryStorage mutex poisoned")
-            .pop_front())
-    }
-
-    fn len(&self) -> usize {
-        self.entries
-            .lock()
-            .expect("InMemoryStorage mutex poisoned")
-            .len()
     }
 }
 
@@ -86,21 +81,21 @@ mod tests {
     }
 
     #[test]
-    fn storage_pop_on_empty_returns_none() {
-        let s = InMemoryStorage::new();
-        assert!(s.pop().unwrap().is_none());
+    fn pop_on_empty_returns_none() {
+        let q = TrackQueue::new();
+        assert!(q.pop().is_none());
     }
 
     #[test]
-    fn storage_preserves_fifo_order() {
-        let s = InMemoryStorage::new();
+    fn preserves_fifo_order() {
+        let q = TrackQueue::new();
         let col = fake_collection(&["uri:a", "uri:b", "uri:c"]);
         for uri in ["uri:a", "uri:b", "uri:c"] {
-            s.push(QueueEntry::new(uri, Arc::clone(&col))).unwrap();
+            q.push(QueueEntry::new(uri, Arc::clone(&col)));
         }
-        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:a");
-        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:b");
-        assert_eq!(s.pop().unwrap().unwrap().track_uri, "uri:c");
-        assert!(s.pop().unwrap().is_none());
+        assert_eq!(q.pop().unwrap().track_uri, "uri:a");
+        assert_eq!(q.pop().unwrap().track_uri, "uri:b");
+        assert_eq!(q.pop().unwrap().track_uri, "uri:c");
+        assert!(q.pop().is_none());
     }
 }

@@ -1,43 +1,115 @@
-//! Tokio-based queue implementation.
+//! Download coordinator.
 //!
-//! Provides:
-//! - [`InMemoryStorage`] – the default `QueueStorage` backend (swap this for sled/yaque)
-//! - [`TokioQueue`] – wires storage, async notification, progress broadcast, and the worker loop
-//!
-//! The worker loop enforces **single active download** via a `Semaphore(1)`.
+//! [`DownloadCoordinator`] is the central orchestration point:
+//! - accepts collections and fans them into per-track tasks
+//! - feeds them one-at-a-time to a blocking worker via a background loop
+//! - persists every status transition to an optional [`TaskRegistry`]
+//! - broadcasts progress over an SSE-friendly channel
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, Notify, Semaphore};
 use tracing::{error, info, warn};
 
+use crate::audio::AudioFileDownloader;
 use crate::container::TrackCollection;
-use crate::queue::{JobRunner, ProgressUpdate, QueueEntry, QueueStorage, TaskId, TaskRegistry, TaskSnapshot, TaskStatus, WorkerApis};
-use crate::queue_memory::InMemoryStorage;
+use crate::queue::{QueueEntry, TaskId};
+use crate::queue_memory::TrackQueue;
+use crate::registry::{TaskRegistry, TaskSnapshot, TaskStatus};
+use crate::spotify_api::{CoverFetcher, SpotifyCollectionMetadata, SpotifyTrackMetadata};
 
 // ---------------------------------------------------------------------------
-// TokioQueue
+// Progress types (SSE broadcast payload)
 // ---------------------------------------------------------------------------
 
-/// User-facing queue handle.
+/// Track metadata resolved during download — sent in the `Running` update so
+/// the frontend can replace placeholder titles with real information.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TrackInfo {
+    pub title: String,
+    pub artists: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disc_number: Option<i32>,
+    pub duration_ms: i32,
+}
+
+/// Minimal progress payload sent over the SSE broadcast channel.
 ///
-/// A single `TokioQueue` instance is shared (as `Arc<TokioQueue>`) between the
-/// server state and the worker background task.
+/// Intentionally kept narrow – add fields here when the frontend needs them,
+/// without touching the registry or runner seams.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProgressUpdate {
+    pub task_id: TaskId,
+    pub status: TaskStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// Populated on the first `Running` update, once track metadata is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_info: Option<TrackInfo>,
+}
+
+// ---------------------------------------------------------------------------
+// WorkerApis
+// ---------------------------------------------------------------------------
+
+/// All Spotify API handles a [`JobRunner`] needs, bundled for cheap `Arc` cloning.
+pub struct WorkerApis {
+    pub collection_metadata: Arc<dyn SpotifyCollectionMetadata + Send + Sync>,
+    pub track_metadata: Arc<dyn SpotifyTrackMetadata + Send + Sync>,
+    pub cover: Arc<dyn CoverFetcher>,
+    pub audio: Arc<dyn AudioFileDownloader>,
+}
+
+// ---------------------------------------------------------------------------
+// JobRunner – the work-phase entry point
+// ---------------------------------------------------------------------------
+
+/// The actual download / tag / store pipeline plugs in here.
+///
+/// `run` is **synchronous** on purpose: librespot's audio I/O blocks, so the
+/// coordinator calls this inside `tokio::task::spawn_blocking` to keep the
+/// async executor free.
+///
+/// `progress_tx` is provided so the runner can emit mid-job updates (e.g. a
+/// `Running` event carrying resolved [`TrackInfo`] or a stage description).
+///
+/// The returned `Option<String>` is a short human-readable message attached to
+/// the final `Done` SSE event — e.g. `"Downloaded"` or `"File already exists"`.
+pub trait JobRunner: Send + Sync + 'static {
+    fn run(
+        &self,
+        entry: &QueueEntry,
+        apis: &WorkerApis,
+        progress_tx: &broadcast::Sender<ProgressUpdate>,
+    ) -> anyhow::Result<Option<String>>;
+}
+
+// ---------------------------------------------------------------------------
+// DownloadCoordinator
+// ---------------------------------------------------------------------------
+
+/// User-facing handle for the download pipeline.
+///
+/// A single `DownloadCoordinator` instance is shared (as `Arc<DownloadCoordinator>`)
+/// between the HTTP layer and the background worker task.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let queue = Arc::new(TokioQueue::new(apis, runner));
-/// queue.start();
+/// let coord = Arc::new(DownloadCoordinator::new(apis, runner));
+/// coord.start();
 ///
 /// // In the HTTP handler:
-/// queue.add_collection(Arc::new(collection));
+/// coord.add_collection(Arc::new(collection));
 ///
 /// // In the SSE handler:
-/// let rx = queue.subscribe_progress();
+/// let rx = coord.subscribe_progress();
 /// ```
-pub struct TokioQueue {
-    storage: Arc<dyn QueueStorage>,
+pub struct DownloadCoordinator {
+    queue: TrackQueue,
     registry: Option<Arc<dyn TaskRegistry>>,
     notify: Arc<Notify>,
     progress_tx: broadcast::Sender<ProgressUpdate>,
@@ -45,28 +117,18 @@ pub struct TokioQueue {
     runner: Arc<dyn JobRunner>,
 }
 
-impl TokioQueue {
+impl DownloadCoordinator {
     const PROGRESS_CHANNEL_CAPACITY: usize = 256;
 
     // -----------------------------------------------------------------------
     // Constructors
     // -----------------------------------------------------------------------
 
-    /// Create a queue backed by `InMemoryStorage` with no task registry.
+    /// Create a coordinator with no task registry (batch mode).
     pub fn new(apis: WorkerApis, runner: impl JobRunner) -> Self {
-        Self::with_storage(InMemoryStorage::new(), apis, runner)
-    }
-
-    /// Create a queue backed by a custom `QueueStorage` with no task registry.
-    ///
-    /// Use this when swapping in a sled or yaque backend:
-    /// ```ignore
-    /// TokioQueue::with_storage(SledStorage::open(path)?, apis, runner)
-    /// ```
-    pub fn with_storage(storage: impl QueueStorage, apis: WorkerApis, runner: impl JobRunner) -> Self {
         let (progress_tx, _) = broadcast::channel(Self::PROGRESS_CHANNEL_CAPACITY);
         Self {
-            storage: Arc::new(storage),
+            queue: TrackQueue::new(),
             registry: None,
             notify: Arc::new(Notify::new()),
             progress_tx,
@@ -75,23 +137,18 @@ impl TokioQueue {
         }
     }
 
-    /// Create a queue with both a custom storage backend and a task registry.
+    /// Create a coordinator backed by a persistent task registry (server mode).
     ///
-    /// When a single backend implements both traits (e.g. `SledStorage`),
-    /// wrap it in `Arc` and pass it for both parameters:
-    /// ```ignore
-    /// let sled = Arc::new(SledStorage::open("queue.sled")?);
-    /// TokioQueue::with_registry(sled.clone(), sled.clone(), apis, runner)
-    /// ```
+    /// The registry records every status transition so that `GET /api/queue`
+    /// can return a full snapshot even after page refresh.
     pub fn with_registry(
-        storage: Arc<dyn QueueStorage>,
         registry: Arc<dyn TaskRegistry>,
         apis: WorkerApis,
         runner: impl JobRunner,
     ) -> Self {
         let (progress_tx, _) = broadcast::channel(Self::PROGRESS_CHANNEL_CAPACITY);
         Self {
-            storage,
+            queue: TrackQueue::new(),
             registry: Some(registry),
             notify: Arc::new(Notify::new()),
             progress_tx,
@@ -120,15 +177,18 @@ impl TokioQueue {
                         error!("Failed to register task {id} in registry: {e}");
                     }
                 }
-                if let Err(e) = self.storage.push(entry) {
-                    error!("Failed to push queue entry for {uri}: {e}");
-                }
+                self.queue.push(entry);
                 id
             })
             .collect();
 
         self.notify.notify_one();
         task_ids
+    }
+
+    /// Push a single pre-built entry (used for crash-recovery re-queue).
+    pub fn enqueue(&self, entry: QueueEntry) {
+        self.queue.push(entry);
     }
 
     /// Subscribe to the progress broadcast channel.
@@ -141,12 +201,12 @@ impl TokioQueue {
 
     /// Return the number of entries currently waiting in the queue.
     pub fn len(&self) -> usize {
-        self.storage.len()
+        self.queue.len()
     }
 
     /// Returns `true` if the queue has no pending entries.
     pub fn is_empty(&self) -> bool {
-        self.storage.is_empty()
+        self.queue.is_empty()
     }
 
     /// Return a snapshot of all known tasks and their current status.
@@ -163,22 +223,14 @@ impl TokioQueue {
     ///
     /// Call this exactly once during application startup.
     /// The loop runs until the Tokio runtime shuts down.
-    /// If there are already pending entries in storage (e.g. restored from
-    /// sled after a restart), the worker is woken immediately.
-    pub fn start(&self) {
-        let storage = Arc::clone(&self.storage);
-        let registry = self.registry.as_ref().map(Arc::clone);
-        let notify = Arc::clone(&self.notify);
-        let progress_tx = self.progress_tx.clone();
-        let apis = Arc::clone(&self.apis);
-        let runner = Arc::clone(&self.runner);
-
-        // Wake the worker for any entries already in storage at startup.
-        if !self.storage.is_empty() {
+    /// If there are already pending entries (e.g. recovered from sled after a
+    /// restart), the worker is woken immediately.
+    pub fn start(self: &Arc<Self>) {
+        // Wake the worker for any entries already queued at startup.
+        if !self.queue.is_empty() {
             self.notify.notify_one();
         }
-
-        tokio::spawn(worker_loop(storage, notify, progress_tx, apis, runner, registry));
+        tokio::spawn(worker_loop(Arc::clone(self)));
     }
 }
 
@@ -190,35 +242,22 @@ impl TokioQueue {
 ///
 /// The `Semaphore(1)` makes the single-download constraint explicit and
 /// easy to relax later (increase the permits to allow parallel downloads).
-async fn worker_loop(
-    storage: Arc<dyn QueueStorage>,
-    notify: Arc<Notify>,
-    progress_tx: broadcast::Sender<ProgressUpdate>,
-    apis: Arc<WorkerApis>,
-    runner: Arc<dyn JobRunner>,
-    registry: Option<Arc<dyn TaskRegistry>>,
-) {
+async fn worker_loop(coord: Arc<DownloadCoordinator>) {
     let semaphore = Arc::new(Semaphore::new(1));
 
     loop {
-        // Block until add_collection wakes us.
-        notify.notified().await;
+        // Block until add_collection / enqueue wakes us.
+        coord.notify.notified().await;
 
         // Drain all pending entries, one at a time.
         loop {
-            let entry = match storage.pop() {
-                Ok(Some(e)) => e,
-                Ok(None) => break, // queue empty, go back to waiting
-                Err(e) => {
-                    error!("QueueStorage::pop failed: {e}");
-                    break;
-                }
+            let Some(entry) = coord.queue.pop() else {
+                break; // queue empty, go back to waiting
             };
 
             let task_id = entry.task_id;
 
             // Acquire the "single active download" slot.
-            // Increasing Semaphore capacity here → concurrent downloads.
             let permit = match semaphore.clone().acquire_owned().await {
                 Ok(p) => p,
                 Err(_) => {
@@ -228,8 +267,8 @@ async fn worker_loop(
             };
 
             emit_update(
-                &progress_tx,
-                registry.as_deref(),
+                &coord.progress_tx,
+                coord.registry.as_deref(),
                 ProgressUpdate {
                     task_id,
                     status: TaskStatus::Running,
@@ -241,10 +280,10 @@ async fn worker_loop(
             info!("Processing track: {} (task {})", entry.track_uri, task_id);
 
             // Run the blocking job off the async executor.
-            let runner = Arc::clone(&runner);
-            let apis = Arc::clone(&apis);
+            let runner = Arc::clone(&coord.runner);
+            let apis = Arc::clone(&coord.apis);
             let track_uri = entry.track_uri.clone();
-            let progress_tx_for_runner = progress_tx.clone();
+            let progress_tx_for_runner = coord.progress_tx.clone();
 
             let result = tokio::task::spawn_blocking(move || {
                 let _permit = permit; // drop permit when job finishes
@@ -286,7 +325,7 @@ async fn worker_loop(
                 }
             };
 
-            emit_update(&progress_tx, registry.as_deref(), update);
+            emit_update(&coord.progress_tx, coord.registry.as_deref(), update);
         }
     }
 }
@@ -314,7 +353,7 @@ fn emit_update(
 mod tests {
     use super::*;
     use crate::container::{CollectionType, TrackCollection};
-    use crate::queue::{CoverFetcher, JobRunner, ProgressUpdate, QueueEntry, TaskStatus, WorkerApis};
+    use crate::spotify_api::CoverFetcher;
     use async_trait::async_trait;
     use librespot_core::SpotifyUri;
     use std::collections::HashSet;
@@ -390,26 +429,25 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // TokioQueue::add_collection
+    // DownloadCoordinator::add_collection
     // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn add_collection_returns_one_task_id_per_track_uri() {
-        let queue = TokioQueue::new(stub_apis(), OkRunner);
-        let ids = queue.add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]));
+        let coord = DownloadCoordinator::new(stub_apis(), OkRunner);
+        let ids = coord.add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]));
         assert_eq!(ids.len(), 3);
         let unique: HashSet<_> = ids.iter().collect();
         assert_eq!(unique.len(), 3, "task IDs must be unique");
     }
 
     #[tokio::test]
-    async fn add_collection_pushes_entries_to_storage_in_order() {
-        let queue = TokioQueue::new(stub_apis(), OkRunner);
-        queue.add_collection(fake_collection(&["uri:x", "uri:y"]));
-        // access storage directly – test submodule can see private fields
-        assert_eq!(queue.storage.pop().unwrap().unwrap().track_uri, "uri:x");
-        assert_eq!(queue.storage.pop().unwrap().unwrap().track_uri, "uri:y");
-        assert!(queue.storage.pop().unwrap().is_none());
+    async fn add_collection_pushes_entries_in_order() {
+        let coord = DownloadCoordinator::new(stub_apis(), OkRunner);
+        coord.add_collection(fake_collection(&["uri:x", "uri:y"]));
+        assert_eq!(coord.queue.pop().unwrap().track_uri, "uri:x");
+        assert_eq!(coord.queue.pop().unwrap().track_uri, "uri:y");
+        assert!(coord.queue.pop().is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -418,11 +456,11 @@ mod tests {
 
     #[tokio::test]
     async fn worker_sends_running_then_done_on_success() {
-        let queue = Arc::new(TokioQueue::new(stub_apis(), OkRunner));
-        let mut rx = queue.subscribe_progress();
-        queue.start();
+        let coord = Arc::new(DownloadCoordinator::new(stub_apis(), OkRunner));
+        let mut rx = coord.subscribe_progress();
+        coord.start();
 
-        let ids: HashSet<_> = queue
+        let ids: HashSet<_> = coord
             .add_collection(fake_collection(&["uri:1"]))
             .into_iter()
             .collect();
@@ -440,11 +478,11 @@ mod tests {
 
     #[tokio::test]
     async fn worker_sends_running_then_failed_on_error() {
-        let queue = Arc::new(TokioQueue::new(stub_apis(), FailRunner));
-        let mut rx = queue.subscribe_progress();
-        queue.start();
+        let coord = Arc::new(DownloadCoordinator::new(stub_apis(), FailRunner));
+        let mut rx = coord.subscribe_progress();
+        coord.start();
 
-        let ids: HashSet<_> = queue
+        let ids: HashSet<_> = coord
             .add_collection(fake_collection(&["uri:1"]))
             .into_iter()
             .collect();
@@ -465,11 +503,11 @@ mod tests {
 
     #[tokio::test]
     async fn worker_sends_progress_for_every_track_in_collection() {
-        let queue = Arc::new(TokioQueue::new(stub_apis(), OkRunner));
-        let mut rx = queue.subscribe_progress();
-        queue.start();
+        let coord = Arc::new(DownloadCoordinator::new(stub_apis(), OkRunner));
+        let mut rx = coord.subscribe_progress();
+        coord.start();
 
-        let ids: HashSet<_> = queue
+        let ids: HashSet<_> = coord
             .add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]))
             .into_iter()
             .collect();
@@ -512,11 +550,11 @@ mod tests {
             concurrent,
             max_seen: Arc::clone(&max_seen),
         };
-        let queue = Arc::new(TokioQueue::new(stub_apis(), runner));
-        let mut rx = queue.subscribe_progress();
-        queue.start();
+        let coord = Arc::new(DownloadCoordinator::new(stub_apis(), runner));
+        let mut rx = coord.subscribe_progress();
+        coord.start();
 
-        let ids: HashSet<_> = queue
+        let ids: HashSet<_> = coord
             .add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]))
             .into_iter()
             .collect();
@@ -534,5 +572,34 @@ mod tests {
             max_seen.load(Ordering::SeqCst), 1,
             "more than one job ran concurrently"
         );
+    }
+
+    // -- ProgressUpdate serde contract (wire format shared with the frontend) -
+
+    #[test]
+    fn progress_update_serde_round_trips_with_message() {
+        let update = ProgressUpdate {
+            task_id: TaskId::new_v4(),
+            status: TaskStatus::Running,
+            message: Some("fetching".to_string()),
+            track_info: None,
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        let back: ProgressUpdate = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.task_id, update.task_id);
+        assert_eq!(back.status, update.status);
+        assert_eq!(back.message, update.message);
+    }
+
+    #[test]
+    fn progress_update_omits_message_field_when_none() {
+        let update = ProgressUpdate {
+            task_id: TaskId::new_v4(),
+            status: TaskStatus::Done,
+            message: None,
+            track_info: None,
+        };
+        let json = serde_json::to_string(&update).unwrap();
+        assert!(!json.contains("message"), "message field should be omitted: {json}");
     }
 }
