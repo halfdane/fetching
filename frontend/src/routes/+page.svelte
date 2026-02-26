@@ -3,6 +3,7 @@
   import QueueView from '../lib/QueueView.svelte';
   import DevDrawer from '../lib/DevDrawer.svelte';
   import AddToQueue from '../lib/AddToQueue.svelte';
+  import Toast from '../lib/Toast.svelte';
   import { fetchStatus, subscribeEvents } from '../lib/api';
   import { MOCK_QUEUE } from '../lib/mock';
   import type { QueueItem } from '../lib/types';
@@ -10,7 +11,15 @@
   let queue = $state<QueueItem[]>([]);
   let loading = $state(true);
   let error = $state('');
+  let toasts = $state<{ id: number; message: string }[]>([]);
+  let toastSeq = 0;
   let unsubscribe: (() => void) | undefined;
+
+  function addToast(message: string) {
+    const id = toastSeq++;
+    toasts = [...toasts, { id, message }];
+    setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); }, 3000);
+  }
 
   onMount(async () => {
     try {
@@ -75,6 +84,8 @@
       return;
     }
     queue = [...queue, item];
+    const noun = item.trackCount === 1 ? 'track' : 'tracks';
+    addToast(`Added '${item.title}' (${item.trackCount} ${noun})`);
   }
 </script>
 
@@ -85,3 +96,4 @@
 </main>
 
 <DevDrawer />
+<Toast {toasts} />
