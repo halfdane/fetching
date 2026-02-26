@@ -20,7 +20,7 @@ const SCOPES: &[&str] = &["streaming"];
 /// Proactively refresh when fewer than this many seconds remain.
 const REFRESH_THRESHOLD_SECS: u64 = 600;
 /// How often the background task checks token expiry.
-const REFRESH_POLL_INTERVAL_SECS: u64 = 300;
+const REFRESH_POLL_INTERVAL_SECS: u64 = 600;
 
 // ── Token storage ─────────────────────────────────────────────────────────────
 

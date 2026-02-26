@@ -18,7 +18,7 @@ export interface QueueItem {
   title: string;
   artist: string;
   trackCount: number;
-  status: 'pending' | 'running' | 'done' | 'failed' | 'retried' | string;
+  status: 'pending' | 'running' | 'done' | 'failed' | string;
   progress: number; // 0-100, derived from track completions
   tracks?: TrackItem[];
 }

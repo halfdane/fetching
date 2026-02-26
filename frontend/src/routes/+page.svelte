@@ -5,8 +5,9 @@
   import AddToQueue from '../lib/AddToQueue.svelte';
   import Toast from '../lib/Toast.svelte';
   import { fetchStatus, subscribeEvents, queueUrl, responseToQueueItem } from '../lib/api';
+  import { handleEvent, drainBuffer } from '../lib/queue-state';
   import { MOCK_QUEUE } from '../lib/mock';
-  import type { QueueItem } from '../lib/types';
+  import type { QueueItem, SseEvent } from '../lib/types';
 
   let queue = $state<QueueItem[]>([]);
   let loading = $state(true);
@@ -14,6 +15,10 @@
   let toasts = $state<{ id: number; message: string }[]>([]);
   let toastSeq = 0;
   let unsubscribe: (() => void) | undefined;
+
+  // Buffer for SSE events that arrive before their queue item exists (retry race).
+  // Keyed by task_id — see queue-state.ts.
+  const buffer = new Map<string, SseEvent[]>();
 
   // PWA install prompt
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,49 +62,7 @@
         }
       }
       unsubscribe = subscribeEvents((event) => {
-        queue = queue.map((item) => {
-          if (!item.tracks) return item;
-          const trackIdx = item.tracks.findIndex((t) => t.id === event.task_id);
-          if (trackIdx === -1) return item;
-
-          const newStatus = event.status.type;
-          const newProgress =
-            newStatus === 'done' ? 100
-            : (newStatus === 'running' || newStatus === 'retrying') ? item.tracks[trackIdx].progress
-            : 0;
-          const failureReason =
-            newStatus === 'failed' ? (event.status.reason ?? 'Unknown error') : undefined;
-
-          const updatedTracks = item.tracks.map((t, i) => {
-            if (i !== trackIdx) return t;
-            const infoUpdate = event.track_info
-              ? {
-                  title: event.track_info.title,
-                  artists: event.track_info.artists,
-                  number: event.track_info.number ?? t.number,
-                  duration_ms: event.track_info.duration_ms,
-                }
-              : {};
-            const msgUpdate = event.message !== undefined
-              ? { statusMessage: event.message }
-              : {};
-            return { ...t, status: newStatus, progress: newProgress, failureReason, ...infoUpdate, ...msgUpdate };
-          });
-
-          // Derive collection-level status and progress from individual tracks
-          const anyRunning = updatedTracks.some((t) => t.status === 'running' || t.status === 'retrying');
-          const anyFailed  = updatedTracks.some((t) => t.status === 'failed');
-          const allDone    = updatedTracks.every((t) => t.status === 'done');
-          const collectionStatus = anyRunning ? 'running'
-            : allDone    ? 'done'
-            : anyFailed  ? 'failed'
-            : 'pending';
-          const collectionProgress = Math.round(
-            updatedTracks.reduce((sum, t) => sum + t.progress, 0) / updatedTracks.length
-          );
-
-          return { ...item, tracks: updatedTracks, status: collectionStatus, progress: collectionProgress };
-        });
+        queue = handleEvent(queue, event, buffer);
       });
       loading = false;
     } catch (e: unknown) {
@@ -115,6 +78,7 @@
       return;
     }
     queue = [...queue, item];
+    queue = drainBuffer(queue, buffer);
     const noun = item.trackCount === 1 ? 'track' : 'tracks';
     addToast(`Added '${item.title}' (${item.trackCount} ${noun})`);
   }
@@ -123,12 +87,10 @@
     try {
       const res = await queueUrl(uri);
       const item = responseToQueueItem(res);
-      // Mark the old failed entry as 'retried' — give it a random id since it's
-      // purely informational (no actions, never a retry target). The new item
-      // gets the canonical uri_str, and each tombstone is guaranteed unique even
-      // across multiple retry attempts on the same item.
-      queue = queue.map((q) => q.id === uri ? { ...q, id: crypto.randomUUID(), status: 'retried' } : q);
-      queue = [...queue, item];
+      // In-place replace: same collection uri_str, fresh track UUIDs.
+      // The item slides from "failed" to "pending" via animate:flip.
+      queue = queue.map((q) => q.id === uri ? item : q);
+      queue = drainBuffer(queue, buffer);
       const noun = item.trackCount === 1 ? 'track' : 'tracks';
       addToast(`Re-queued '${item.title}' (${item.trackCount} ${noun})`);
     } catch (e: unknown) {

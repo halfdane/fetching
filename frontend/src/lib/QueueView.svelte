@@ -1,6 +1,9 @@
 <script lang="ts">
 import type { QueueItem } from './types';
 import TrackList from './TrackList.svelte';
+import { fly, fade } from 'svelte/transition';
+import { flip } from 'svelte/animate';
+import { cubicOut } from 'svelte/easing';
 
 let {
   queue,
@@ -26,8 +29,7 @@ function statusPriority(status: string): number {
     case 'retrying': return 0;
     case 'pending':  return 1;
     case 'failed':   return 2;
-    case 'retried':  return 3;
-    case 'done':     return 4;
+    case 'done':     return 3;
     default:         return 5;
   }
 }
@@ -41,7 +43,6 @@ function statusColor(status: string): string {
     case 'done':    return 'text-green-400';
     case 'running': return 'text-blue-400';
     case 'failed':  return 'text-red-400';
-    case 'retried': return 'text-gray-500';
     default:        return 'text-gray-500';
   }
 }
@@ -51,7 +52,6 @@ function barColor(status: string): string {
     case 'done':    return 'bg-green-500';
     case 'running': return 'bg-blue-500';
     case 'failed':  return 'bg-red-500';
-    case 'retried': return 'bg-gray-700';
     default:        return 'bg-gray-600';
   }
 }
@@ -66,10 +66,13 @@ function barColor(status: string): string {
     <p class="text-gray-600 text-center py-16">No downloads queued.</p>
   {:else}
     {#each sortedQueue as item, i (item.id)}
-      {#if i > 0 && statusPriority(item.status) === 1 && statusPriority(sortedQueue[i - 1].status) === 0}
-        <hr class="border-gray-700" />
-      {/if}
-      <div class="bg-gray-900 bg-opacity-70 rounded-xl shadow-lg overflow-hidden">
+      <div animate:flip={{ duration: 300, easing: cubicOut }}
+           in:fly={{ y: -20, duration: 250, easing: cubicOut }}
+           out:fade={{ duration: 200 }}>
+        {#if i > 0 && statusPriority(item.status) === 1 && statusPriority(sortedQueue[i - 1].status) === 0}
+          <hr class="border-gray-700 mb-4" />
+        {/if}
+        <div class="bg-gray-900 bg-opacity-70 rounded-xl shadow-lg overflow-hidden">
 
         <!-- Clickable header -->
         <div
@@ -79,9 +82,9 @@ function barColor(status: string): string {
           tabindex="0"
           onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(item.id); }}
         >
-          <img src={item.cover} alt="cover" class="w-16 h-16 rounded-lg object-cover flex-shrink-0 {item.status === 'retried' ? 'opacity-40' : ''}" />
+          <img src={item.cover} alt="cover" class="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
 
-          <div class="flex-1 min-w-0 {item.status === 'retried' ? 'opacity-60' : ''}">
+          <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <h2 class="text-lg font-bold truncate">{item.title}</h2>
               <span class="text-sm text-gray-400 truncate">{item.artist}</span>
@@ -118,6 +121,7 @@ function barColor(status: string): string {
           </div>
         {/if}
 
+        </div>
       </div>
     {/each}
   {/if}

@@ -116,16 +116,6 @@ export const MOCK_QUEUE: QueueItem[] = [
     progress: 50,
     tracks: FAILED_TRACKS,
   },
-  {
-    id: 'task-retried-1',
-    cover: DUMMY_COVER,
-    title: 'Previously Failed',
-    artist: 'Another Artist',
-    trackCount: 4,
-    status: 'retried',
-    progress: 50,
-    tracks: FAILED_TRACKS,
-  },
 ];
 
 export function mockFetchStatus(): Promise<string> {

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, env, path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use fetching_core_lib::{
@@ -81,6 +81,8 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    env::set_var("LIBRESPOT_AP", "preferred-ap-spotify-com.akamaized.net");
 
     let cli = Cli::parse();
 
