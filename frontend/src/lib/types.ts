@@ -1,5 +1,6 @@
 export interface TrackItem {
   id: string;           // task_id (UUID) — matches SSE ProgressUpdate.task_id
+  track_uri?: string;   // Spotify URI — used for retry (populated from QueueResponse)
   number: number;
   title: string;
   artists?: string[];
@@ -17,7 +18,7 @@ export interface QueueItem {
   title: string;
   artist: string;
   trackCount: number;
-  status: 'pending' | 'running' | 'done' | 'failed' | string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'retried' | string;
   progress: number; // 0-100, derived from track completions
   tracks?: TrackItem[];
 }

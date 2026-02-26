@@ -118,6 +118,23 @@
     const noun = item.trackCount === 1 ? 'track' : 'tracks';
     addToast(`Added '${item.title}' (${item.trackCount} ${noun})`);
   }
+
+  async function handleRetry(uri: string) {
+    try {
+      const res = await queueUrl(uri);
+      const item = responseToQueueItem(res);
+      // Mark the old failed entry as 'retried' — give it a random id since it's
+      // purely informational (no actions, never a retry target). The new item
+      // gets the canonical uri_str, and each tombstone is guaranteed unique even
+      // across multiple retry attempts on the same item.
+      queue = queue.map((q) => q.id === uri ? { ...q, id: crypto.randomUUID(), status: 'retried' } : q);
+      queue = [...queue, item];
+      const noun = item.trackCount === 1 ? 'track' : 'tracks';
+      addToast(`Re-queued '${item.title}' (${item.trackCount} ${noun})`);
+    } catch (e: unknown) {
+      addToast(`Retry failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }
 </script>
 
 <main class="min-h-screen flex flex-col items-center bg-gradient-to-br from-black via-gray-900 to-gray-800 text-white px-4">
@@ -134,7 +151,7 @@
     </button>
   {/if}
   <AddToQueue onQueued={handleQueued} />
-  <QueueView {queue} {loading} {error} />
+  <QueueView {queue} {loading} {error} onRetry={handleRetry} />
 </main>
 
 <DevDrawer />

@@ -15,6 +15,7 @@ export function responseToQueueItem(res: QueueResponse): QueueItem {
     progress: 0,
     tracks: task_ids.map((taskId, i) => ({
       id: taskId,
+      track_uri: collection.track_uris[i],
       number: i + 1,
       title: `Track ${i + 1}`,
       status: 'pending',

@@ -6,10 +6,12 @@ let {
   queue,
   loading = false,
   error = '',
+  onRetry,
 }: {
   queue: QueueItem[];
   loading?: boolean;
   error?: string;
+  onRetry?: (uri: string) => void;
 } = $props();
 
 let expanded: Record<string, boolean> = $state({});
@@ -24,8 +26,9 @@ function statusPriority(status: string): number {
     case 'retrying': return 0;
     case 'pending':  return 1;
     case 'failed':   return 2;
-    case 'done':     return 3;
-    default:         return 4;
+    case 'retried':  return 3;
+    case 'done':     return 4;
+    default:         return 5;
   }
 }
 
@@ -38,6 +41,7 @@ function statusColor(status: string): string {
     case 'done':    return 'text-green-400';
     case 'running': return 'text-blue-400';
     case 'failed':  return 'text-red-400';
+    case 'retried': return 'text-gray-500';
     default:        return 'text-gray-500';
   }
 }
@@ -47,6 +51,7 @@ function barColor(status: string): string {
     case 'done':    return 'bg-green-500';
     case 'running': return 'bg-blue-500';
     case 'failed':  return 'bg-red-500';
+    case 'retried': return 'bg-gray-700';
     default:        return 'bg-gray-600';
   }
 }
@@ -74,15 +79,23 @@ function barColor(status: string): string {
           tabindex="0"
           onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(item.id); }}
         >
-          <img src={item.cover} alt="cover" class="w-16 h-16 rounded-lg object-cover flex-shrink-0" />
+          <img src={item.cover} alt="cover" class="w-16 h-16 rounded-lg object-cover flex-shrink-0 {item.status === 'retried' ? 'opacity-40' : ''}" />
 
-          <div class="flex-1 min-w-0">
+          <div class="flex-1 min-w-0 {item.status === 'retried' ? 'opacity-60' : ''}">
             <div class="flex items-center gap-2 flex-wrap">
               <h2 class="text-lg font-bold truncate">{item.title}</h2>
               <span class="text-sm text-gray-400 truncate">{item.artist}</span>
               <span class="bg-gray-700 text-xs px-2 py-0.5 rounded flex-shrink-0">{item.trackCount} tracks</span>
             </div>
-            <div class="mt-1 text-sm capitalize {statusColor(item.status)}">{item.status}</div>
+            <div class="mt-1 text-sm capitalize flex items-center gap-2">
+              <span class="{statusColor(item.status)}">{item.status}</span>
+              {#if item.status === 'failed' && onRetry}
+                <button
+                  onclick={(e) => { e.stopPropagation(); onRetry(item.id); }}
+                  class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
+                >↺ Retry</button>
+              {/if}
+            </div>
             <div class="mt-2 h-1.5 bg-gray-800 rounded-full">
               <div
                 class="h-1.5 {barColor(item.status)} rounded-full transition-all duration-500"

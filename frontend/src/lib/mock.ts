@@ -18,25 +18,25 @@ const DUMMY_COVER =
 // ---------------------------------------------------------------------------
 
 const FLOOD_TRACKS: TrackItem[] = [
-  { id: 'fl-01', number: 1,  title: 'Theme from Flood',                  status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-02', number: 2,  title: 'Birdhouse in Your Soul',            status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-03', number: 3,  title: 'Lucky Ball and Chain',              status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-04', number: 4,  title: 'Istanbul (Not Constantinople)',     status: 'done',    progress: 100, statusMessage: 'File already exists' },
-  { id: 'fl-05', number: 5,  title: 'Dead',                             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-06', number: 6,  title: 'Your Racist Friend',               status: 'done',    progress: 100, statusMessage: 'File already exists' },
-  { id: 'fl-07', number: 7,  title: 'Particle Man',                     status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-08', number: 8,  title: 'Twisting',                         status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-09', number: 9,  title: 'We Want a Rock',                   status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-10', number: 10, title: 'Someone Keeps Moving My Chair',    status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-11', number: 11, title: 'Hearing Aid',                      status: 'done',    progress: 100, statusMessage: 'File already exists' },
-  { id: 'fl-12', number: 12, title: 'Minimum Wage',                     status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-13', number: 13, title: 'Letterbox',                        status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-14', number: 14, title: 'Whistling in the Dark',            status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-15', number: 15, title: 'Hot Cha',                          status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-16', number: 16, title: 'Women & Men',                      status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-17', number: 17, title: 'Sapphire Bullets of Pure Love',    status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-18', number: 18, title: 'They Might Be Giants',             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fl-19', number: 19, title: 'Road Movie to Berlin',             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-01', track_uri: 'spotify:track:fl-01', number: 1,  title: 'Theme from Flood',                  status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-02', track_uri: 'spotify:track:fl-02', number: 2,  title: 'Birdhouse in Your Soul',            status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-03', track_uri: 'spotify:track:fl-03', number: 3,  title: 'Lucky Ball and Chain',              status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-04', track_uri: 'spotify:track:fl-04', number: 4,  title: 'Istanbul (Not Constantinople)',     status: 'done',    progress: 100, statusMessage: 'File already exists' },
+  { id: 'fl-05', track_uri: 'spotify:track:fl-05', number: 5,  title: 'Dead',                             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-06', track_uri: 'spotify:track:fl-06', number: 6,  title: 'Your Racist Friend',               status: 'done',    progress: 100, statusMessage: 'File already exists' },
+  { id: 'fl-07', track_uri: 'spotify:track:fl-07', number: 7,  title: 'Particle Man',                     status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-08', track_uri: 'spotify:track:fl-08', number: 8,  title: 'Twisting',                         status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-09', track_uri: 'spotify:track:fl-09', number: 9,  title: 'We Want a Rock',                   status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-10', track_uri: 'spotify:track:fl-10', number: 10, title: 'Someone Keeps Moving My Chair',    status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-11', track_uri: 'spotify:track:fl-11', number: 11, title: 'Hearing Aid',                      status: 'done',    progress: 100, statusMessage: 'File already exists' },
+  { id: 'fl-12', track_uri: 'spotify:track:fl-12', number: 12, title: 'Minimum Wage',                     status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-13', track_uri: 'spotify:track:fl-13', number: 13, title: 'Letterbox',                        status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-14', track_uri: 'spotify:track:fl-14', number: 14, title: 'Whistling in the Dark',            status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-15', track_uri: 'spotify:track:fl-15', number: 15, title: 'Hot Cha',                          status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-16', track_uri: 'spotify:track:fl-16', number: 16, title: 'Women & Men',                      status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-17', track_uri: 'spotify:track:fl-17', number: 17, title: 'Sapphire Bullets of Pure Love',    status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-18', track_uri: 'spotify:track:fl-18', number: 18, title: 'They Might Be Giants',             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fl-19', track_uri: 'spotify:track:fl-19', number: 19, title: 'Road Movie to Berlin',             status: 'done',    progress: 100, statusMessage: 'Downloaded' },
 ];
 
 const APOLLO_TRACKS: TrackItem[] = [
@@ -55,6 +55,7 @@ const APOLLO_TRACKS: TrackItem[] = [
 
 const PENDING_TRACKS: TrackItem[] = Array.from({ length: 8 }, (_, i) => ({
   id: `pe-${String(i + 1).padStart(2, '0')}`,
+  track_uri: `spotify:track:pe-${String(i + 1).padStart(2, '0')}`,
   number: i + 1,
   title: `Track ${String(i + 1).padStart(2, '0')}`,
   status: 'pending',
@@ -62,11 +63,11 @@ const PENDING_TRACKS: TrackItem[] = Array.from({ length: 8 }, (_, i) => ({
 }));
 
 const FAILED_TRACKS: TrackItem[] = [
-  { id: 'fa-01', number: 1, title: 'Lost Signal',       status: 'done',   progress: 100, statusMessage: 'Downloaded' },
-  { id: 'fa-02', number: 2, title: 'Broken Frequency',  status: 'done',   progress: 100, statusMessage: 'File already exists' },
-  { id: 'fa-03', number: 3, title: 'Static Noise',      status: 'failed', progress: 45,
+  { id: 'fa-01', track_uri: 'spotify:track:fa-01', number: 1, title: 'Lost Signal',       status: 'done',   progress: 100, statusMessage: 'Downloaded' },
+  { id: 'fa-02', track_uri: 'spotify:track:fa-02', number: 2, title: 'Broken Frequency',  status: 'done',   progress: 100, statusMessage: 'File already exists' },
+  { id: 'fa-03', track_uri: 'spotify:track:fa-03', number: 3, title: 'Static Noise',      status: 'failed', progress: 45,
     failureReason: 'Audio key error after 4 attempts' },
-  { id: 'fa-04', number: 4, title: 'Distant Echo',      status: 'failed', progress: 0,
+  { id: 'fa-04', track_uri: 'spotify:track:fa-04', number: 4, title: 'Distant Echo',      status: 'failed', progress: 0,
     failureReason: 'Track not available in your region' },
 ];
 
@@ -112,6 +113,16 @@ export const MOCK_QUEUE: QueueItem[] = [
     artist: 'Another Artist',
     trackCount: 4,
     status: 'failed',
+    progress: 50,
+    tracks: FAILED_TRACKS,
+  },
+  {
+    id: 'task-retried-1',
+    cover: DUMMY_COVER,
+    title: 'Previously Failed',
+    artist: 'Another Artist',
+    trackCount: 4,
+    status: 'retried',
     progress: 50,
     tracks: FAILED_TRACKS,
   },
