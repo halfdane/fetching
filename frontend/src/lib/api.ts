@@ -1,7 +1,27 @@
 import { mockFetchStatus, mockSubscribeEvents, mockSubscribeRawEvents, mockQueueUrl } from './mock';
-import type { RawEvent, QueueResponse, SseEvent } from './types';
+import type { RawEvent, QueueItem, QueueResponse, SseEvent } from './types';
 
 const IS_DEV = import.meta.env.DEV;
+
+export function responseToQueueItem(res: QueueResponse): QueueItem {
+  const { collection, cover_data_url, task_ids } = res;
+  return {
+    id: collection.uri_str,
+    cover: cover_data_url ?? '',
+    title: collection.title,
+    artist: collection.artists[0] ?? '',
+    trackCount: collection.total_tracks,
+    status: 'pending',
+    progress: 0,
+    tracks: task_ids.map((taskId, i) => ({
+      id: taskId,
+      number: i + 1,
+      title: `Track ${i + 1}`,
+      status: 'pending',
+      progress: 0,
+    })),
+  };
+}
 
 export async function queueUrl(url: string): Promise<QueueResponse> {
   if (IS_DEV) return mockQueueUrl(url);

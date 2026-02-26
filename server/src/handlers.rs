@@ -20,8 +20,8 @@ async fn pwa_handler_debug(uri: Uri) -> impl IntoResponse {
     use axum::{http::Request, body::Body};
     use tower::ServiceExt;
     let req = Request::builder().uri(uri.clone()).body(Body::empty()).unwrap();
-    let res = ServeDir::new("static/pwa")
-        .fallback(ServeFile::new("static/pwa/index.html"))
+    let res = ServeDir::new("frontend/build")
+        .fallback(ServeFile::new("frontend/build/index.html"))
         .oneshot(req)
         .await;
     res.into_response()

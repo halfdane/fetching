@@ -1,32 +1,12 @@
 <script lang="ts">
-  import { queueUrl } from './api';
-  import type { QueueItem, QueueResponse } from './types';
+  import { queueUrl, responseToQueueItem } from './api';
+  import type { QueueItem } from './types';
 
   let { onQueued }: { onQueued: (item: QueueItem) => void } = $props();
 
   let url = $state('');
   let loading = $state(false);
   let error = $state('');
-
-  function responseToQueueItem(res: QueueResponse): QueueItem {
-    const { collection, cover_data_url, task_ids } = res;
-    return {
-      id: collection.uri_str,
-      cover: cover_data_url ?? '',
-      title: collection.title,
-      artist: collection.artists[0] ?? '',
-      trackCount: collection.total_tracks,
-      status: 'pending',
-      progress: 0,
-      tracks: task_ids.map((taskId, i) => ({
-        id: taskId,
-        number: i + 1,
-        title: `Track ${i + 1}`,
-        status: 'pending',
-        progress: 0,
-      })),
-    };
-  }
 
   async function submit() {
     const trimmed = url.trim();
