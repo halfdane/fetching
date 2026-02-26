@@ -39,13 +39,19 @@ export interface TrackCollection {
   track_uris: string[];
 }
 
-/** Shape returned by POST /api/queue on success. */
+/** Shape returned by POST /api/queue and GET /api/queue. */
 export interface QueueResponse {
   collection: TrackCollection;
   /** Base64 JPEG data URL, or null if the cover could not be fetched. */
   cover_data_url: string | null;
   /** Task IDs in the same order as collection.track_uris. Used as TrackItem.id. */
   task_ids: string[];
+  /**
+   * Current status of each task, parallel to task_ids.
+   * Populated by GET /api/queue; empty array in POST /api/queue responses
+   * (all newly-queued tasks start as Pending).
+   */
+  task_statuses: SseEvent['status'][];
 }
 
 /** Resolved track metadata sent in the first `running` SSE event. */

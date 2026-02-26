@@ -4,23 +4,40 @@ import type { RawEvent, QueueItem, QueueResponse, SseEvent } from './types';
 const IS_DEV = import.meta.env.DEV;
 
 export function responseToQueueItem(res: QueueResponse): QueueItem {
-  const { collection, cover_data_url, task_ids } = res;
+  const { collection, cover_data_url, task_ids, task_statuses } = res;
+  const statuses = task_statuses ?? [];
+
+  const anyRunning = statuses.some(s => s.type === 'running' || s.type === 'retrying');
+  const anyFailed  = statuses.some(s => s.type === 'failed');
+  const allDone    = statuses.length > 0 && statuses.every(s => s.type === 'done');
+  const collectionStatus = anyRunning ? 'running'
+    : allDone   ? 'done'
+    : anyFailed ? 'failed'
+    : 'pending';
+  const collectionProgress = statuses.length
+    ? Math.round(statuses.filter(s => s.type === 'done').length / statuses.length * 100)
+    : 0;
+
   return {
     id: collection.uri_str,
     cover: cover_data_url ?? '',
     title: collection.title,
     artist: collection.artists[0] ?? '',
     trackCount: collection.total_tracks,
-    status: 'pending',
-    progress: 0,
-    tracks: task_ids.map((taskId, i) => ({
-      id: taskId,
-      track_uri: collection.track_uris[i],
-      number: i + 1,
-      title: `Track ${i + 1}`,
-      status: 'pending',
-      progress: 0,
-    })),
+    status: collectionStatus,
+    progress: collectionProgress,
+    tracks: task_ids.map((taskId, i) => {
+      const s = statuses[i];
+      return {
+        id: taskId,
+        track_uri: collection.track_uris[i],
+        number: i + 1,
+        title: `Track ${i + 1}`,
+        status: s?.type ?? 'pending',
+        progress: s?.type === 'done' ? 100 : 0,
+        failureReason: s?.type === 'failed' ? s.reason : undefined,
+      };
+    }),
   };
 }
 
@@ -33,6 +50,13 @@ export async function queueUrl(url: string): Promise<QueueResponse> {
   });
   if (!res.ok) throw new Error(`Server responded ${res.status}`);
   return res.json() as Promise<QueueResponse>;
+}
+
+export async function fetchQueue(): Promise<QueueResponse[]> {
+  if (IS_DEV) return [];
+  const res = await fetch('/api/queue');
+  if (!res.ok) throw new Error(`Server responded ${res.status}`);
+  return res.json() as Promise<QueueResponse[]>;
 }
 
 export async function fetchStatus(): Promise<string> {

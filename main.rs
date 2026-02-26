@@ -193,8 +193,10 @@ async fn main() -> anyhow::Result<()> {
             let cover = CachedCoverProvider::new(Arc::new(LibrespotCoverFetcher::new(&session).await?));
             let (apis, runner) = build_apis(session.clone(), Arc::new(cover.clone()), output_dir);
 
-            let queue = Arc::new(TokioQueue::with_storage(
-                SledStorage::open("queue.sled")?,
+            let sled = std::sync::Arc::new(SledStorage::open("queue.sled")?);
+            let queue = Arc::new(TokioQueue::with_registry(
+                sled.clone(),
+                sled,
                 apis,
                 runner,
             ));

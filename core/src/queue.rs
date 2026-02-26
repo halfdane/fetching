@@ -191,6 +191,54 @@ pub trait QueueStorage: Send + Sync + 'static {
     }
 }
 
+// ---------------------------------------------------------------------------
+// TaskSnapshot
+// ---------------------------------------------------------------------------
+
+/// Point-in-time view of a single queued task, as returned by
+/// [`TaskRegistry::snapshot`].
+#[derive(Clone, Debug)]
+pub struct TaskSnapshot {
+    pub task_id: TaskId,
+    pub track_uri: String,
+    pub collection: Arc<TrackCollection>,
+    pub status: TaskStatus,
+}
+
+// ---------------------------------------------------------------------------
+// TaskRegistry – status-tracking seam
+// ---------------------------------------------------------------------------
+
+/// Persists every task's status across its full lifecycle:
+/// `Pending → Running → Done / Failed`.
+///
+/// Intentionally separate from [`QueueStorage`]:
+/// - `QueueStorage` answers "what's next?" (narrow FIFO seam)
+/// - `TaskRegistry` answers "what does everything look like right now?"
+///
+/// A single backend (e.g. `SledStorage`) may implement both traits on the
+/// same struct while keeping the traits themselves single-responsibility.
+///
+/// # Integration points
+///
+/// - [`TokioQueue::add_collection`] calls `register` for each new entry.
+/// - The worker loop calls `update` (via `emit_update`) at every status
+///   transition alongside the SSE broadcast — no separate background task
+///   needed.
+pub trait TaskRegistry: Send + Sync + 'static {
+    /// Record a new task with its initial status (`Pending`) at enqueue time.
+    ///
+    /// Implementations must replace any existing entry for the same `track_uri`,
+    /// so the registry always holds exactly one record per track URI.
+    fn register(&self, entry: &QueueEntry, status: TaskStatus) -> anyhow::Result<()>;
+
+    /// Update the status of an existing task.
+    fn update(&self, task_id: TaskId, status: TaskStatus) -> anyhow::Result<()>;
+
+    /// Return all known tasks with their current status.
+    fn snapshot(&self) -> anyhow::Result<Vec<TaskSnapshot>>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

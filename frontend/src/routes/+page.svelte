@@ -4,7 +4,7 @@
   import DevDrawer from '../lib/DevDrawer.svelte';
   import AddToQueue from '../lib/AddToQueue.svelte';
   import Toast from '../lib/Toast.svelte';
-  import { fetchStatus, subscribeEvents, queueUrl, responseToQueueItem } from '../lib/api';
+  import { fetchStatus, subscribeEvents, queueUrl, responseToQueueItem, fetchQueue } from '../lib/api';
   import { handleEvent, drainBuffer } from '../lib/queue-state';
   import { MOCK_QUEUE } from '../lib/mock';
   import type { QueueItem, SseEvent } from '../lib/types';
@@ -46,7 +46,20 @@
     });
     try {
       await fetchStatus();
-      queue = import.meta.env.DEV ? [...MOCK_QUEUE] : [];
+
+      // Subscribe first so SSE events are buffered while we fetch the snapshot.
+      unsubscribe = subscribeEvents((event) => {
+        queue = handleEvent(queue, event, buffer);
+      });
+
+      // Hydrate from server snapshot, then drain any SSE events that raced in.
+      if (!import.meta.env.DEV) {
+        const snapshot = await fetchQueue();
+        queue = snapshot.map(responseToQueueItem);
+        queue = drainBuffer(queue, buffer);
+      } else {
+        queue = [...MOCK_QUEUE];
+      }
 
       // Handle Web Share Target — Spotify appends ?url=... when sharing to this PWA
       const params = new URLSearchParams(window.location.search);
@@ -61,9 +74,6 @@
           addToast(`Failed to queue shared URL: ${e instanceof Error ? e.message : e}`);
         }
       }
-      unsubscribe = subscribeEvents((event) => {
-        queue = handleEvent(queue, event, buffer);
-      });
       loading = false;
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : 'Failed to load backend';

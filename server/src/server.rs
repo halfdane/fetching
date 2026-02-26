@@ -9,7 +9,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fetching_core_lib::{
     container::TrackCollection,
-    queue::CoverFetcher,
+    queue::{CoverFetcher, TaskStatus},
     queue_tokio::TokioQueue,
     spotify_api::SpotifyCollectionMetadata,
 };
@@ -50,6 +50,11 @@ pub struct QueueResponse {
     /// The frontend stores these as `TrackItem.id` values so it can match
     /// incoming SSE `ProgressUpdate` events to individual tracks.
     pub task_ids: Vec<String>,
+    /// Current status of each task, in the same order as `task_ids`.
+    /// Always populated by `GET /api/queue`; empty in `POST /api/queue`
+    /// responses (new tasks always start as `Pending`).
+    #[serde(default)]
+    pub task_statuses: Vec<TaskStatus>,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +132,7 @@ async fn queue_url(
             collection: (*collection).clone(),
             cover_data_url,
             task_ids,
+            task_statuses: vec![],
         }),
     )
         .into_response()
@@ -135,6 +141,72 @@ async fn queue_url(
 async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let pending = state.queue.len();
     axum::response::Html(format!("<pre>Status: ok — {pending} track(s) pending</pre>"))
+}
+
+async fn get_queue(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let snapshots = match state.queue.snapshot() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to read queue snapshot: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    // Group tasks by collection, preserving track_uris order.
+    // Use IndexMap so response order is stable (insertion = enqueue order).
+    let mut by_collection: std::collections::HashMap<
+        String,
+        (std::sync::Arc<fetching_core_lib::container::TrackCollection>, Vec<(usize, String, TaskStatus)>),
+    > = std::collections::HashMap::new();
+
+    for snap in snapshots {
+        let entry = by_collection
+            .entry(snap.collection.uri_str.clone())
+            .or_insert_with(|| (std::sync::Arc::clone(&snap.collection), vec![]));
+        let pos = entry
+            .0
+            .track_uris
+            .iter()
+            .position(|u| u == &snap.track_uri)
+            .unwrap_or(usize::MAX);
+        entry.1.push((pos, snap.task_id.to_string(), snap.status));
+    }
+
+    let mut responses: Vec<QueueResponse> = Vec::new();
+    for (collection, mut tasks) in by_collection.into_values() {
+        tasks.sort_by_key(|(pos, _, _)| *pos);
+
+        let cover_data_url = match &collection.cover_id {
+            Some(cover_id) => {
+                let cover = std::sync::Arc::clone(&state.cover);
+                let cid = cover_id.clone();
+                let handle = tokio::runtime::Handle::current();
+                match tokio::task::spawn_blocking(move || handle.block_on(cover.fetch_cover(&cid))).await {
+                    Ok(Ok(bytes)) => Some(format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes))),
+                    _ => None,
+                }
+            }
+            None => None,
+        };
+
+        let (task_ids, task_statuses): (Vec<_>, Vec<_>) = tasks
+            .into_iter()
+            .map(|(_, id, status)| (id, status))
+            .unzip();
+
+        responses.push(QueueResponse {
+            collection: (*collection).clone(),
+            cover_data_url,
+            task_ids,
+            task_statuses,
+        });
+    }
+
+    (StatusCode::OK, Json(responses)).into_response()
 }
 
 async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -160,6 +232,7 @@ pub fn app(state: Arc<AppState>) -> Router {
         .route("/", get(pwa_handler))
         .route("/*path", get(pwa_handler))
         .route("/api/queue", axum::routing::post(queue_url))
+        .route("/api/queue", get(get_queue))
         .route("/api/status", get(get_status))
         .route("/events", get(events))
         .with_state(state)

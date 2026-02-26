@@ -186,6 +186,7 @@ const KIND_OF_BLUE: QueueResponse = {
   },
   cover_data_url: null, // mock: no base64 image
   task_ids: ['kob-01', 'kob-02', 'kob-03', 'kob-04', 'kob-05'],
+  task_statuses: [],
 };
 
 /** Returns a fake QueueResponse for any URL entered in dev. */

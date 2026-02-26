@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, Notify, Semaphore};
 use tracing::{error, info, warn};
 
 use crate::container::TrackCollection;
-use crate::queue::{JobRunner, ProgressUpdate, QueueEntry, QueueStorage, TaskId, TaskStatus, WorkerApis};
+use crate::queue::{JobRunner, ProgressUpdate, QueueEntry, QueueStorage, TaskId, TaskRegistry, TaskSnapshot, TaskStatus, WorkerApis};
 use crate::queue_memory::InMemoryStorage;
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,7 @@ use crate::queue_memory::InMemoryStorage;
 /// ```
 pub struct TokioQueue {
     storage: Arc<dyn QueueStorage>,
+    registry: Option<Arc<dyn TaskRegistry>>,
     notify: Arc<Notify>,
     progress_tx: broadcast::Sender<ProgressUpdate>,
     apis: Arc<WorkerApis>,
@@ -51,12 +52,12 @@ impl TokioQueue {
     // Constructors
     // -----------------------------------------------------------------------
 
-    /// Create a queue backed by `InMemoryStorage`.
+    /// Create a queue backed by `InMemoryStorage` with no task registry.
     pub fn new(apis: WorkerApis, runner: impl JobRunner) -> Self {
         Self::with_storage(InMemoryStorage::new(), apis, runner)
     }
 
-    /// Create a queue backed by a custom `QueueStorage` implementation.
+    /// Create a queue backed by a custom `QueueStorage` with no task registry.
     ///
     /// Use this when swapping in a sled or yaque backend:
     /// ```ignore
@@ -66,6 +67,32 @@ impl TokioQueue {
         let (progress_tx, _) = broadcast::channel(Self::PROGRESS_CHANNEL_CAPACITY);
         Self {
             storage: Arc::new(storage),
+            registry: None,
+            notify: Arc::new(Notify::new()),
+            progress_tx,
+            apis: Arc::new(apis),
+            runner: Arc::new(runner),
+        }
+    }
+
+    /// Create a queue with both a custom storage backend and a task registry.
+    ///
+    /// When a single backend implements both traits (e.g. `SledStorage`),
+    /// wrap it in `Arc` and pass it for both parameters:
+    /// ```ignore
+    /// let sled = Arc::new(SledStorage::open("queue.sled")?);
+    /// TokioQueue::with_registry(sled.clone(), sled.clone(), apis, runner)
+    /// ```
+    pub fn with_registry(
+        storage: Arc<dyn QueueStorage>,
+        registry: Arc<dyn TaskRegistry>,
+        apis: WorkerApis,
+        runner: impl JobRunner,
+    ) -> Self {
+        let (progress_tx, _) = broadcast::channel(Self::PROGRESS_CHANNEL_CAPACITY);
+        Self {
+            storage,
+            registry: Some(registry),
             notify: Arc::new(Notify::new()),
             progress_tx,
             apis: Arc::new(apis),
@@ -88,6 +115,11 @@ impl TokioQueue {
             .map(|uri| {
                 let entry = QueueEntry::new(uri.clone(), Arc::clone(&collection));
                 let id = entry.task_id;
+                if let Some(reg) = &self.registry {
+                    if let Err(e) = reg.register(&entry, TaskStatus::Pending) {
+                        error!("Failed to register task {id} in registry: {e}");
+                    }
+                }
                 if let Err(e) = self.storage.push(entry) {
                     error!("Failed to push queue entry for {uri}: {e}");
                 }
@@ -117,18 +149,36 @@ impl TokioQueue {
         self.storage.is_empty()
     }
 
+    /// Return a snapshot of all known tasks and their current status.
+    ///
+    /// Returns an empty vec when no registry is configured (e.g. batch mode).
+    pub fn snapshot(&self) -> anyhow::Result<Vec<TaskSnapshot>> {
+        match &self.registry {
+            Some(reg) => reg.snapshot(),
+            None => Ok(vec![]),
+        }
+    }
+
     /// Spawn the background worker loop.
     ///
     /// Call this exactly once during application startup.
     /// The loop runs until the Tokio runtime shuts down.
+    /// If there are already pending entries in storage (e.g. restored from
+    /// sled after a restart), the worker is woken immediately.
     pub fn start(&self) {
         let storage = Arc::clone(&self.storage);
+        let registry = self.registry.as_ref().map(Arc::clone);
         let notify = Arc::clone(&self.notify);
         let progress_tx = self.progress_tx.clone();
         let apis = Arc::clone(&self.apis);
         let runner = Arc::clone(&self.runner);
 
-        tokio::spawn(worker_loop(storage, notify, progress_tx, apis, runner));
+        // Wake the worker for any entries already in storage at startup.
+        if !self.storage.is_empty() {
+            self.notify.notify_one();
+        }
+
+        tokio::spawn(worker_loop(storage, notify, progress_tx, apis, runner, registry));
     }
 }
 
@@ -146,6 +196,7 @@ async fn worker_loop(
     progress_tx: broadcast::Sender<ProgressUpdate>,
     apis: Arc<WorkerApis>,
     runner: Arc<dyn JobRunner>,
+    registry: Option<Arc<dyn TaskRegistry>>,
 ) {
     let semaphore = Arc::new(Semaphore::new(1));
 
@@ -176,8 +227,9 @@ async fn worker_loop(
                 }
             };
 
-            send_progress(
+            emit_update(
                 &progress_tx,
+                registry.as_deref(),
                 ProgressUpdate {
                     task_id,
                     status: TaskStatus::Running,
@@ -234,12 +286,23 @@ async fn worker_loop(
                 }
             };
 
-            send_progress(&progress_tx, update);
+            emit_update(&progress_tx, registry.as_deref(), update);
         }
     }
 }
 
-fn send_progress(tx: &broadcast::Sender<ProgressUpdate>, update: ProgressUpdate) {
+fn emit_update(
+    tx: &broadcast::Sender<ProgressUpdate>,
+    registry: Option<&dyn TaskRegistry>,
+    update: ProgressUpdate,
+) {
+    // Always persist to the registry, regardless of whether anyone is
+    // subscribed to the SSE stream.
+    if let Some(reg) = registry {
+        if let Err(e) = reg.update(update.task_id, update.status.clone()) {
+            warn!("Failed to update registry for task {}: {e}", update.task_id);
+        }
+    }
     if tx.receiver_count() > 0 {
         if let Err(e) = tx.send(update) {
             warn!("Failed to send progress update: {e}");
