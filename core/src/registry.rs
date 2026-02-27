@@ -118,6 +118,8 @@ pub struct SledRegistry {
     tasks: sled::Tree,
 }
 
+const MAX_REGISTRY_ENTRIES: usize = 1_000;
+
 impl SledRegistry {
     /// Open (or create) a sled database at `path`.
     pub fn open(path: impl AsRef<std::path::Path>) -> anyhow::Result<Self> {
@@ -175,6 +177,37 @@ impl SledRegistry {
         }
         Ok(entries)
     }
+
+    fn prune_to_limit(&self) -> anyhow::Result<()> {
+        self.prune_to(MAX_REGISTRY_ENTRIES)
+    }
+
+    fn prune_to(&self, limit: usize) -> anyhow::Result<()> {
+        let total = self.tasks.len();
+        if total <= limit {
+            return Ok(());
+        }
+        // Only finished tasks are safe to drop; active ones must stay.
+        let mut finished: Vec<(u64, sled::IVec)> = self
+            .tasks
+            .iter()
+            .filter_map(|res| {
+                let (key, value) = res.ok()?;
+                let stored: StoredTask = serde_json::from_slice(&value).ok()?;
+                matches!(stored.status, TaskStatus::Done | TaskStatus::Failed { .. })
+                    .then_some((stored.registered_at, key))
+            })
+            .collect();
+        finished.sort_unstable_by_key(|(ts, _)| *ts);
+        let to_remove = total - limit;
+        for (_, key) in finished.into_iter().take(to_remove) {
+            self.tasks.remove(key)?;
+        }
+        if to_remove > 0 {
+            info!("Pruned {to_remove} old finished task(s) from registry (limit {limit})");
+        }
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +251,7 @@ impl TaskRegistry for SledRegistry {
         };
         self.tasks
             .insert(entry.task_id.as_bytes(), serde_json::to_vec(&stored)?)?;
+        self.prune_to_limit()?;
         Ok(())
     }
 
@@ -450,5 +484,69 @@ mod tests {
     fn recover_on_empty_registry_returns_empty() {
         let reg = temp_registry();
         assert!(reg.recover_interrupted().unwrap().is_empty());
+    }
+
+    // -- prune_to -----------------------------------------------------------
+
+    #[test]
+    fn prune_does_nothing_at_or_below_limit() {
+        let reg = temp_registry();
+        let col = fake_collection(&["uri:a", "uri:b"]);
+        for uri in ["uri:a", "uri:b"] {
+            reg.register(&QueueEntry::new(uri, Arc::clone(&col)), TaskStatus::Done)
+                .unwrap();
+        }
+        reg.prune_to(2).unwrap();
+        assert_eq!(reg.snapshot().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn prune_drops_oldest_finished_tasks_first() {
+        let reg = temp_registry();
+        let col = fake_collection(&["uri:a", "uri:b", "uri:c"]);
+
+        // Register with small sleeps so registered_at differs.
+        let entries: Vec<_> = ["uri:a", "uri:b", "uri:c"]
+            .iter()
+            .map(|uri| {
+                let e = QueueEntry::new(*uri, Arc::clone(&col));
+                reg.register(&e, TaskStatus::Done).unwrap();
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                e
+            })
+            .collect();
+
+        // Limit to 2 — should drop the oldest (uri:a).
+        reg.prune_to(2).unwrap();
+
+        let snap = reg.snapshot().unwrap();
+        assert_eq!(snap.len(), 2, "should have pruned down to limit");
+        let remaining_uris: Vec<_> = snap.iter().map(|s| s.track_uri.as_str()).collect();
+        assert!(!remaining_uris.contains(&"uri:a"), "oldest entry should have been pruned");
+        assert!(remaining_uris.contains(&"uri:b"));
+        assert!(remaining_uris.contains(&"uri:c"));
+        let _ = entries; // keep alive
+    }
+
+    #[test]
+    fn prune_never_removes_active_tasks() {
+        let reg = temp_registry();
+        let col = fake_collection(&["uri:a", "uri:b", "uri:c"]);
+
+        reg.register(&QueueEntry::new("uri:a", Arc::clone(&col)), TaskStatus::Done)
+            .unwrap();
+        reg.register(&QueueEntry::new("uri:b", Arc::clone(&col)), TaskStatus::Pending)
+            .unwrap();
+        reg.register(&QueueEntry::new("uri:c", Arc::clone(&col)), TaskStatus::Running)
+            .unwrap();
+
+        // Limit of 1 — can only prune finished tasks, so active two must survive.
+        reg.prune_to(1).unwrap();
+
+        let snap = reg.snapshot().unwrap();
+        assert_eq!(snap.len(), 2, "only Done task should have been removed");
+        let uris: Vec<_> = snap.iter().map(|s| s.track_uri.as_str()).collect();
+        assert!(uris.contains(&"uri:b"), "Pending task must not be pruned");
+        assert!(uris.contains(&"uri:c"), "Running task must not be pruned");
     }
 }
