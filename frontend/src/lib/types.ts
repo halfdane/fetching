@@ -52,6 +52,10 @@ export interface QueueResponse {
    * (all newly-queued tasks start as Pending).
    */
   task_statuses: SseEvent['status'][];
+  /** Human-readable status message per task (e.g. "Downloading audio…"). */
+  task_messages: (string | null)[];
+  /** Resolved track metadata per task (title, artists, number, duration). */
+  task_track_infos: (TrackInfo | null)[];
 }
 
 /** Resolved track metadata sent in the first `running` SSE event. */

@@ -4,8 +4,10 @@ import type { RawEvent, QueueItem, QueueResponse, SseEvent } from './types';
 const IS_DEV = import.meta.env.DEV;
 
 export function responseToQueueItem(res: QueueResponse): QueueItem {
-  const { collection, cover_data_url, task_ids, task_statuses } = res;
+  const { collection, cover_data_url, task_ids, task_statuses, task_messages, task_track_infos } = res;
   const statuses = task_statuses ?? [];
+  const messages = task_messages ?? [];
+  const infos = task_track_infos ?? [];
 
   const anyRunning = statuses.some(s => s.type === 'running' || s.type === 'retrying');
   const anyFailed  = statuses.some(s => s.type === 'failed');
@@ -28,13 +30,17 @@ export function responseToQueueItem(res: QueueResponse): QueueItem {
     progress: collectionProgress,
     tracks: task_ids.map((taskId, i) => {
       const s = statuses[i];
+      const info = infos[i];
       return {
         id: taskId,
         track_uri: collection.track_uris[i],
-        number: i + 1,
-        title: `Track ${i + 1}`,
+        number: info?.number ?? i + 1,
+        title: info?.title ?? `Track ${i + 1}`,
+        artists: info?.artists,
+        duration_ms: info?.duration_ms,
         status: s?.type ?? 'pending',
         progress: s?.type === 'done' ? 100 : 0,
+        statusMessage: messages[i] ?? undefined,
         failureReason: s?.type === 'failed' ? s.reason : undefined,
       };
     }),
@@ -74,6 +80,20 @@ export function subscribeEvents(
   es.onmessage = (msg) => {
     try { onUpdate(JSON.parse(msg.data)); } catch {}
   };
+  return () => es.close();
+}
+
+/**
+ * Lightweight SSE subscription that fires a callback on every event.
+ * The callback receives no parsed data — it's just a "something changed" signal
+ * so the caller can debounce a re-fetch from GET /api/queue.
+ */
+export function subscribeSseSignal(
+  onSignal: () => void
+): () => void {
+  if (IS_DEV) return mockSubscribeEvents(() => onSignal());
+  const es = new EventSource('/events');
+  es.onmessage = () => onSignal();
   return () => es.close();
 }
 

@@ -22,7 +22,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -98,11 +97,11 @@ impl JobRunner for DownloadRunner {
         &self,
         entry: &QueueEntry,
         apis: &WorkerApis,
-        progress_tx: &broadcast::Sender<ProgressUpdate>,
+        on_progress: &dyn Fn(ProgressUpdate),
     ) -> anyhow::Result<Option<String>> {
         // Convenience: fire a progress update with an optional track_info payload.
         let emit = |status: TaskStatus, msg: &str, track_info: Option<TrackInfo>| {
-            let _ = progress_tx.send(ProgressUpdate {
+            on_progress(ProgressUpdate {
                 task_id: entry.task_id,
                 status,
                 message: Some(msg.to_owned()),

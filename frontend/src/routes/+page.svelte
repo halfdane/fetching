@@ -4,10 +4,9 @@
   import DevDrawer from '../lib/DevDrawer.svelte';
   import AddToQueue from '../lib/AddToQueue.svelte';
   import Toast from '../lib/Toast.svelte';
-  import { fetchStatus, subscribeEvents, queueUrl, responseToQueueItem, fetchQueue } from '../lib/api';
-  import { handleEvent, drainBuffer } from '../lib/queue-state';
+  import { fetchStatus, subscribeSseSignal, queueUrl, responseToQueueItem, fetchQueue } from '../lib/api';
   import { MOCK_QUEUE } from '../lib/mock';
-  import type { QueueItem, SseEvent } from '../lib/types';
+  import type { QueueItem } from '../lib/types';
 
   let queue = $state<QueueItem[]>([]);
   let loading = $state(true);
@@ -15,10 +14,6 @@
   let toasts = $state<{ id: number; message: string }[]>([]);
   let toastSeq = 0;
   let unsubscribe: (() => void) | undefined;
-
-  // Buffer for SSE events that arrive before their queue item exists (retry race).
-  // Keyed by task_id — see queue-state.ts.
-  const buffer = new Map<string, SseEvent[]>();
 
   // PWA install prompt
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,6 +34,25 @@
     setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); }, 3000);
   }
 
+  // --- Backend is the single source of truth ---
+
+  /** Fetch from GET /api/queue and replace the entire queue state. */
+  async function refreshQueue() {
+    try {
+      const snapshot = await fetchQueue();
+      queue = snapshot.map(responseToQueueItem);
+    } catch (e: unknown) {
+      console.warn('Failed to refresh queue:', e);
+    }
+  }
+
+  /** Debounced refresh: coalesces rapid SSE bursts into a single fetch. */
+  let debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleRefresh() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(refreshQueue, 300);
+  }
+
   onMount(async () => {
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
@@ -47,19 +61,16 @@
     try {
       await fetchStatus();
 
-      // Subscribe first so SSE events are buffered while we fetch the snapshot.
-      unsubscribe = subscribeEvents((event) => {
-        queue = handleEvent(queue, event, buffer);
-      });
-
-      // Hydrate from server snapshot, then drain any SSE events that raced in.
+      // Hydrate from server snapshot.
       if (!import.meta.env.DEV) {
         const snapshot = await fetchQueue();
         queue = snapshot.map(responseToQueueItem);
-        queue = drainBuffer(queue, buffer);
       } else {
         queue = [...MOCK_QUEUE];
       }
+
+      // SSE: every event triggers a debounced re-fetch.
+      unsubscribe = subscribeSseSignal(scheduleRefresh);
 
       // Handle Web Share Target — Spotify appends ?url=... when sharing to this PWA
       const params = new URLSearchParams(window.location.search);
@@ -68,8 +79,9 @@
       if (spotifyUrl) {
         history.replaceState({}, '', '/');
         try {
-          const res = await queueUrl(spotifyUrl);
-          handleQueued(responseToQueueItem(res));
+          await queueUrl(spotifyUrl);
+          await refreshQueue();
+          addToast('Queued shared URL');
         } catch (e: unknown) {
           addToast(`Failed to queue shared URL: ${e instanceof Error ? e.message : e}`);
         }
@@ -81,28 +93,29 @@
     }
   });
 
-  onDestroy(() => unsubscribe?.());
+  onDestroy(() => {
+    unsubscribe?.();
+    clearTimeout(debounceTimer);
+  });
 
-  function handleQueued(item: QueueItem) {
+  async function handleQueued(item: QueueItem) {
     if (queue.some((q) => q.id === item.id)) {
       return;
     }
+    // Optimistic add so the card appears instantly, then reconcile with server.
     queue = [...queue, item];
-    queue = drainBuffer(queue, buffer);
     const noun = item.trackCount === 1 ? 'track' : 'tracks';
     addToast(`Added '${item.title}' (${item.trackCount} ${noun})`);
+    await refreshQueue();
   }
 
   async function handleRetry(uri: string) {
     try {
       const res = await queueUrl(uri);
       const item = responseToQueueItem(res);
-      // In-place replace: same collection uri_str, fresh track UUIDs.
-      // The item slides from "failed" to "pending" via animate:flip.
-      queue = queue.map((q) => q.id === uri ? item : q);
-      queue = drainBuffer(queue, buffer);
       const noun = item.trackCount === 1 ? 'track' : 'tracks';
       addToast(`Re-queued '${item.title}' (${item.trackCount} ${noun})`);
+      await refreshQueue();
     } catch (e: unknown) {
       addToast(`Retry failed: ${e instanceof Error ? e.message : e}`);
     }

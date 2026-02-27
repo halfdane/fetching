@@ -73,8 +73,10 @@ pub struct WorkerApis {
 /// coordinator calls this inside `tokio::task::spawn_blocking` to keep the
 /// async executor free.
 ///
-/// `progress_tx` is provided so the runner can emit mid-job updates (e.g. a
-/// `Running` event carrying resolved [`TrackInfo`] or a stage description).
+/// `on_progress` is a callback the runner invokes at every state transition
+/// (resolved metadata, stage changes, retries).  The coordinator wires it to
+/// both the SSE broadcast channel **and** the persistent registry so that
+/// mid-job updates survive a server restart.
 ///
 /// The returned `Option<String>` is a short human-readable message attached to
 /// the final `Done` SSE event — e.g. `"Downloaded"` or `"File already exists"`.
@@ -83,7 +85,7 @@ pub trait JobRunner: Send + Sync + 'static {
         &self,
         entry: &QueueEntry,
         apis: &WorkerApis,
-        progress_tx: &broadcast::Sender<ProgressUpdate>,
+        on_progress: &dyn Fn(ProgressUpdate),
     ) -> anyhow::Result<Option<String>>;
 }
 
@@ -284,10 +286,18 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
             let apis = Arc::clone(&coord.apis);
             let track_uri = entry.track_uri.clone();
             let progress_tx_for_runner = coord.progress_tx.clone();
+            let registry_for_runner = coord.registry.clone();
 
             let result = tokio::task::spawn_blocking(move || {
                 let _permit = permit; // drop permit when job finishes
-                runner.run(&entry, &apis, &progress_tx_for_runner)
+                let on_progress = |update: ProgressUpdate| {
+                    emit_update(
+                        &progress_tx_for_runner,
+                        registry_for_runner.as_deref(),
+                        update,
+                    );
+                };
+                runner.run(&entry, &apis, &on_progress)
             })
             .await;
 
@@ -338,7 +348,7 @@ fn emit_update(
     // Always persist to the registry, regardless of whether anyone is
     // subscribed to the SSE stream.
     if let Some(reg) = registry {
-        if let Err(e) = reg.update(update.task_id, update.status.clone()) {
+        if let Err(e) = reg.update(&update) {
             warn!("Failed to update registry for task {}: {e}", update.task_id);
         }
     }
@@ -359,7 +369,6 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
-    use tokio::sync::broadcast;
     use tokio::time::timeout;
 
     // -----------------------------------------------------------------------
@@ -418,12 +427,12 @@ mod tests {
 
     struct OkRunner;
     impl JobRunner for OkRunner {
-        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &broadcast::Sender<ProgressUpdate>) -> anyhow::Result<Option<String>> { Ok(None) }
+        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> { Ok(None) }
     }
 
     struct FailRunner;
     impl JobRunner for FailRunner {
-        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &broadcast::Sender<ProgressUpdate>) -> anyhow::Result<Option<String>> {
+        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> {
             anyhow::bail!("intentional failure")
         }
     }
@@ -537,7 +546,7 @@ mod tests {
             max_seen: Arc<AtomicUsize>,
         }
         impl JobRunner for CountingRunner {
-            fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &broadcast::Sender<ProgressUpdate>) -> anyhow::Result<Option<String>> {
+            fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> {
                 let c = self.concurrent.fetch_add(1, Ordering::SeqCst) + 1;
                 self.max_seen.fetch_max(c, Ordering::SeqCst);
                 std::thread::sleep(Duration::from_millis(20));

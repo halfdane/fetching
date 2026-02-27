@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::container::TrackCollection;
+use crate::coordinator::{ProgressUpdate, TrackInfo};
 use crate::queue::{QueueEntry, TaskId};
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,8 @@ pub struct TaskSnapshot {
     pub track_uri: String,
     pub collection: Arc<TrackCollection>,
     pub status: TaskStatus,
+    pub message: Option<String>,
+    pub track_info: Option<TrackInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,8 +79,8 @@ pub trait TaskRegistry: Send + Sync + 'static {
     /// so the registry always holds exactly one record per track URI.
     fn register(&self, entry: &QueueEntry, status: TaskStatus) -> anyhow::Result<()>;
 
-    /// Update the status of an existing task.
-    fn update(&self, task_id: TaskId, status: TaskStatus) -> anyhow::Result<()>;
+    /// Update a task from a progress update (status, message, track_info).
+    fn update(&self, update: &ProgressUpdate) -> anyhow::Result<()>;
 
     /// Return all known tasks with their current status.
     fn snapshot(&self) -> anyhow::Result<Vec<TaskSnapshot>>;
@@ -90,6 +93,10 @@ struct StoredTask {
     track_uri: String,
     collection: TrackCollection,
     status: TaskStatus,
+    #[serde(default)]
+    message: Option<String>,
+    #[serde(default)]
+    track_info: Option<TrackInfo>,
 }
 
 /// Sled-backed persistent task registry.
@@ -193,20 +200,28 @@ impl TaskRegistry for SledRegistry {
             track_uri: entry.track_uri.clone(),
             collection: (*entry.collection).clone(),
             status,
+            message: None,
+            track_info: None,
         };
         self.tasks
             .insert(entry.task_id.as_bytes(), serde_json::to_vec(&stored)?)?;
         Ok(())
     }
 
-    fn update(&self, task_id: TaskId, status: TaskStatus) -> anyhow::Result<()> {
-        let key = task_id.as_bytes();
+    fn update(&self, update: &ProgressUpdate) -> anyhow::Result<()> {
+        let key = update.task_id.as_bytes();
         let Some(bytes) = self.tasks.get(key)? else {
-            warn!("TaskRegistry::update called for unknown task {task_id}");
+            warn!("TaskRegistry::update called for unknown task {}", update.task_id);
             return Ok(());
         };
         let mut stored: StoredTask = serde_json::from_slice(&bytes)?;
-        stored.status = status;
+        stored.status = update.status.clone();
+        if update.message.is_some() {
+            stored.message = update.message.clone();
+        }
+        if update.track_info.is_some() {
+            stored.track_info = update.track_info.clone();
+        }
         self.tasks.insert(key, serde_json::to_vec(&stored)?)?;
         Ok(())
     }
@@ -222,6 +237,8 @@ impl TaskRegistry for SledRegistry {
                     track_uri: stored.track_uri,
                     collection: Arc::new(stored.collection),
                     status: stored.status,
+                    message: stored.message,
+                    track_info: stored.track_info,
                 })
             })
             .collect()
@@ -341,17 +358,28 @@ mod tests {
         let entry = QueueEntry::new("uri:a", col);
         reg.register(&entry, TaskStatus::Pending).unwrap();
 
-        reg.update(entry.task_id, TaskStatus::Running).unwrap();
+        reg.update(&ProgressUpdate {
+            task_id: entry.task_id,
+            status: TaskStatus::Running,
+            message: Some("Running…".into()),
+            track_info: None,
+        }).unwrap();
 
         let snap = reg.snapshot().unwrap();
         assert_eq!(snap[0].status, TaskStatus::Running);
+        assert_eq!(snap[0].message.as_deref(), Some("Running…"));
     }
 
     #[test]
     fn update_unknown_task_is_noop() {
         let reg = temp_registry();
         // Should not panic or error — just warn and return Ok.
-        reg.update(TaskId::new_v4(), TaskStatus::Done).unwrap();
+        reg.update(&ProgressUpdate {
+            task_id: TaskId::new_v4(),
+            status: TaskStatus::Done,
+            message: None,
+            track_info: None,
+        }).unwrap();
     }
 
     // -- recover_interrupted ------------------------------------------------

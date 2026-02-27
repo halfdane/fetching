@@ -9,7 +9,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fetching_core_lib::{
     container::TrackCollection,
-    coordinator::DownloadCoordinator,
+    coordinator::{DownloadCoordinator, TrackInfo},
     registry::TaskStatus,
     spotify_api::{CoverFetcher, SpotifyCollectionMetadata},
 };
@@ -55,6 +55,12 @@ pub struct QueueResponse {
     /// responses (new tasks always start as `Pending`).
     #[serde(default)]
     pub task_statuses: Vec<TaskStatus>,
+    /// Human-readable status message per task (e.g. "Downloading audio…").
+    #[serde(default)]
+    pub task_messages: Vec<Option<String>>,
+    /// Resolved track metadata per task (title, artists, number, duration).
+    #[serde(default)]
+    pub task_track_infos: Vec<Option<TrackInfo>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +139,8 @@ async fn queue_url(
             cover_data_url,
             task_ids,
             task_statuses: vec![],
+            task_messages: vec![],
+            task_track_infos: vec![],
         }),
     )
         .into_response()
@@ -160,7 +168,7 @@ async fn get_queue(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Use IndexMap so response order is stable (insertion = enqueue order).
     let mut by_collection: std::collections::HashMap<
         String,
-        (std::sync::Arc<fetching_core_lib::container::TrackCollection>, Vec<(usize, String, TaskStatus)>),
+        (std::sync::Arc<fetching_core_lib::container::TrackCollection>, Vec<(usize, String, TaskStatus, Option<String>, Option<TrackInfo>)>),
     > = std::collections::HashMap::new();
 
     for snap in snapshots {
@@ -173,12 +181,12 @@ async fn get_queue(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             .iter()
             .position(|u| u == &snap.track_uri)
             .unwrap_or(usize::MAX);
-        entry.1.push((pos, snap.task_id.to_string(), snap.status));
+        entry.1.push((pos, snap.task_id.to_string(), snap.status, snap.message, snap.track_info));
     }
 
     let mut responses: Vec<QueueResponse> = Vec::new();
     for (collection, mut tasks) in by_collection.into_values() {
-        tasks.sort_by_key(|(pos, _, _)| *pos);
+        tasks.sort_by_key(|(pos, _, _, _, _)| *pos);
 
         let cover_data_url = match &collection.cover_id {
             Some(cover_id) => {
@@ -193,16 +201,24 @@ async fn get_queue(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             None => None,
         };
 
-        let (task_ids, task_statuses): (Vec<_>, Vec<_>) = tasks
-            .into_iter()
-            .map(|(_, id, status)| (id, status))
-            .unzip();
+        let mut task_ids = Vec::new();
+        let mut task_statuses = Vec::new();
+        let mut task_messages = Vec::new();
+        let mut task_track_infos = Vec::new();
+        for (_, id, status, message, track_info) in tasks {
+            task_ids.push(id);
+            task_statuses.push(status);
+            task_messages.push(message);
+            task_track_infos.push(track_info);
+        }
 
         responses.push(QueueResponse {
             collection: (*collection).clone(),
             cover_data_url,
             task_ids,
             task_statuses,
+            task_messages,
+            task_track_infos,
         });
     }
 
