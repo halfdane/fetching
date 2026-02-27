@@ -1,7 +1,7 @@
 <script lang="ts">
 import type { QueueItem } from './types';
 import TrackList from './TrackList.svelte';
-import { fly, fade } from 'svelte/transition';
+import { slide } from 'svelte/transition';
 import { flip } from 'svelte/animate';
 import { cubicOut } from 'svelte/easing';
 
@@ -67,8 +67,7 @@ function barColor(status: string): string {
   {:else}
     {#each sortedQueue as item, i (item.id)}
       <div animate:flip={{ duration: 300, easing: cubicOut }}
-           in:fly={{ y: -20, duration: 250, easing: cubicOut }}
-           out:fade={{ duration: 200 }}>
+           transition:slide={{ duration: 300, easing: cubicOut }}>
         {#if i > 0 && statusPriority(item.status) === 1 && statusPriority(sortedQueue[i - 1].status) === 0}
           <hr class="border-gray-700 mb-4" />
         {/if}
