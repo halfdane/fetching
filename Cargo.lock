@@ -767,7 +767,7 @@ checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
 name = "fetching"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "fetching-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2997,7 +2997,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "async-stream",
