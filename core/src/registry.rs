@@ -56,6 +56,9 @@ pub struct TaskSnapshot {
     pub status: TaskStatus,
     pub message: Option<String>,
     pub track_info: Option<TrackInfo>,
+    /// Unix epoch milliseconds at which this task was first registered.
+    /// Used to preserve stable enqueue order across restarts.
+    pub registered_at: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +100,10 @@ struct StoredTask {
     message: Option<String>,
     #[serde(default)]
     track_info: Option<TrackInfo>,
+    /// Unix epoch milliseconds at first registration. `0` for records
+    /// persisted before this field was added (treated as oldest).
+    #[serde(default)]
+    registered_at: u64,
 }
 
 /// Sled-backed persistent task registry.
@@ -195,6 +202,11 @@ impl TaskRegistry for SledRegistry {
             self.tasks.remove(key)?;
         }
 
+        let registered_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
         let stored = StoredTask {
             task_id: entry.task_id,
             track_uri: entry.track_uri.clone(),
@@ -202,6 +214,7 @@ impl TaskRegistry for SledRegistry {
             status,
             message: None,
             track_info: None,
+            registered_at,
         };
         self.tasks
             .insert(entry.task_id.as_bytes(), serde_json::to_vec(&stored)?)?;
@@ -239,6 +252,7 @@ impl TaskRegistry for SledRegistry {
                     status: stored.status,
                     message: stored.message,
                     track_info: stored.track_info,
+                    registered_at: stored.registered_at,
                 })
             })
             .collect()

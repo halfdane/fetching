@@ -165,27 +165,37 @@ async fn get_queue(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     };
 
     // Group tasks by collection, preserving track_uris order.
-    // Use IndexMap so response order is stable (insertion = enqueue order).
+    // Keyed by collection URI; each entry tracks the earliest registered_at
+    // across all tasks in the collection so we can sort collections by enqueue
+    // time at the end.
     let mut by_collection: std::collections::HashMap<
         String,
-        (std::sync::Arc<fetching_core_lib::container::TrackCollection>, Vec<(usize, String, TaskStatus, Option<String>, Option<TrackInfo>)>),
+        (std::sync::Arc<fetching_core_lib::container::TrackCollection>, u64, Vec<(usize, String, TaskStatus, Option<String>, Option<TrackInfo>)>),
     > = std::collections::HashMap::new();
 
     for snap in snapshots {
         let entry = by_collection
             .entry(snap.collection.uri_str.clone())
-            .or_insert_with(|| (std::sync::Arc::clone(&snap.collection), vec![]));
+            .or_insert_with(|| (std::sync::Arc::clone(&snap.collection), snap.registered_at, vec![]));
+        // Keep the earliest timestamp — that's when the first track of this
+        // collection was enqueued.
+        entry.1 = entry.1.min(snap.registered_at);
         let pos = entry
             .0
             .track_uris
             .iter()
             .position(|u| u == &snap.track_uri)
             .unwrap_or(usize::MAX);
-        entry.1.push((pos, snap.task_id.to_string(), snap.status, snap.message, snap.track_info));
+        entry.2.push((pos, snap.task_id.to_string(), snap.status, snap.message, snap.track_info));
     }
 
+    // Collect into a Vec and sort by enqueue time so the response order is
+    // stable and meaningful (oldest first; frontend reverses for newest-first).
+    let mut ordered: Vec<_> = by_collection.into_values().collect();
+    ordered.sort_by_key(|(_, registered_at, _)| *registered_at);
+
     let mut responses: Vec<QueueResponse> = Vec::new();
-    for (collection, mut tasks) in by_collection.into_values() {
+    for (collection, _, mut tasks) in ordered {
         tasks.sort_by_key(|(pos, _, _, _, _)| *pos);
 
         let cover_data_url = match &collection.cover_id {
