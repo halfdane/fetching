@@ -37,7 +37,7 @@
           installPhase = ''
             cp -r build $out
           '';
-          npmDepsHash = "sha256-2NBaOYvOTmPHnPa0N4i5ojJfS88friOTuZrmz6cM4CU=";
+          npmDepsHash = "sha256-THISvv1bm9AIJS2EVnO421LsjLYA9YklkDCU1TYPMEI=";
         };
       in pkgs.rustPlatform.buildRustPackage {
         pname = "fetching";
