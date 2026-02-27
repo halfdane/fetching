@@ -18,6 +18,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -193,6 +194,13 @@ impl JobRunner for DownloadRunner {
         downloaded.file.persist(&final_path).map_err(|e| {
             anyhow::anyhow!("Failed to persist audio to {}: {}", final_path.display(), e)
         })?;
+        // Make the file world-readable so other users (e.g. navidrome) can access it.
+        if let Err(e) = std::fs::set_permissions(
+            &final_path,
+            std::fs::Permissions::from_mode(0o644),
+        ) {
+            warn!(path = %final_path.display(), "Failed to set file permissions: {e}");
+        }
         info!(path = %final_path.display(), "Saved audio");
 
         // ── 6. Embed metadata tags ───────────────────────────────────────────
