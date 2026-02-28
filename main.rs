@@ -1,4 +1,4 @@
-use std::{collections::HashSet, env, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use clap::{Parser, Subcommand};
 use fetching_core_lib::{

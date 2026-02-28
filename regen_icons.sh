@@ -4,6 +4,7 @@ set -euo pipefail
 
 STATIC=frontend/static
 MANIFEST="$STATIC/manifest.json"
+LAYOUT="frontend/src/routes/+layout.svelte"
 
 # Each entry: "base_name:source_svg:width"
 # base_name is the stable prefix; a content hash is appended to the final filename.
@@ -36,6 +37,12 @@ for entry in "${icons[@]}"; do
         '.icons = [.icons[] | if (.src | test("^/" + $base + ".*\\.png$")) then .src = $src else . end]' \
         "$MANIFEST")
     echo "$updated" > "$MANIFEST"
+
+    # Update the PNG fallback link in +layout.svelte for icon-512
+    if [[ "$base" == "icon-512" ]]; then
+        sed -i "s|href=\"/icon-512[^\"]*\.png\"|href=\"/${base}-${hash}.png\"|g" "$LAYOUT"
+        echo "Updated: $LAYOUT (icon-512 PNG fallback → /${base}-${hash}.png)"
+    fi
 done
 
 echo "Done. manifest.json updated."
