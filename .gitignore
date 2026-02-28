@@ -9,4 +9,8 @@ frontend/node_modules
 frontend/.svelte-kit
 frontend/build
 result
+# Runtime database
+*.db
+*.db-shm
+*.db-wal
 *.sled
