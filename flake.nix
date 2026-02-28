@@ -2,6 +2,7 @@
   description = "librespot development shell";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
+  inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   outputs = { self, nixpkgs, rust-overlay }:
     let
       cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);

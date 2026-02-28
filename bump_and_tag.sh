@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+# Sync nixpkgs lock to latest unstable so cachix binary cache hits for consumers
+nix flake update nixpkgs
+
 # Bump patch version for all packages
 cargo set-version --bump patch
 
