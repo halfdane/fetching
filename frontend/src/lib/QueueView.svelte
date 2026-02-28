@@ -50,7 +50,7 @@ function barColor(status: string): string {
   {:else if queue.length === 0}
     <p class="text-gray-600 text-center py-16">No downloads queued.</p>
   {:else}
-    {#each [...queue].reverse() as item (item.id)}
+    {#each queue as item (item.id)}
       <div animate:flip={{ duration: 300, easing: cubicOut }}
            transition:slide={{ duration: 300, easing: cubicOut }}>
         <div class="bg-gray-900 bg-opacity-70 rounded-xl shadow-lg overflow-hidden">
@@ -75,7 +75,7 @@ function barColor(status: string): string {
               <span class="{statusColor(item.status)}">{item.status}</span>
               {#if item.status === 'failed' && onRetry}
                 <button
-                  onclick={(e) => { e.stopPropagation(); onRetry(item.id); }}
+                  onclick={(e) => { e.stopPropagation(); onRetry(item.uri); }}
                   class="text-xs px-2 py-0.5 rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
                 >↺ Retry</button>
               {/if}
@@ -96,7 +96,7 @@ function barColor(status: string): string {
         </div>
 
         <!-- Expandable track list -->
-        {#if expanded[item.id] && item.tracks && item.tracks.length > 0}
+        {#if expanded[item.id] && item.tracks.length > 0}
           <div class="border-t border-gray-800 px-5 pb-4">
             <TrackList tracks={item.tracks} />
           </div>

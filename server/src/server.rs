@@ -1,16 +1,14 @@
 use axum::response::sse::{Event, Sse};
 use axum::{
-    extract::{Json, State},
+    extract::{Json, Path as AxumPath, State},
     http::StatusCode,
     response::IntoResponse,
     routing::get,
     Router,
 };
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fetching_core_lib::{
-    container::TrackCollection,
-    coordinator::{DownloadCoordinator, TrackInfo},
-    registry::TaskStatus,
+    coordinator::DownloadCoordinator,
+    db::Database,
     spotify_api::{CoverFetcher, SpotifyCollectionMetadata},
 };
 use serde::{Deserialize, Serialize};
@@ -26,6 +24,7 @@ use crate::handlers::pwa_handler;
 #[derive(Clone)]
 pub struct AppState {
     pub queue: Arc<DownloadCoordinator>,
+    pub db: Arc<Database>,
     /// Shared with the worker — same Arc<Cache> so cover fetches are deduplicated.
     pub cover: Arc<dyn CoverFetcher>,
     /// Used in the POST handler to resolve a URI before queuing.
@@ -41,26 +40,12 @@ struct QueueRequest {
     url: String,
 }
 
+/// Response for `POST /api/queue`.
 #[derive(Serialize)]
 pub struct QueueResponse {
-    pub collection: TrackCollection,
-    /// Base64-encoded JPEG as `data:image/jpeg;base64,…`, or `null` if unavailable.
-    pub cover_data_url: Option<String>,
-    /// Task IDs, in the same order as `collection.track_uris`.
-    /// The frontend stores these as `TrackItem.id` values so it can match
-    /// incoming SSE `ProgressUpdate` events to individual tracks.
+    pub collection_id: String,
+    pub track_ids: Vec<String>,
     pub task_ids: Vec<String>,
-    /// Current status of each task, in the same order as `task_ids`.
-    /// Always populated by `GET /api/queue`; empty in `POST /api/queue`
-    /// responses (new tasks always start as `Pending`).
-    #[serde(default)]
-    pub task_statuses: Vec<TaskStatus>,
-    /// Human-readable status message per task (e.g. "Downloading audio…").
-    #[serde(default)]
-    pub task_messages: Vec<Option<String>>,
-    /// Resolved track metadata per task (title, artists, number, duration).
-    #[serde(default)]
-    pub task_track_infos: Vec<Option<TrackInfo>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -95,52 +80,20 @@ async fn queue_url(
         }
     };
 
-    // Step 2: fetch cover art inside spawn_blocking — LibrespotCoverFetcher
-    // calls futures::executor::block_on internally, which blocks the OS thread.
-    // Running it in spawn_blocking keeps the async executor free.
-    let cover_data_url = match &collection.cover_id {
-        Some(cover_id) => {
-            let cover = Arc::clone(&state.cover);
-            let cid = cover_id.clone();
-            let handle = tokio::runtime::Handle::current();
-            match tokio::task::spawn_blocking(move || {
-                handle.block_on(cover.fetch_cover(&cid))
-            })
-            .await
-            {
-                Ok(Ok(bytes)) => Some(format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes))),
-                Ok(Err(e)) => {
-                    tracing::warn!("Cover fetch failed for '{}': {e}", collection.title);
-                    None
-                }
-                Err(e) => {
-                    tracing::warn!("Cover fetch panicked for '{}': {e}", collection.title);
-                    None
-                }
-            }
-        }
-        None => None,
-    };
+    // Step 2: enqueue — downloads start here, after the response is ready
+    let (collection_id, id_pairs) = state.queue.add_collection(Arc::clone(&collection));
 
-    // Step 3: enqueue — downloads start here, after the response is ready
-    let task_ids: Vec<String> = state
-        .queue
-        .add_collection(Arc::clone(&collection))
-        .into_iter()
-        .map(|id| id.to_string())
-        .collect();
+    let track_ids: Vec<String> = id_pairs.iter().map(|(tid, _)| tid.clone()).collect();
+    let task_ids: Vec<String> = id_pairs.iter().map(|(_, tid)| tid.clone()).collect();
 
     tracing::info!("Queued '{}' ({} tracks)", collection.title, task_ids.len());
 
     (
         StatusCode::OK,
         Json(QueueResponse {
-            collection: (*collection).clone(),
-            cover_data_url,
+            collection_id,
+            track_ids,
             task_ids,
-            task_statuses: vec![],
-            task_messages: vec![],
-            task_track_infos: vec![],
         }),
     )
         .into_response()
@@ -151,88 +104,35 @@ async fn get_status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     axum::response::Html(format!("<pre>Status: ok — {pending} track(s) pending</pre>"))
 }
 
-async fn get_queue(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let snapshots = match state.queue.snapshot() {
-        Ok(s) => s,
+async fn get_collections(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.db.list_collections() {
+        Ok(collections) => (StatusCode::OK, Json(serde_json::to_value(collections).unwrap_or_default())).into_response(),
         Err(e) => {
-            tracing::error!("Failed to read queue snapshot: {e}");
-            return (
+            tracing::error!("Failed to list collections: {e}");
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({ "error": e.to_string() })),
             )
-                .into_response();
+                .into_response()
         }
-    };
-
-    // Group tasks by collection, preserving track_uris order.
-    // Keyed by collection URI; each entry tracks the earliest registered_at
-    // across all tasks in the collection so we can sort collections by enqueue
-    // time at the end.
-    let mut by_collection: std::collections::HashMap<
-        String,
-        (std::sync::Arc<fetching_core_lib::container::TrackCollection>, u64, Vec<(usize, String, TaskStatus, Option<String>, Option<TrackInfo>)>),
-    > = std::collections::HashMap::new();
-
-    for snap in snapshots {
-        let entry = by_collection
-            .entry(snap.collection.uri_str.clone())
-            .or_insert_with(|| (std::sync::Arc::clone(&snap.collection), snap.registered_at, vec![]));
-        // Keep the earliest timestamp — that's when the first track of this
-        // collection was enqueued.
-        entry.1 = entry.1.min(snap.registered_at);
-        let pos = entry
-            .0
-            .track_uris
-            .iter()
-            .position(|u| u == &snap.track_uri)
-            .unwrap_or(usize::MAX);
-        entry.2.push((pos, snap.task_id.to_string(), snap.status, snap.message, snap.track_info));
     }
+}
 
-    // Collect into a Vec and sort by enqueue time so the response order is
-    // stable and meaningful (oldest first; frontend reverses for newest-first).
-    let mut ordered: Vec<_> = by_collection.into_values().collect();
-    ordered.sort_by_key(|(_, registered_at, _)| *registered_at);
-
-    let mut responses: Vec<QueueResponse> = Vec::new();
-    for (collection, _, mut tasks) in ordered {
-        tasks.sort_by_key(|(pos, _, _, _, _)| *pos);
-
-        let cover_data_url = match &collection.cover_id {
-            Some(cover_id) => {
-                let cover = std::sync::Arc::clone(&state.cover);
-                let cid = cover_id.clone();
-                let handle = tokio::runtime::Handle::current();
-                match tokio::task::spawn_blocking(move || handle.block_on(cover.fetch_cover(&cid))).await {
-                    Ok(Ok(bytes)) => Some(format!("data:image/jpeg;base64,{}", STANDARD.encode(&bytes))),
-                    _ => None,
-                }
-            }
-            None => None,
-        };
-
-        let mut task_ids = Vec::new();
-        let mut task_statuses = Vec::new();
-        let mut task_messages = Vec::new();
-        let mut task_track_infos = Vec::new();
-        for (_, id, status, message, track_info) in tasks {
-            task_ids.push(id);
-            task_statuses.push(status);
-            task_messages.push(message);
-            task_track_infos.push(track_info);
+async fn get_collection_tracks(
+    State(state): State<Arc<AppState>>,
+    AxumPath(collection_id): AxumPath<String>,
+) -> impl IntoResponse {
+    match state.db.get_tracks_for_collection(&collection_id) {
+        Ok(tracks) => (StatusCode::OK, Json(serde_json::to_value(tracks).unwrap_or_default())).into_response(),
+        Err(e) => {
+            tracing::error!("Failed to get tracks for collection {collection_id}: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
         }
-
-        responses.push(QueueResponse {
-            collection: (*collection).clone(),
-            cover_data_url,
-            task_ids,
-            task_statuses,
-            task_messages,
-            task_track_infos,
-        });
     }
-
-    (StatusCode::OK, Json(responses)).into_response()
 }
 
 async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -255,11 +155,11 @@ async fn events(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 pub fn app(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/", get(pwa_handler))
-        .route("/*path", get(pwa_handler))
         .route("/api/queue", axum::routing::post(queue_url))
-        .route("/api/queue", get(get_queue))
+        .route("/api/collections", get(get_collections))
+        .route("/api/collections/:id/tracks", get(get_collection_tracks))
         .route("/api/status", get(get_status))
         .route("/events", get(events))
+        .fallback(pwa_handler)
         .with_state(state)
 }

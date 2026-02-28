@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { queueUrl, responseToQueueItem } from './api';
-  import type { QueueItem } from './types';
+  import { queueUrl } from './api';
 
-  let { onQueued }: { onQueued: (item: QueueItem) => void } = $props();
+  let { onQueued }: { onQueued: (collectionId: string) => void } = $props();
 
   let url = $state('');
   let loading = $state(false);
@@ -16,7 +15,7 @@
     try {
       const response = await queueUrl(trimmed);
       url = '';
-      onQueued(responseToQueueItem(response));
+      onQueued(response.collection_id);
     } catch (e: unknown) {
       error = e instanceof Error ? e.message : 'Failed to queue URL';
     } finally {

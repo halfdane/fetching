@@ -4,9 +4,9 @@
   import DevDrawer from '../lib/DevDrawer.svelte';
   import AddToQueue from '../lib/AddToQueue.svelte';
   import Toast from '../lib/Toast.svelte';
-  import { fetchStatus, subscribeSseSignal, queueUrl, responseToQueueItem, fetchQueue } from '../lib/api';
+  import { fetchStatus, subscribeEvents, queueUrl, fetchCollections, fetchCollectionTracks, collectionToQueueItem } from '../lib/api';
   import { MOCK_QUEUE } from '../lib/mock';
-  import type { QueueItem } from '../lib/types';
+  import type { QueueItem, SseEvent } from '../lib/types';
 
   let queue = $state<QueueItem[]>([]);
   let loading = $state(true);
@@ -34,23 +34,98 @@
     setTimeout(() => { toasts = toasts.filter((t) => t.id !== id); }, 3000);
   }
 
-  // --- Backend is the single source of truth ---
+  // --- Load initial state ---
 
-  /** Fetch from GET /api/queue and replace the entire queue state. */
-  async function refreshQueue() {
-    try {
-      const snapshot = await fetchQueue();
-      queue = snapshot.map(responseToQueueItem);
-    } catch (e: unknown) {
-      console.warn('Failed to refresh queue:', e);
+  /** Fetch all collections and their tracks from the REST API. */
+  async function loadFullQueue(): Promise<QueueItem[]> {
+    const collections = await fetchCollections();
+    const items: QueueItem[] = [];
+    for (const col of collections) {
+      const tracks = await fetchCollectionTracks(col.id);
+      items.push(collectionToQueueItem(col, tracks));
     }
+    return items;
   }
 
-  /** Debounced refresh: coalesces rapid SSE bursts into a single fetch. */
+  // --- Targeted SSE patching ---
+
+  /** Apply a single SSE event to the queue in-place (no re-fetch). */
+  function applySseUpdate(event: SseEvent) {
+    const collectionIdx = queue.findIndex(q => q.id === event.collection_id);
+    if (collectionIdx === -1) {
+      // Unknown collection — could be newly queued from another client.
+      // Schedule a full refresh to pick it up.
+      scheduleRefresh();
+      return;
+    }
+
+    const item = queue[collectionIdx];
+    const trackIdx = item.tracks.findIndex(t => t.task_id === event.task_id);
+    if (trackIdx === -1) {
+      // Unknown task in a known collection — refresh that collection.
+      scheduleCollectionRefresh(event.collection_id);
+      return;
+    }
+
+    // Patch the track in-place
+    const track = { ...item.tracks[trackIdx] };
+    track.status = event.status.type;
+    track.statusMessage = event.message ?? track.statusMessage;
+    track.progress = event.status.type === 'done' ? 100 : track.progress;
+    if (event.status.type === 'failed') {
+      track.failureReason = event.status.reason;
+    }
+    if (event.track_info) {
+      track.title = event.track_info.title;
+      track.artists = event.track_info.artists;
+      track.number = event.track_info.number ?? track.number;
+      track.duration_ms = event.track_info.duration_ms;
+    }
+
+    const newTracks = [...item.tracks];
+    newTracks[trackIdx] = track;
+
+    // Recompute collection-level status and progress
+    const doneCount = newTracks.filter(t => t.status === 'done').length;
+    const runningCount = newTracks.filter(t => t.status === 'running' || t.status === 'retrying').length;
+    const failedCount = newTracks.filter(t => t.status === 'failed').length;
+    const progress = newTracks.length > 0 ? Math.round((doneCount / newTracks.length) * 100) : 0;
+    const status = runningCount > 0 ? 'running'
+      : doneCount === newTracks.length ? 'done'
+      : failedCount > 0 ? 'failed'
+      : 'pending';
+
+    const newItem = { ...item, tracks: newTracks, progress, status };
+    const newQueue = [...queue];
+    newQueue[collectionIdx] = newItem;
+    queue = newQueue;
+  }
+
+  /** Debounced full refresh (fallback when SSE references unknown collection). */
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   function scheduleRefresh() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(refreshQueue, 300);
+    debounceTimer = setTimeout(async () => {
+      try { queue = await loadFullQueue(); } catch (e) { console.warn('Refresh failed:', e); }
+    }, 500);
+  }
+
+  /** Refresh a single collection's tracks from the server. */
+  async function scheduleCollectionRefresh(collectionId: string) {
+    try {
+      const collections = await fetchCollections();
+      const col = collections.find(c => c.id === collectionId);
+      if (!col) return;
+      const tracks = await fetchCollectionTracks(collectionId);
+      const updated = collectionToQueueItem(col, tracks);
+      // Remove old entry (if any), add updated, then sort newest-first.
+      const filtered = queue.filter(q => q.id !== collectionId);
+      filtered.push(updated);
+      filtered.sort((a, b) => b.registered_at.localeCompare(a.registered_at));
+      queue = filtered;
+    } catch (e) {
+      console.warn('Collection refresh failed:', e);
+    }
   }
 
   onMount(async () => {
@@ -61,16 +136,17 @@
     try {
       await fetchStatus();
 
-      // Hydrate from server snapshot.
+      // Hydrate from server.
       if (!import.meta.env.DEV) {
-        const snapshot = await fetchQueue();
-        queue = snapshot.map(responseToQueueItem);
+        queue = await loadFullQueue();
       } else {
         queue = [...MOCK_QUEUE];
       }
 
-      // SSE: every event triggers a debounced re-fetch.
-      unsubscribe = subscribeSseSignal(scheduleRefresh);
+      // SSE: targeted in-place patching, with full refresh on reconnect.
+      unsubscribe = subscribeEvents(applySseUpdate, async () => {
+        try { queue = await loadFullQueue(); } catch (e) { console.warn('Reconnect refresh failed:', e); }
+      });
 
       // Handle Web Share Target — Spotify appends ?url=... when sharing to this PWA
       const params = new URLSearchParams(window.location.search);
@@ -79,8 +155,8 @@
       if (spotifyUrl) {
         history.replaceState({}, '', '/');
         try {
-          await queueUrl(spotifyUrl);
-          await refreshQueue();
+          const postRes = await queueUrl(spotifyUrl);
+          await scheduleCollectionRefresh(postRes.collection_id);
           addToast('Queued shared URL');
         } catch (e: unknown) {
           addToast(`Failed to queue shared URL: ${e instanceof Error ? e.message : e}`);
@@ -98,24 +174,25 @@
     clearTimeout(debounceTimer);
   });
 
-  async function handleQueued(item: QueueItem) {
-    if (queue.some((q) => q.id === item.id)) {
-      return;
+  async function handleQueued(collectionId: string) {
+    // Always refresh — even if the collection already exists (re-add resets it).
+    await scheduleCollectionRefresh(collectionId);
+    const item = queue.find(q => q.id === collectionId);
+    if (item) {
+      const noun = item.trackCount === 1 ? 'track' : 'tracks';
+      addToast(`Added '${item.title}' (${item.trackCount} ${noun})`);
     }
-    // Optimistic add so the card appears instantly, then reconcile with server.
-    queue = [...queue, item];
-    const noun = item.trackCount === 1 ? 'track' : 'tracks';
-    addToast(`Added '${item.title}' (${item.trackCount} ${noun})`);
-    await refreshQueue();
   }
 
   async function handleRetry(uri: string) {
     try {
       const res = await queueUrl(uri);
-      const item = responseToQueueItem(res);
-      const noun = item.trackCount === 1 ? 'track' : 'tracks';
-      addToast(`Re-queued '${item.title}' (${item.trackCount} ${noun})`);
-      await refreshQueue();
+      await scheduleCollectionRefresh(res.collection_id);
+      const item = queue.find(q => q.id === res.collection_id);
+      if (item) {
+        const noun = item.trackCount === 1 ? 'track' : 'tracks';
+        addToast(`Re-queued '${item.title}' (${item.trackCount} ${noun})`);
+      }
     } catch (e: unknown) {
       addToast(`Retry failed: ${e instanceof Error ? e.message : e}`);
     }

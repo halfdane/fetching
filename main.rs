@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 use fetching_core_lib::{
     audio_librespot::LibrespotAudioDownloader,
     coordinator::{DownloadCoordinator, WorkerApis},
+    db::{Database, TaskStatus},
     librespot_impl::{
         cached_cover_fetcher::CachedCoverProvider,
         collection_metadata::LibrespotCollectionMetadataFetcher,
@@ -11,7 +12,6 @@ use fetching_core_lib::{
         session::create_session,
         track_metadata::LibrespotTrackMetadataFetcher,
     },
-    registry::{SledRegistry, TaskStatus},
     runner::DownloadRunner,
     spotify_api::{CoverFetcher, SpotifyCollectionMetadata},
 };
@@ -35,6 +35,7 @@ fn build_apis(
     session: Arc<librespot_core::Session>,
     cover: Arc<dyn CoverFetcher>,
     output_dir: PathBuf,
+    db: Option<Arc<Database>>,
 ) -> (WorkerApis, DownloadRunner) {
     let apis = WorkerApis {
         collection_metadata: Arc::new(collection_fetcher(session.clone())),
@@ -42,7 +43,11 @@ fn build_apis(
         cover,
         audio: Arc::new(LibrespotAudioDownloader::new(session)),
     };
-    (apis, DownloadRunner::new(output_dir))
+    let runner = match db {
+        Some(db) => DownloadRunner::with_db(output_dir, db),
+        None => DownloadRunner::new(output_dir),
+    };
+    (apis, runner)
 }
 
 #[derive(Parser)]
@@ -109,8 +114,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    env::set_var("LIBRESPOT_AP", "preferred-ap-spotify-com.akamaized.net");
-
     let cli = Cli::parse();
 
     match cli.command {
@@ -120,14 +123,14 @@ async fn main() -> anyhow::Result<()> {
             // Fetcher used only for pre-resolving URIs on the main task
             let resolver = collection_fetcher(session.clone());
             let cover = CachedCoverProvider::new(Arc::new(LibrespotCoverFetcher::new(&session).await?));
-            let (apis, runner) = build_apis(session, Arc::new(cover), output_dir);
+            let (apis, runner) = build_apis(session, Arc::new(cover), output_dir, None);
 
             let queue = Arc::new(DownloadCoordinator::new(apis, runner));
             let mut progress_rx = queue.subscribe_progress();
             queue.start();
 
             // Resolve each URI and enqueue; collect all task IDs
-            let mut all_task_ids: HashSet<_> = HashSet::new();
+            let mut all_task_ids: HashSet<String> = HashSet::new();
             for url in &urls {
                 match resolver.fetch_by_uri(url) {
                     Ok(collection) => {
@@ -137,9 +140,10 @@ async fn main() -> anyhow::Result<()> {
                             collection.title,
                             collection.total_tracks
                         );
-                        let ids = queue.add_collection(Arc::clone(&collection));
-                        tracing::info!("Queued {} track(s), queue depth: {}", ids.len(), queue.len());
-                        all_task_ids.extend(ids);
+                        let (_collection_id, id_pairs) = queue.add_collection(Arc::clone(&collection));
+                        let task_ids: Vec<String> = id_pairs.iter().map(|(_, tid)| tid.clone()).collect();
+                        tracing::info!("Queued {} track(s), queue depth: {}", task_ids.len(), queue.len());
+                        all_task_ids.extend(task_ids);
                     }
                     Err(e) => {
                         tracing::error!("Failed to resolve '{url}': {e}");
@@ -159,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
             let mut finished = 0usize;
             loop {
                 match progress_rx.recv().await {
-                    Ok(update) if all_task_ids.contains(&update.task_id) => {
+                    Ok(update) if all_task_ids.contains(&update.task_id.to_string()) => {
                         match &update.status {
                             TaskStatus::Done => {
                                 finished += 1;
@@ -190,22 +194,33 @@ async fn main() -> anyhow::Result<()> {
             // CachedCoverProvider is cheap to clone — both the worker and the
             // HTTP handler share the same underlying Arc<Cache>.
             let cover = CachedCoverProvider::new(Arc::new(LibrespotCoverFetcher::new(&session).await?));
-            let (apis, runner) = build_apis(session.clone(), Arc::new(cover.clone()), output_dir);
 
-            let registry = std::sync::Arc::new(SledRegistry::open("queue.sled")?);
-            let queue = Arc::new(DownloadCoordinator::with_registry(
-                registry.clone(),
+            let db = Arc::new(Database::open("fetching.db")?);
+
+            if std::path::Path::new("queue.sled").exists() {
+                tracing::warn!(
+                    "Legacy queue.sled directory found — it is no longer used. \
+                     Data has been migrated to fetching.db. You can safely remove queue.sled."
+                );
+            }
+
+            let (apis, runner) = build_apis(session.clone(), Arc::new(cover.clone()), output_dir, Some(Arc::clone(&db)));
+
+            let queue = Arc::new(DownloadCoordinator::with_db(
+                Arc::clone(&db),
                 apis,
                 runner,
             ));
+
             // Re-queue any tasks that were pending or mid-flight at shutdown.
-            for entry in registry.recover_interrupted()? {
-                queue.enqueue(entry);
+            for entry in db.recover_interrupted()? {
+                queue.enqueue(entry.into());
             }
             queue.start();
 
             let app_state = Arc::new(AppState {
                 queue: Arc::clone(&queue),
+                db: Arc::clone(&db),
                 collection_metadata: Arc::new(collection_fetcher(session)),
                 cover: Arc::new(cover),
             });

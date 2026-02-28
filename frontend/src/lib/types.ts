@@ -1,6 +1,11 @@
+// ---------------------------------------------------------------------------
+// UI-level types (used by Svelte components)
+// ---------------------------------------------------------------------------
+
 export interface TrackItem {
-  id: string;           // task_id (UUID) — matches SSE ProgressUpdate.task_id
-  track_uri?: string;   // Spotify URI — used for retry (populated from QueueResponse)
+  id: string;           // track row id (UUID)
+  task_id: string;      // task_id (UUID) — matches SSE ProgressUpdate.task_id
+  track_uri: string;    // Spotify URI
   number: number;
   title: string;
   artists?: string[];
@@ -13,49 +18,59 @@ export interface TrackItem {
 }
 
 export interface QueueItem {
-  id: string;           // collection uri_str — used for duplicate detection
-  cover: string;
+  id: string;           // collection id (UUID)
+  uri: string;          // Spotify URI (e.g. spotify:album:…)
+  cover: string;        // cover URL or empty string
   title: string;
   artist: string;
   trackCount: number;
   status: 'pending' | 'running' | 'done' | 'failed' | string;
   progress: number; // 0-100, derived from track completions
-  tracks?: TrackItem[];
+  tracks: TrackItem[];
+  registered_at: string; // ISO 8601 — used for display ordering (newest first)
 }
 
-/** Mirrors the Rust TrackCollection struct (serde snake_case). */
-export interface TrackCollection {
-  uri_str: string;
-  spotify_id: string;
-  collection_type: 'Album' | 'Playlist' | 'Show' | 'SingleTrack' | 'SingleEpisode';
+// ---------------------------------------------------------------------------
+// Server response types (match Rust serde JSON output)
+// ---------------------------------------------------------------------------
+
+/** Row from GET /api/collections (SQL aggregate, mirrors Rust CollectionRow). */
+export interface CollectionRow {
+  id: string;
+  uri: string;
+  collection_type: string;
   title: string;
   artists: string[];
   cover_id: string | null;
-  upc: string | null;
-  total_tracks: number;
-  popularity: number | null;
-  label: string | null;
   date: string | null;
-  track_uris: string[];
+  total_tracks: number;
+  /** Pre-aggregated: "pending" | "running" | "done" | "failed" */
+  status: string;
+  /** 0–100 */
+  progress: number;
+  registered_at: string;
 }
 
-/** Shape returned by POST /api/queue and GET /api/queue. */
-export interface QueueResponse {
-  collection: TrackCollection;
-  /** Base64 JPEG data URL, or null if the cover could not be fetched. */
-  cover_data_url: string | null;
-  /** Task IDs in the same order as collection.track_uris. Used as TrackItem.id. */
+/** Row from GET /api/collections/:id/tracks (mirrors Rust TrackRow). */
+export interface TrackRow {
+  id: string;
+  uri: string;
+  title: string | null;
+  artists: string[] | null;
+  number: number | null;
+  disc_number: number | null;
+  duration_ms: number | null;
+  task_id: string;
+  /** "pending" | "running" | "retrying" | "done" | "failed:reason" */
+  status: string;
+  message: string | null;
+}
+
+/** Response from POST /api/queue. */
+export interface PostQueueResponse {
+  collection_id: string;
+  track_ids: string[];
   task_ids: string[];
-  /**
-   * Current status of each task, parallel to task_ids.
-   * Populated by GET /api/queue; empty array in POST /api/queue responses
-   * (all newly-queued tasks start as Pending).
-   */
-  task_statuses: SseEvent['status'][];
-  /** Human-readable status message per task (e.g. "Downloading audio…"). */
-  task_messages: (string | null)[];
-  /** Resolved track metadata per task (title, artists, number, duration). */
-  task_track_infos: (TrackInfo | null)[];
 }
 
 /** Resolved track metadata sent in the first `running` SSE event. */
@@ -70,6 +85,7 @@ export interface TrackInfo {
 /** Shape of SSE events emitted by GET /events. Mirrors Rust ProgressUpdate. */
 export interface SseEvent {
   task_id: string;
+  collection_id: string;
   status: {
     type: 'pending' | 'running' | 'retrying' | 'done' | 'failed';
     reason?: string;

@@ -3,7 +3,7 @@
 //! [`DownloadCoordinator`] is the central orchestration point:
 //! - accepts collections and fans them into per-track tasks
 //! - feeds them one-at-a-time to a blocking worker via a background loop
-//! - persists every status transition to an optional [`TaskRegistry`]
+//! - persists every status transition to the SQLite [`Database`]
 //! - broadcasts progress over an SSE-friendly channel
 
 use std::sync::Arc;
@@ -14,9 +14,9 @@ use tracing::{error, info, warn};
 
 use crate::audio::AudioFileDownloader;
 use crate::container::TrackCollection;
+use crate::db::{Database, TaskStatus};
 use crate::queue::{QueueEntry, TaskId};
 use crate::queue_memory::TrackQueue;
-use crate::registry::{TaskRegistry, TaskSnapshot, TaskStatus};
 use crate::spotify_api::{CoverFetcher, SpotifyCollectionMetadata, SpotifyTrackMetadata};
 
 // ---------------------------------------------------------------------------
@@ -39,10 +39,13 @@ pub struct TrackInfo {
 /// Minimal progress payload sent over the SSE broadcast channel.
 ///
 /// Intentionally kept narrow – add fields here when the frontend needs them,
-/// without touching the registry or runner seams.
+/// without touching the database or runner seams.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProgressUpdate {
     pub task_id: TaskId,
+    /// Which collection this task belongs to — lets the frontend route events
+    /// to the correct collection tile without a client-side lookup map.
+    pub collection_id: String,
     pub status: TaskStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -75,7 +78,7 @@ pub struct WorkerApis {
 ///
 /// `on_progress` is a callback the runner invokes at every state transition
 /// (resolved metadata, stage changes, retries).  The coordinator wires it to
-/// both the SSE broadcast channel **and** the persistent registry so that
+/// both the SSE broadcast channel **and** the persistent database so that
 /// mid-job updates survive a server restart.
 ///
 /// The returned `Option<String>` is a short human-readable message attached to
@@ -85,6 +88,7 @@ pub trait JobRunner: Send + Sync + 'static {
         &self,
         entry: &QueueEntry,
         apis: &WorkerApis,
+        collection_id: &str,
         on_progress: &dyn Fn(ProgressUpdate),
     ) -> anyhow::Result<Option<String>>;
 }
@@ -112,7 +116,7 @@ pub trait JobRunner: Send + Sync + 'static {
 /// ```
 pub struct DownloadCoordinator {
     queue: TrackQueue,
-    registry: Option<Arc<dyn TaskRegistry>>,
+    db: Option<Arc<Database>>,
     notify: Arc<Notify>,
     progress_tx: broadcast::Sender<ProgressUpdate>,
     apis: Arc<WorkerApis>,
@@ -126,12 +130,12 @@ impl DownloadCoordinator {
     // Constructors
     // -----------------------------------------------------------------------
 
-    /// Create a coordinator with no task registry (batch mode).
+    /// Create a coordinator with no database (batch mode).
     pub fn new(apis: WorkerApis, runner: impl JobRunner) -> Self {
         let (progress_tx, _) = broadcast::channel(Self::PROGRESS_CHANNEL_CAPACITY);
         Self {
             queue: TrackQueue::new(),
-            registry: None,
+            db: None,
             notify: Arc::new(Notify::new()),
             progress_tx,
             apis: Arc::new(apis),
@@ -139,19 +143,19 @@ impl DownloadCoordinator {
         }
     }
 
-    /// Create a coordinator backed by a persistent task registry (server mode).
+    /// Create a coordinator backed by a persistent SQLite database (server mode).
     ///
-    /// The registry records every status transition so that `GET /api/queue`
+    /// The database records every status transition so that `GET /api/collections`
     /// can return a full snapshot even after page refresh.
-    pub fn with_registry(
-        registry: Arc<dyn TaskRegistry>,
+    pub fn with_db(
+        db: Arc<Database>,
         apis: WorkerApis,
         runner: impl JobRunner,
     ) -> Self {
         let (progress_tx, _) = broadcast::channel(Self::PROGRESS_CHANNEL_CAPACITY);
         Self {
             queue: TrackQueue::new(),
-            registry: Some(registry),
+            db: Some(db),
             notify: Arc::new(Notify::new()),
             progress_tx,
             apis: Arc::new(apis),
@@ -165,27 +169,62 @@ impl DownloadCoordinator {
 
     /// Enqueue one `QueueEntry` per `track_uri` in the collection.
     ///
-    /// Returns the `TaskId`s assigned to each entry so callers can correlate
-    /// future `ProgressUpdate` messages.
-    pub fn add_collection(&self, collection: Arc<TrackCollection>) -> Vec<TaskId> {
-        let task_ids: Vec<TaskId> = collection
+    /// Returns `(collection_id, Vec<(track_id, task_id)>)` when backed by a
+    /// database, or a generated collection_id with task_ids when in batch mode.
+    pub fn add_collection(&self, collection: Arc<TrackCollection>) -> (String, Vec<(String, String)>) {
+        if let Some(db) = &self.db {
+            match db.insert_collection_with_tracks(&collection) {
+                Ok((collection_id, id_pairs)) => {
+                    for (_, task_id) in &id_pairs {
+                        let task_uuid = uuid::Uuid::parse_str(task_id)
+                            .unwrap_or_else(|_| uuid::Uuid::new_v4());
+                        // Find the track_uri for this task
+                        if let Ok(Some((_, track_uri))) = db.collection_for_task(task_id) {
+                            let entry = QueueEntry {
+                                task_id: task_uuid,
+                                track_uri,
+                                collection: Arc::clone(&collection),
+                            };
+                            self.queue.push(entry);
+                        }
+                    }
+                    self.notify.notify_one();
+                    (collection_id, id_pairs)
+                }
+                Err(e) => {
+                    error!("Failed to insert collection into database: {e}");
+                    // Fall through to batch-mode style
+                    let collection_id = uuid::Uuid::new_v4().to_string();
+                    let pairs = self.enqueue_batch(&collection, &collection_id);
+                    (collection_id, pairs)
+                }
+            }
+        } else {
+            let collection_id = uuid::Uuid::new_v4().to_string();
+            let pairs = self.enqueue_batch(&collection, &collection_id);
+            (collection_id, pairs)
+        }
+    }
+
+    /// Batch-mode enqueue (no database).
+    fn enqueue_batch(
+        &self,
+        collection: &Arc<TrackCollection>,
+        _collection_id: &str,
+    ) -> Vec<(String, String)> {
+        let pairs: Vec<(String, String)> = collection
             .track_uris
             .iter()
             .map(|uri| {
-                let entry = QueueEntry::new(uri.clone(), Arc::clone(&collection));
-                let id = entry.task_id;
-                if let Some(reg) = &self.registry {
-                    if let Err(e) = reg.register(&entry, TaskStatus::Pending) {
-                        error!("Failed to register task {id} in registry: {e}");
-                    }
-                }
+                let entry = QueueEntry::new(uri.clone(), Arc::clone(collection));
+                let task_id = entry.task_id.to_string();
+                let track_id = uuid::Uuid::new_v4().to_string();
                 self.queue.push(entry);
-                id
+                (track_id, task_id)
             })
             .collect();
-
         self.notify.notify_one();
-        task_ids
+        pairs
     }
 
     /// Push a single pre-built entry (used for crash-recovery re-queue).
@@ -211,21 +250,16 @@ impl DownloadCoordinator {
         self.queue.is_empty()
     }
 
-    /// Return a snapshot of all known tasks and their current status.
-    ///
-    /// Returns an empty vec when no registry is configured (e.g. batch mode).
-    pub fn snapshot(&self) -> anyhow::Result<Vec<TaskSnapshot>> {
-        match &self.registry {
-            Some(reg) => reg.snapshot(),
-            None => Ok(vec![]),
-        }
+    /// Get a reference to the database, if configured.
+    pub fn db(&self) -> Option<&Arc<Database>> {
+        self.db.as_ref()
     }
 
     /// Spawn the background worker loop.
     ///
     /// Call this exactly once during application startup.
     /// The loop runs until the Tokio runtime shuts down.
-    /// If there are already pending entries (e.g. recovered from sled after a
+    /// If there are already pending entries (e.g. recovered from DB after a
     /// restart), the worker is woken immediately.
     pub fn start(self: &Arc<Self>) {
         // Wake the worker for any entries already queued at startup.
@@ -259,6 +293,18 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
 
             let task_id = entry.task_id;
 
+            // Look up which collection this task belongs to (for SSE routing).
+            let collection_id = coord
+                .db
+                .as_ref()
+                .and_then(|db| {
+                    db.collection_for_task(&task_id.to_string())
+                        .ok()
+                        .flatten()
+                        .map(|(cid, _)| cid)
+                })
+                .unwrap_or_default();
+
             // Acquire the "single active download" slot.
             let permit = match semaphore.clone().acquire_owned().await {
                 Ok(p) => p,
@@ -270,9 +316,10 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
 
             emit_update(
                 &coord.progress_tx,
-                coord.registry.as_deref(),
+                coord.db.as_ref(),
                 ProgressUpdate {
                     task_id,
+                    collection_id: collection_id.clone(),
                     status: TaskStatus::Running,
                     message: Some("Running…".to_string()),
                     track_info: None,
@@ -286,18 +333,19 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
             let apis = Arc::clone(&coord.apis);
             let track_uri = entry.track_uri.clone();
             let progress_tx_for_runner = coord.progress_tx.clone();
-            let registry_for_runner = coord.registry.clone();
+            let db_for_runner = coord.db.clone();
+            let collection_id_for_runner = collection_id.clone();
 
             let result = tokio::task::spawn_blocking(move || {
                 let _permit = permit; // drop permit when job finishes
                 let on_progress = |update: ProgressUpdate| {
                     emit_update(
                         &progress_tx_for_runner,
-                        registry_for_runner.as_deref(),
+                        db_for_runner.as_ref(),
                         update,
                     );
                 };
-                runner.run(&entry, &apis, &on_progress)
+                runner.run(&entry, &apis, &collection_id_for_runner, &on_progress)
             })
             .await;
 
@@ -306,6 +354,7 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
                     info!("Task {task_id} done: {track_uri}");
                     ProgressUpdate {
                         task_id,
+                        collection_id: collection_id.clone(),
                         status: TaskStatus::Done,
                         message: final_msg,
                         track_info: None,
@@ -315,6 +364,7 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
                     error!("Task {task_id} failed: {e}");
                     ProgressUpdate {
                         task_id,
+                        collection_id: collection_id.clone(),
                         status: TaskStatus::Failed {
                             reason: e.to_string(),
                         },
@@ -326,6 +376,7 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
                     error!("Task {task_id} panicked: {e}");
                     ProgressUpdate {
                         task_id,
+                        collection_id: collection_id.clone(),
                         status: TaskStatus::Failed {
                             reason: format!("worker panic: {e}"),
                         },
@@ -335,21 +386,25 @@ async fn worker_loop(coord: Arc<DownloadCoordinator>) {
                 }
             };
 
-            emit_update(&coord.progress_tx, coord.registry.as_deref(), update);
+            emit_update(&coord.progress_tx, coord.db.as_ref(), update);
         }
     }
 }
 
 fn emit_update(
     tx: &broadcast::Sender<ProgressUpdate>,
-    registry: Option<&dyn TaskRegistry>,
+    db: Option<&Arc<Database>>,
     update: ProgressUpdate,
 ) {
-    // Always persist to the registry, regardless of whether anyone is
+    // Always persist to the database, regardless of whether anyone is
     // subscribed to the SSE stream.
-    if let Some(reg) = registry {
-        if let Err(e) = reg.update(&update) {
-            warn!("Failed to update registry for task {}: {e}", update.task_id);
+    if let Some(db) = db {
+        if let Err(e) = db.update_task(
+            &update.task_id.to_string(),
+            &update.status,
+            update.message.as_deref(),
+        ) {
+            warn!("Failed to update DB for task {}: {e}", update.task_id);
         }
     }
     if tx.receiver_count() > 0 {
@@ -427,12 +482,12 @@ mod tests {
 
     struct OkRunner;
     impl JobRunner for OkRunner {
-        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> { Ok(None) }
+        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &str, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> { Ok(None) }
     }
 
     struct FailRunner;
     impl JobRunner for FailRunner {
-        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> {
+        fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &str, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> {
             anyhow::bail!("intentional failure")
         }
     }
@@ -444,9 +499,9 @@ mod tests {
     #[tokio::test]
     async fn add_collection_returns_one_task_id_per_track_uri() {
         let coord = DownloadCoordinator::new(stub_apis(), OkRunner);
-        let ids = coord.add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]));
-        assert_eq!(ids.len(), 3);
-        let unique: HashSet<_> = ids.iter().collect();
+        let (_, pairs) = coord.add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]));
+        assert_eq!(pairs.len(), 3);
+        let unique: HashSet<_> = pairs.iter().map(|(_, tid)| tid).collect();
         assert_eq!(unique.len(), 3, "task IDs must be unique");
     }
 
@@ -469,9 +524,9 @@ mod tests {
         let mut rx = coord.subscribe_progress();
         coord.start();
 
-        let ids: HashSet<_> = coord
-            .add_collection(fake_collection(&["uri:1"]))
-            .into_iter()
+        let (_, pairs) = coord.add_collection(fake_collection(&["uri:1"]));
+        let task_ids: HashSet<TaskId> = pairs.iter()
+            .filter_map(|(_, tid)| uuid::Uuid::parse_str(tid).ok())
             .collect();
 
         let running = timeout(Duration::from_secs(2), rx.recv()).await
@@ -479,9 +534,9 @@ mod tests {
         let done = timeout(Duration::from_secs(2), rx.recv()).await
             .expect("timed out waiting for Done").unwrap();
 
-        assert!(ids.contains(&running.task_id));
+        assert!(task_ids.contains(&running.task_id));
         assert_eq!(running.status, TaskStatus::Running);
-        assert!(ids.contains(&done.task_id));
+        assert!(task_ids.contains(&done.task_id));
         assert_eq!(done.status, TaskStatus::Done);
     }
 
@@ -491,9 +546,9 @@ mod tests {
         let mut rx = coord.subscribe_progress();
         coord.start();
 
-        let ids: HashSet<_> = coord
-            .add_collection(fake_collection(&["uri:1"]))
-            .into_iter()
+        let (_, pairs) = coord.add_collection(fake_collection(&["uri:1"]));
+        let task_ids: HashSet<TaskId> = pairs.iter()
+            .filter_map(|(_, tid)| uuid::Uuid::parse_str(tid).ok())
             .collect();
 
         let running = timeout(Duration::from_secs(2), rx.recv()).await
@@ -501,9 +556,9 @@ mod tests {
         let failed = timeout(Duration::from_secs(2), rx.recv()).await
             .expect("timed out waiting for Failed").unwrap();
 
-        assert!(ids.contains(&running.task_id));
+        assert!(task_ids.contains(&running.task_id));
         assert_eq!(running.status, TaskStatus::Running);
-        assert!(ids.contains(&failed.task_id));
+        assert!(task_ids.contains(&failed.task_id));
         assert!(
             matches!(failed.status, TaskStatus::Failed { ref reason } if reason.contains("intentional")),
             "unexpected status: {:?}", failed.status
@@ -516,20 +571,20 @@ mod tests {
         let mut rx = coord.subscribe_progress();
         coord.start();
 
-        let ids: HashSet<_> = coord
-            .add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]))
-            .into_iter()
+        let (_, pairs) = coord.add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]));
+        let task_ids: HashSet<TaskId> = pairs.iter()
+            .filter_map(|(_, tid)| uuid::Uuid::parse_str(tid).ok())
             .collect();
 
         let mut done_ids = HashSet::new();
         while done_ids.len() < 3 {
             let update = timeout(Duration::from_secs(5), rx.recv()).await
                 .expect("timed out").unwrap();
-            if ids.contains(&update.task_id) && update.status == TaskStatus::Done {
+            if task_ids.contains(&update.task_id) && update.status == TaskStatus::Done {
                 done_ids.insert(update.task_id);
             }
         }
-        assert_eq!(done_ids, ids);
+        assert_eq!(done_ids, task_ids);
     }
 
     // -----------------------------------------------------------------------
@@ -546,7 +601,7 @@ mod tests {
             max_seen: Arc<AtomicUsize>,
         }
         impl JobRunner for CountingRunner {
-            fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> {
+            fn run(&self, _: &QueueEntry, _: &WorkerApis, _: &str, _: &dyn Fn(ProgressUpdate)) -> anyhow::Result<Option<String>> {
                 let c = self.concurrent.fetch_add(1, Ordering::SeqCst) + 1;
                 self.max_seen.fetch_max(c, Ordering::SeqCst);
                 std::thread::sleep(Duration::from_millis(20));
@@ -563,16 +618,16 @@ mod tests {
         let mut rx = coord.subscribe_progress();
         coord.start();
 
-        let ids: HashSet<_> = coord
-            .add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]))
-            .into_iter()
+        let (_, pairs) = coord.add_collection(fake_collection(&["uri:1", "uri:2", "uri:3"]));
+        let task_ids: HashSet<TaskId> = pairs.iter()
+            .filter_map(|(_, tid)| uuid::Uuid::parse_str(tid).ok())
             .collect();
 
         let mut done_count = 0;
         while done_count < 3 {
             let update = timeout(Duration::from_secs(5), rx.recv()).await
                 .expect("timed out").unwrap();
-            if ids.contains(&update.task_id) && update.status == TaskStatus::Done {
+            if task_ids.contains(&update.task_id) && update.status == TaskStatus::Done {
                 done_count += 1;
             }
         }
@@ -589,6 +644,7 @@ mod tests {
     fn progress_update_serde_round_trips_with_message() {
         let update = ProgressUpdate {
             task_id: TaskId::new_v4(),
+            collection_id: "test-coll".to_string(),
             status: TaskStatus::Running,
             message: Some("fetching".to_string()),
             track_info: None,
@@ -596,6 +652,7 @@ mod tests {
         let json = serde_json::to_string(&update).unwrap();
         let back: ProgressUpdate = serde_json::from_str(&json).unwrap();
         assert_eq!(back.task_id, update.task_id);
+        assert_eq!(back.collection_id, update.collection_id);
         assert_eq!(back.status, update.status);
         assert_eq!(back.message, update.message);
     }
@@ -604,6 +661,7 @@ mod tests {
     fn progress_update_omits_message_field_when_none() {
         let update = ProgressUpdate {
             task_id: TaskId::new_v4(),
+            collection_id: "test-coll".to_string(),
             status: TaskStatus::Done,
             message: None,
             track_info: None,

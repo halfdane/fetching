@@ -2,37 +2,53 @@
 
 ## Overview
 
-The queue is split into two layers:
+The queue system uses a SQLite database (`fetching.db`) as the persistent store for all collection and track state. The architecture is split into three layers:
 
 | Layer | File | Responsibility |
 |---|---|---|
-| **Types + Traits** | `core/src/queue.rs` | Data structures, `QueueStorage` (the replaceable seam), `JobRunner`, progress types |
-| **Tokio runtime impl** | `core/src/queue_tokio.rs` | In-memory storage, Tokio channels, notify + semaphore, worker loop |
-
-Future backends (sled, yaque) only need to implement `QueueStorage`; the Tokio scaffolding stays unchanged.
+| **Types** | `core/src/queue.rs` | `QueueEntry`, `TaskId` — in-memory queue entry types |
+| **Database** | `core/src/db.rs` | `Database` struct — SQLite-backed persistence (collections, tracks, tasks) |
+| **Coordinator** | `core/src/coordinator.rs` | `DownloadCoordinator` — orchestration, worker loop, SSE broadcast |
 
 ---
 
 ## Data Flow
 
 ```
-  caller
+  caller (POST /api/queue)
     │
     │  add_collection(Arc<TrackCollection>)
     ▼
- TokioQueue
-    │  pushes one QueueEntry per track_uri into QueueStorage
+ DownloadCoordinator
+    │  inserts collection + tracks + tasks into Database (SQLite)
+    │  pushes QueueEntry per track_uri into in-memory queue
     │  wakes worker via Notify
     ▼
  worker loop
-    │  pops entry from QueueStorage
+    │  pops entry from in-memory queue
     │  acquires Semaphore(1)  ← ensures single active download
-    │  calls JobRunner::run(entry, apis) inside spawn_blocking
-    │  sends ProgressUpdate to broadcast channel
+    │  calls JobRunner::run(entry, apis, collection_id) inside spawn_blocking
+    │  sends ProgressUpdate (with collection_id) to broadcast channel
+    │  updates task status in Database
     ▼
  broadcast::Receiver<ProgressUpdate>
     │  (SSE endpoint subscribes here)
+    │  Frontend patches individual tracks in-place using collection_id + task_id
 ```
+
+---
+
+## Database Schema (SQLite)
+
+Three normalized tables:
+
+- **collections** — one row per album/playlist/single queued
+- **tracks** — one row per track URI within a collection (nullable metadata until resolved)
+- **tasks** — one row per download task (status, message, timestamps)
+
+Key indexes: `idx_tasks_status`, `idx_tasks_registered`, `idx_tracks_collection`.
+
+See `core/src/db.rs` for the full schema and `docs/redesign-relational-db.md` for the design rationale.
 
 ---
 
@@ -47,64 +63,55 @@ One entry per **track URI** (not per collection). Holds:
 
 ### `ProgressUpdate`
 
-Minimal, opaque payload sent over SSE:
+Payload sent over SSE:
 ```rust
 pub struct ProgressUpdate {
     pub task_id: Uuid,
-    pub status: TaskStatus,     // Pending | Running | Done | Failed
+    pub collection_id: String,   // added: targets SSE patching
+    pub status: TaskStatus,      // Pending | Running | Retrying | Done | Failed
     pub message: Option<String>,
+    pub track_info: Option<TrackInfo>,
 }
 ```
-Schema is intentionally kept narrow; richer fields can be added without breaking the backend seam.
 
 ### `WorkerApis`
 
-Bundles all Spotify API handles. Constructed once, wrapped in `Arc`, cloned cheaply per worker task:
+Bundles all Spotify API handles:
 ```rust
 pub struct WorkerApis {
     pub collection_metadata: Arc<dyn SpotifyCollectionMetadata + Send + Sync>,
     pub track_metadata: Arc<dyn SpotifyTrackMetadata + Send + Sync>,
     pub cover: Arc<dyn CoverFetcher>,
+    pub audio: Arc<dyn AudioDownloader + Send + Sync>,
 }
 ```
-
-`CoverFetcher` is a thin queue-internal trait (without the `Clone` supertrait that `SpotifyCover` carries), allowing object-safe `Arc<dyn CoverFetcher>`. Any `T: SpotifyCover` gets a blanket impl.
 
 ### `JobRunner`
 
-The work-phase entry point. Not implemented here — the actual download/tag/store pipeline plugs in here later:
+The work-phase entry point:
 ```rust
 pub trait JobRunner: Send + Sync + 'static {
-    fn run(&self, entry: &QueueEntry, apis: &WorkerApis) -> anyhow::Result<()>;
+    fn run(
+        &self,
+        entry: &QueueEntry,
+        apis: &WorkerApis,
+        collection_id: &str,
+        progress: &dyn Fn(ProgressUpdate),
+    ) -> anyhow::Result<Option<String>>;
 }
 ```
-Because `JobRunner::run` is synchronous, the queue passes it to `spawn_blocking` so librespot's blocking audio code does not block the Tokio runtime.
 
 ---
 
-## The Replaceable Seam: `QueueStorage`
+## REST API
 
-```rust
-pub trait QueueStorage: Send + Sync + 'static {
-    fn push(&self, entry: QueueEntry) -> anyhow::Result<()>;
-    fn pop(&self)  -> anyhow::Result<Option<QueueEntry>>;
-}
-```
-
-Current implementation: `InMemoryStorage` (a `Mutex<VecDeque<QueueEntry>>`).
-
-### Swapping to sled
-
-1. Create `core/src/queue_sled.rs`.
-2. Implement `QueueStorage` for `SledStorage`, serialising `QueueEntry` with `serde_json`/`bincode`.
-3. Pass `Arc<SledStorage>` to `TokioQueue::with_storage(...)` instead of `Arc<InMemoryStorage>`.
-4. Everything else (worker loop, semaphore, progress broadcast) is unchanged.
-
-### Swapping to yaque
-
-1. Create `core/src/queue_yaque.rs`.
-2. yaque is async, so implement `QueueStorage` using `block_on` or a shared `Handle::block_on` inside `push`/`pop`.
-3. Alternatively, expose an async `YaqueBackend` alongside the sync trait and wire it in `TokioQueue` via a `tokio::task::spawn_blocking` wrapper.
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/queue` | Enqueue a Spotify URL; returns `{collection_id, track_ids, task_ids}` |
+| GET | `/api/collections` | List all collections with aggregate status counts |
+| GET | `/api/collections/{id}/tracks` | Tracks + task status for one collection |
+| GET | `/api/status` | Health check |
+| GET | `/events` | SSE stream of `ProgressUpdate` events |
 
 ---
 
@@ -116,11 +123,6 @@ Current implementation: `InMemoryStorage` (a `Mutex<VecDeque<QueueEntry>>`).
 
 ---
 
-## Implementation Plan
+## Recovery
 
-- [x] `docs/queue.md` — this file
-- [x] Add `uuid` (with `v4`, `serde` features) to `core/Cargo.toml`
-- [x] `core/src/queue.rs` — `QueueEntry`, `TaskStatus`, `ProgressUpdate`, `WorkerApis`, `CoverFetcher`, `JobRunner`, `QueueStorage`
-- [x] `core/src/queue_tokio.rs` — `InMemoryStorage`, `TokioQueue`, worker loop
-- [x] `core/src/lib.rs` — `pub mod queue; pub mod queue_tokio;`
-- [x] `cargo build` green
+On startup, `Database::recover_interrupted()` resets any `running`/`retrying` tasks back to `pending` and returns them for re-queuing. This makes the system crash-safe — if the process dies mid-download, those tasks will be retried on next launch.

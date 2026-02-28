@@ -1,53 +1,65 @@
-import { mockFetchStatus, mockSubscribeEvents, mockSubscribeRawEvents, mockQueueUrl } from './mock';
-import type { RawEvent, QueueItem, QueueResponse, SseEvent } from './types';
+import { mockFetchStatus, mockSubscribeEvents, mockSubscribeRawEvents, mockQueueUrl, mockFetchCollections, mockFetchCollectionTracks } from './mock';
+import type { RawEvent, QueueItem, TrackItem, CollectionRow, TrackRow, PostQueueResponse, SseEvent } from './types';
 
 const IS_DEV = import.meta.env.DEV;
 
-export function responseToQueueItem(res: QueueResponse): QueueItem {
-  const { collection, cover_data_url, task_ids, task_statuses, task_messages, task_track_infos } = res;
-  const statuses = task_statuses ?? [];
-  const messages = task_messages ?? [];
-  const infos = task_track_infos ?? [];
+// ---------------------------------------------------------------------------
+// Conversion helpers
+// ---------------------------------------------------------------------------
 
-  const anyRunning = statuses.some(s => s.type === 'running' || s.type === 'retrying');
-  const anyFailed  = statuses.some(s => s.type === 'failed');
-  const allDone    = statuses.length > 0 && statuses.every(s => s.type === 'done');
-  const collectionStatus = anyRunning ? 'running'
-    : allDone   ? 'done'
-    : anyFailed ? 'failed'
-    : 'pending';
-  const collectionProgress = statuses.length
-    ? Math.round(statuses.filter(s => s.type === 'done').length / statuses.length * 100)
-    : 0;
+/** Parse the status string from the DB into {status, failureReason}. */
+function parseTaskStatus(raw: string): { status: string; failureReason?: string } {
+  if (raw.startsWith('failed:')) {
+    return { status: 'failed', failureReason: raw.slice('failed:'.length) };
+  }
+  return { status: raw };
+}
+
+/** Convert a CollectionRow + optional TrackRow[] into a UI QueueItem. */
+export function collectionToQueueItem(row: CollectionRow, trackRows?: TrackRow[]): QueueItem {
+  const tracks: TrackItem[] = trackRows
+    ? trackRows.map((t, i) => trackRowToTrackItem(t, i))
+    : [];
 
   return {
-    id: collection.uri_str,
-    cover: cover_data_url ?? '',
-    title: collection.title,
-    artist: collection.artists[0] ?? '',
-    trackCount: collection.total_tracks,
-    status: collectionStatus,
-    progress: collectionProgress,
-    tracks: task_ids.map((taskId, i) => {
-      const s = statuses[i];
-      const info = infos[i];
-      return {
-        id: taskId,
-        track_uri: collection.track_uris[i],
-        number: info?.number ?? i + 1,
-        title: info?.title ?? `Track ${i + 1}`,
-        artists: info?.artists,
-        duration_ms: info?.duration_ms,
-        status: s?.type ?? 'pending',
-        progress: s?.type === 'done' ? 100 : 0,
-        statusMessage: messages[i] ?? undefined,
-        failureReason: s?.type === 'failed' ? s.reason : undefined,
-      };
-    }),
+    id: row.id,
+    uri: row.uri,
+    cover: '',
+    title: row.title,
+    artist: row.artists[0] ?? '',
+    trackCount: row.total_tracks,
+    status: row.status,
+    progress: row.progress,
+    tracks,
+    registered_at: row.registered_at,
   };
 }
 
-export async function queueUrl(url: string): Promise<QueueResponse> {
+/** Convert a TrackRow into a UI TrackItem. */
+export function trackRowToTrackItem(row: TrackRow, index: number): TrackItem {
+  const { status, failureReason } = parseTaskStatus(row.status);
+
+  return {
+    id: row.id,
+    task_id: row.task_id,
+    track_uri: row.uri,
+    number: row.number ?? (index + 1),
+    title: row.title ?? `Track ${index + 1}`,
+    artists: row.artists ?? undefined,
+    duration_ms: row.duration_ms ?? undefined,
+    status,
+    progress: status === 'done' ? 100 : 0,
+    statusMessage: row.message ?? undefined,
+    failureReason,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// API functions
+// ---------------------------------------------------------------------------
+
+/** POST /api/queue — enqueue a Spotify URL, returns IDs only. */
+export async function queueUrl(url: string): Promise<PostQueueResponse> {
   if (IS_DEV) return mockQueueUrl(url);
   const res = await fetch('/api/queue', {
     method: 'POST',
@@ -55,14 +67,23 @@ export async function queueUrl(url: string): Promise<QueueResponse> {
     body: JSON.stringify({ url }),
   });
   if (!res.ok) throw new Error(`Server responded ${res.status}`);
-  return res.json() as Promise<QueueResponse>;
+  return res.json() as Promise<PostQueueResponse>;
 }
 
-export async function fetchQueue(): Promise<QueueResponse[]> {
-  if (IS_DEV) return [];
-  const res = await fetch('/api/queue');
+/** GET /api/collections — list all collections with aggregate status. */
+export async function fetchCollections(): Promise<CollectionRow[]> {
+  if (IS_DEV) return mockFetchCollections();
+  const res = await fetch('/api/collections');
   if (!res.ok) throw new Error(`Server responded ${res.status}`);
-  return res.json() as Promise<QueueResponse[]>;
+  return res.json() as Promise<CollectionRow[]>;
+}
+
+/** GET /api/collections/:id/tracks — tracks + task status for one collection. */
+export async function fetchCollectionTracks(collectionId: string): Promise<TrackRow[]> {
+  if (IS_DEV) return mockFetchCollectionTracks(collectionId);
+  const res = await fetch(`/api/collections/${encodeURIComponent(collectionId)}/tracks`);
+  if (!res.ok) throw new Error(`Server responded ${res.status}`);
+  return res.json() as Promise<TrackRow[]>;
 }
 
 export async function fetchStatus(): Promise<string> {
@@ -72,28 +93,21 @@ export async function fetchStatus(): Promise<string> {
   return await res.text();
 }
 
+/** Subscribe to typed SSE events for targeted in-place patching. */
 export function subscribeEvents(
-  onUpdate: (event: SseEvent) => void
+  onUpdate: (event: SseEvent) => void,
+  onReconnect?: () => void,
 ): () => void {
   if (IS_DEV) return mockSubscribeEvents(onUpdate);
   const es = new EventSource('/events');
+  let opened = false;
+  es.onopen = () => {
+    if (opened && onReconnect) onReconnect();
+    opened = true;
+  };
   es.onmessage = (msg) => {
     try { onUpdate(JSON.parse(msg.data)); } catch {}
   };
-  return () => es.close();
-}
-
-/**
- * Lightweight SSE subscription that fires a callback on every event.
- * The callback receives no parsed data — it's just a "something changed" signal
- * so the caller can debounce a re-fetch from GET /api/queue.
- */
-export function subscribeSseSignal(
-  onSignal: () => void
-): () => void {
-  if (IS_DEV) return mockSubscribeEvents(() => onSignal());
-  const es = new EventSource('/events');
-  es.onmessage = () => onSignal();
   return () => es.close();
 }
 
