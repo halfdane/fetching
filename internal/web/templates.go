@@ -130,6 +130,14 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             font-size: 0.75rem;
             padding: 0.3rem 0.6rem;
         }
+        .retry-fallback-btn {
+            background: #1b3a5c;
+            color: var(--text);
+            border: 1px solid var(--blue);
+            font-size: 0.75rem;
+            padding: 0.3rem 0.6rem;
+        }
+        .retry-fallback-btn:hover { background: #1f4878; }
         .tracks {
             list-style: none;
             margin-top: 0.7rem;
@@ -169,10 +177,6 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
 
     <form id="enqueue-form" method="POST" action="/api/jobs">
         <input id="uri-input" type="text" name="uri" placeholder="Paste one Spotify URI or URL and press Enter" autocomplete="off" required>
-        <label style="display:flex;align-items:center;gap:0.3rem;white-space:nowrap;font-size:0.85rem;color:var(--text-muted);cursor:pointer">
-            <input type="checkbox" name="fallback_quality" id="fallback_quality">
-            Fallback quality
-        </label>
         <button type="submit">Add</button>
     </form>
 
@@ -195,7 +199,7 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             fetch('/api/jobs', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'uri=' + encodeURIComponent(uri) + (document.getElementById('fallback_quality').checked ? '&fallback_quality=on' : '')
+                body: 'uri=' + encodeURIComponent(uri)
             }).then(resp => {
                 if (!resp.ok) {
                     return resp.text().then(msg => Promise.reject(msg || 'submit failed'));
@@ -239,6 +243,7 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
                 html += '<button class="toggle" type="button" data-toggle="' + c.jobId + '">' + (isExpanded ? 'Collapse' : 'Expand') + '</button>';
                 if (canRetry) {
                     html += '<button class="retry-btn" type="button" data-retry="' + c.jobId + '" data-uri="' + escapeHtml(c.sourceUri) + '">Retry</button>';
+                    html += '<button class="retry-fallback-btn" type="button" data-retry-fallback="' + c.jobId + '" data-uri="' + escapeHtml(c.sourceUri) + '" title="Retry failed tracks, allowing fallback to lower quality formats">Retry ↓</button>';
                 }
                 html += '</div>';
                 html += '</div>';
@@ -277,6 +282,17 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
                         method: 'POST',
                         headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: 'uri=' + encodeURIComponent(uri)
+                    });
+                };
+            });
+
+            document.querySelectorAll('[data-retry-fallback]').forEach(btn => {
+                btn.onclick = function() {
+                    const uri = this.getAttribute('data-uri');
+                    fetch('/api/jobs/retry', {
+                        method: 'POST',
+                        headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'uri=' + encodeURIComponent(uri) + '&fallback_quality=on'
                     });
                 };
             });
