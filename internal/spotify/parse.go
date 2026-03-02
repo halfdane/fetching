@@ -136,22 +136,24 @@ func LargeCover(covers []Cover) *Cover {
 }
 
 // formatPriority defines preference order for audio formats (lower = better).
+// Ordered by bitrate tier first, then codec efficiency within each tier
+// (OGG ≈ AAC > MP3). A higher-bitrate MP3 therefore beats a lower-bitrate OGG.
 var formatPriority = map[string]int{
-	"FLAC_FLAC":       0,
-	"FLAC_FLAC_24BIT": 1,
-	"OGG_VORBIS_320":  2,
-	"OGG_VORBIS_160":  3,
-	"OGG_VORBIS_96":   4,
-	"AAC_320":         5,
-	"MP3_320":         6,
-	"MP3_256":         7,
-	"AAC_160":         8,
-	"MP3_160":         9,
-	"MP4_128":         10,
+	"FLAC_FLAC_24BIT": 0, // lossless hi-res
+	"FLAC_FLAC":       1, // lossless
+	"OGG_VORBIS_320":  2, // 320 kbps tier
+	"AAC_320":         3,
+	"MP3_320":         4,
+	"MP3_256":         5, // 256 kbps (no OGG/AAC equivalent in Spotify's list)
+	"OGG_VORBIS_160":  6, // 160 kbps tier
+	"AAC_160":         7,
+	"MP3_160":         8,
+	"MP4_128":         9,  // AAC in MP4 container, ~128 kbps
+	"OGG_VORBIS_96":   10, // 96 kbps tier
 	"MP3_96":          11,
 	"AAC_48":          12,
-	"AAC_24":          13,
-	"XHE_AAC_24":      14,
+	"XHE_AAC_24":      13, // xHE-AAC is efficient at very low bitrates
+	"AAC_24":          14,
 	"XHE_AAC_16":      15,
 	"XHE_AAC_12":      16,
 }
