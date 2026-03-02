@@ -7,11 +7,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1772439653,
-        "narHash": "sha256-V+ko7dqli8KgV9WapJMb31Wku+tV/Ou6xW2AxGk54vc=",
+        "lastModified": 1772440706,
+        "narHash": "sha256-9VvdD+vp+gQSNq+lJQmi9xg+y5C1OzotY9WClNIbTTo=",
         "owner": "halfdane",
         "repo": "fetching-cli",
-        "rev": "0e4b7ac8f7e279b59cafcde684206390562e47f8",
+        "rev": "4016ed1e512f281dbd598ad43737f0a4ca7322d6",
         "type": "github"
       },
       "original": {
@@ -74,16 +74,16 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1751274312,
-        "narHash": "sha256-/bVBlRpECLVzjV19t5KMdMFWSwKLtb5RyXdjz3LJT+g=",
+        "lastModified": 1772047000,
+        "narHash": "sha256-7DaQVv4R97cii/Qdfy4tmDZMB2xxtyIvNGSwXBBhSmo=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "50ab793786d9de88ee30ec4e4c24fb4236fc2674",
+        "rev": "1267bb4920d0fc06ea916734c11b0bf004bbe17e",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-24.11",
+        "ref": "nixos-25.11",
         "repo": "nixpkgs",
         "type": "github"
       }
