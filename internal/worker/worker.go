@@ -137,6 +137,8 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 		return w.downloadEpisode(creds, ep)
 	}
 
+	log.Printf("  processing track: %s", track)
+
 	if len(track.AudioFiles) == 0 {
 		log.Printf("  track %s has no audio files, skipping", trackURI)
 		return nil

@@ -78,7 +78,7 @@ type Track struct {
 	Popularity      int            `json:"popularity"`
 	IsExplicit      bool           `json:"is_explicit"`
 	ExternalIDs     []ExternalID   `json:"external_ids"`
-	AudioFiles      []AudioFile    `json:"audio_files"`
+	AudioFiles      []AudioFile    `json:"files"`
 }
 
 // Album holds metadata for a Spotify album.
