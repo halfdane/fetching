@@ -36,9 +36,6 @@ jobs:
             cc: aarch64-linux-gnu-gcc
             packages: gcc-aarch64-linux-gnu
           - goos: darwin
-            goarch: amd64
-            os: macos-13
-          - goos: darwin
             goarch: arm64
             os: macos-latest
     steps:
