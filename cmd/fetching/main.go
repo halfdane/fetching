@@ -34,18 +34,25 @@ Commands:
   version     Print the version and exit
 
 Batch flags:
-  --credentials <path>   Path to credentials JSON file (default: ~/.config/fetching/credentials.json)
-  --output <dir>         Output directory for downloaded files (default: ./music)
-  --concurrency <n>      Max parallel downloads (default: 1)
-  --verbose              Enable verbose output (default: false)
-  <uri> [<uri>...]       Spotify URIs or URLs to download
+  --credentials <path>     Path to credentials JSON file (default: ~/.config/fetching/credentials.json)
+  --output <dir>           Output directory for downloaded files (default: ./music)
+  --track-template <tmpl>  Path template for tracks (default: "{artist}/{album}/{track_number}-{title}")
+  --episode-template <t>   Path template for episodes (default: "{show}/{title}")
+  --concurrency <n>        Max parallel downloads (default: 1)
+  --verbose                Enable verbose output (default: false)
+  <uri> [<uri>...]         Spotify URIs or URLs to download
 
 Serve flags:
-  --credentials <path>   Path to credentials JSON file (default: ~/.config/fetching/credentials.json)
-  --output <dir>         Output directory for downloaded files (default: ./music)
-  --port <port>          HTTP listen port (default: 8080)
-  --concurrency <n>      Max parallel downloads (default: 1)
-  --verbose              Enable verbose output (default: false)
+  --credentials <path>     Path to credentials JSON file (default: ~/.config/fetching/credentials.json)
+  --output <dir>           Output directory for downloaded files (default: ./music)
+  --track-template <tmpl>  Path template for tracks (default: "{artist}/{album}/{track_number}-{title}")
+  --episode-template <t>   Path template for episodes (default: "{show}/{title}")
+  --port <port>            HTTP listen port (default: 8080)
+  --concurrency <n>        Max parallel downloads (default: 1)
+  --verbose                Enable verbose output (default: false)
+
+Template tokens (tracks):   {artist} {album_artist} {album} {title} {track_number} {disc_number} {year}
+Template tokens (episodes): {show} {title} {year} {episode_number}
 `
 
 func main() {
@@ -94,7 +101,7 @@ func dbPath() string {
 	return filepath.Join(p, "fetching.db")
 }
 
-func setupDeps(credPath, outputDir string, concurrency int, verbose bool) (*queue.Queue, *worker.Worker, error) {
+func setupDeps(credPath, outputDir, trackTmpl, episodeTmpl string, concurrency int, verbose bool) (*queue.Queue, *worker.Worker, error) {
 	runner := cli.NewRunner("")
 
 	credDir := filepath.Dir(credPath)
@@ -103,7 +110,7 @@ func setupDeps(credPath, outputDir string, concurrency int, verbose bool) (*queu
 	}
 
 	credStore := credentials.NewStore(credPath, runner.Auth, runner.Reauth)
-	store := storage.New(outputDir)
+	store := storage.NewWithTemplates(outputDir, trackTmpl, episodeTmpl)
 	tgr := tagger.New("", verbose)
 
 	q, err := queue.New(dbPath())
@@ -119,6 +126,8 @@ func runBatch(args []string) error {
 	fs := flag.NewFlagSet("batch", flag.ExitOnError)
 	credPath := fs.String("credentials", defaultCredentialsPath(), "credentials JSON file path")
 	outputDir := fs.String("output", "./music", "output directory")
+	trackTmpl := fs.String("track-template", "", "path template for tracks (default: \"{artist}/{album}/{track_number}-{title}\")")
+	episodeTmpl := fs.String("episode-template", "", "path template for episodes (default: \"{show}/{title}\")")
 	concurrency := fs.Int("concurrency", 1, "max parallel downloads")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
@@ -128,7 +137,7 @@ func runBatch(args []string) error {
 		return fmt.Errorf("no Spotify URIs provided")
 	}
 
-	q, w, err := setupDeps(*credPath, *outputDir, *concurrency, *verbose)
+	q, w, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
@@ -150,12 +159,14 @@ func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	credPath := fs.String("credentials", defaultCredentialsPath(), "credentials JSON file path")
 	outputDir := fs.String("output", "./music", "output directory")
+	trackTmpl := fs.String("track-template", "", "path template for tracks (default: \"{artist}/{album}/{track_number}-{title}\")")
+	episodeTmpl := fs.String("episode-template", "", "path template for episodes (default: \"{show}/{title}\")")
 	port := fs.Int("port", 8080, "HTTP listen port")
 	concurrency := fs.Int("concurrency", 1, "max parallel downloads")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
-	q, w, err := setupDeps(*credPath, *outputDir, *concurrency, *verbose)
+	q, w, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"time"
 
 	"github.com/halfdane/fetching/internal/cli"
@@ -205,7 +206,9 @@ func (w *Worker) generateAlbumAssets(album *Album, results []downloadResult) {
 	if len(album.Artists) > 0 {
 		artist = album.Artists[0].Name
 	}
-	dir := w.store.AlbumDir(artist, album.Name)
+	// Derive the album dir from where the first track actually landed,
+	// so it's always consistent with the path template.
+	dir := filepath.Dir(results[0].Path)
 
 	// M3U8
 	entries := resultsToEntries(results)
@@ -240,7 +243,8 @@ func (w *Worker) generateShowAssets(show *Show, results []downloadResult) {
 		return
 	}
 
-	dir := w.store.ShowDir(show.Name)
+	// Derive the show dir from where the first episode actually landed.
+	dir := filepath.Dir(results[0].Path)
 
 	entries := resultsToEntries(results)
 	m3u8Meta := playlist.Metadata{
