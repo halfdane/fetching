@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/halfdane/fetching/internal/cli"
 	"github.com/halfdane/fetching/internal/credentials"
+	"github.com/halfdane/fetching/internal/logstore"
 	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
 	"github.com/halfdane/fetching/internal/storage"
@@ -155,7 +156,7 @@ func runBatch(args []string) error {
 		return fmt.Errorf("enqueue: %w", err)
 	}
 
-	log.Printf("enqueued %d URI(s), processing...", len(uris))
+	slog.Info("enqueued URIs, processing", "count", len(uris))
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -190,12 +191,15 @@ func runServe(args []string) error {
 
 	go func() {
 		if err := w.Run(ctx, false); err != nil && ctx.Err() == nil {
-			log.Printf("worker error: %v", err)
+			slog.Error("worker error", "err", err)
 		}
 	}()
 
 	// Start web server
-	handler, err := web.New(q, prog)
+	ls := logstore.New()
+	slog.SetDefault(slog.New(ls.Handler(os.Stderr)))
+
+	handler, err := web.New(q, prog, ls)
 	if err != nil {
 		return fmt.Errorf("init web handler: %w", err)
 	}
@@ -204,13 +208,13 @@ func runServe(args []string) error {
 	handler.RegisterRoutes(mux)
 
 	addr := fmt.Sprintf(":%d", *port)
-	log.Printf("fetching %s — listening on http://localhost%s", version, addr)
+	slog.Info("fetching listening", "version", version, "url", "http://localhost"+addr)
 
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	go func() {
 		<-ctx.Done()
-		log.Println("shutting down...")
+		slog.Info("shutting down")
 		srv.Close()
 	}()
 

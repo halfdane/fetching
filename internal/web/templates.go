@@ -169,7 +169,65 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             font-size: 0.8rem;
             color: var(--text-muted);
         }
-        .hidden { display: none; }
+        .hidden { display: none !important; }
+        .log-toggle {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            background: var(--surface);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            z-index: 100;
+        }
+        .log-toggle:hover { background: #1b2b4f; color: var(--text); }
+        .log-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 280px;
+            background: #0d0d18;
+            border-top: 1px solid var(--border);
+            font-family: monospace;
+            font-size: 0.8rem;
+            z-index: 99;
+            display: flex;
+            flex-direction: column;
+        }
+        .log-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.3rem 1rem;
+            border-bottom: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            flex-shrink: 0;
+        }
+        .log-panel-close {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            cursor: pointer;
+            padding: 0 0.25rem;
+            line-height: 1;
+        }
+        .log-panel-close:hover { color: var(--text); background: transparent; }
+        #log-console {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.4rem 1rem;
+        }
+        .log-line { padding: 0.06rem 0; white-space: pre; color: var(--text-muted); }
+        .log-info  { color: var(--text); }
+        .log-warn  { color: var(--warning); }
+        .log-error { color: var(--danger); }
+        .log-debug { color: var(--text-muted); }
     </style>
 </head>
 <body>
@@ -184,7 +242,65 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
 
     <p class="refresh-hint">Live updates enabled</p>
 
+    <button class="log-toggle" id="log-toggle-btn" title="Toggle log console">&lt;/&gt;</button>
+    <div class="log-panel hidden" id="log-panel">
+        <div class="log-panel-header">
+            <span>log console</span>
+            <button class="log-panel-close" id="log-panel-close" title="Close">&times;</button>
+        </div>
+        <div id="log-console"></div>
+    </div>
+
     <script>
+        const logEntries = [];
+        const MAX_LOG_DISP = 300;
+        let logPanelOpen = false;
+
+        document.getElementById('log-toggle-btn').onclick = function() { setLogPanel(!logPanelOpen); };
+        document.getElementById('log-panel-close').onclick = function() { setLogPanel(false); };
+
+        function setLogPanel(open) {
+            logPanelOpen = open;
+            document.getElementById('log-panel').classList.toggle('hidden', !open);
+            if (open) {
+                renderAllLogLines();
+            }
+        }
+
+        function renderAllLogLines() {
+            const con = document.getElementById('log-console');
+            con.innerHTML = '';
+            logEntries.forEach(e => appendLogLine(con, e));
+            con.scrollTop = con.scrollHeight;
+        }
+
+        function appendLogLine(con, entry) {
+            const lvl = (entry.level || 'INFO').toUpperCase();
+            const line = document.createElement('div');
+            line.className = 'log-line log-' + lvl.toLowerCase();
+            const t = new Date(entry.time);
+            const ts = t.toTimeString().slice(0, 8);
+            let text = '[' + ts + '] ' + lvl.padEnd(5) + '  ' + entry.message;
+            if (entry.attrs && Object.keys(entry.attrs).length > 0) {
+                text += '  ' + Object.entries(entry.attrs).map(([k, v]) => k + '=' + v).join(' ');
+            }
+            line.textContent = text;
+            con.appendChild(line);
+            while (con.children.length > MAX_LOG_DISP) con.removeChild(con.firstChild);
+        }
+
+        function addLogEntry(entry) {
+            logEntries.push(entry);
+            if (logEntries.length > MAX_LOG_DISP) logEntries.shift();
+            if (logPanelOpen) {
+                const con = document.getElementById('log-console');
+                appendLogLine(con, entry);
+                con.scrollTop = con.scrollHeight;
+            }
+        }
+
+        fetchLogHistory();
+
         const expanded = {};
         let latestCollections = [];
         const list = document.getElementById('job-list');
@@ -342,10 +458,24 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
                     renderCollections(payload.collections || []);
                 } catch (_) {}
             });
+            es.addEventListener('log', function(ev) {
+                try { addLogEntry(JSON.parse(ev.data)); } catch (_) {}
+            });
             es.onerror = function() {
                 es.close();
-                setTimeout(connectStream, 1500);
+                setTimeout(function() {
+                    logEntries.length = 0; // discard stale entries from old server instance
+                    connectStream();
+                    fetchLogHistory();
+                }, 1500);
             };
+        }
+
+        function fetchLogHistory() {
+            fetch('/api/logs')
+                .then(r => r.json())
+                .then(data => { (data.entries || []).forEach(addLogEntry); })
+                .catch(() => {});
         }
 
         fetch('/api/jobs')

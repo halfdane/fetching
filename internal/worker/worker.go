@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -34,7 +34,7 @@ func withRetry(ctx context.Context, label string, onRetry func(retryAttempt, ret
 	if err := fn(); err == nil {
 		return nil
 	} else {
-		log.Printf("  %s failed (attempt 1): %v", label, err)
+		slog.Warn("attempt failed", "label", label, "attempt", 1, "err", err)
 		lastErr := err
 		for i, d := range trackRetryDelays {
 			retryAttempt := i + 1
@@ -51,7 +51,7 @@ func withRetry(ctx context.Context, label string, onRetry func(retryAttempt, ret
 				return nil
 			} else {
 				lastErr = err
-				log.Printf("  %s failed (attempt %d): %v", label, i+2, err)
+				slog.Warn("attempt failed", "label", label, "attempt", i+2, "err", err)
 			}
 		}
 		return fmt.Errorf("all %d attempts failed: %w", 1+len(trackRetryDelays), lastErr)
@@ -99,7 +99,7 @@ func (w *Worker) Run(ctx context.Context, oneShot bool) error {
 
 		job, err := w.queue.Next()
 		if err != nil {
-			log.Printf("error getting next job: %v", err)
+			slog.Error("error getting next job", "err", err)
 			if oneShot {
 				return err
 			}
@@ -115,12 +115,12 @@ func (w *Worker) Run(ctx context.Context, oneShot bool) error {
 			continue
 		}
 
-		log.Printf("processing job %d: %s", job.ID, job.SpotifyURI)
+		slog.Info("processing job", "id", job.ID, "uri", job.SpotifyURI)
 		if err := w.processJob(ctx, job); err != nil {
-			log.Printf("job %d failed: %v", job.ID, err)
+			slog.Error("job failed", "id", job.ID, "err", err)
 			_ = w.queue.Fail(job.ID, err.Error())
 		} else {
-			log.Printf("job %d completed", job.ID)
+			slog.Info("job completed", "id", job.ID)
 			_ = w.queue.Complete(job.ID)
 		}
 	}
@@ -217,9 +217,9 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 		res, err := w.downloadTrack(ctx, job.ID, creds, uri, job.FallbackQuality)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return err // propagate; job stays 'running' for crash recovery on next startup
+				return err
 			}
-			log.Printf("  track %s permanently failed: %v", uri, err)
+			slog.Error("track permanently failed", "uri", uri, "err", err)
 			if w.progress != nil {
 				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
 					t.Status = progress.TrackFailed
@@ -307,16 +307,16 @@ func (w *Worker) generateAlbumAssets(album *Album, results []downloadResult) {
 
 	dest := dir + "/" + storage.Sanitize(album.Name) + ".m3u8"
 	if err := playlist.WriteM3U8(dest, entries, m3u8Meta); err != nil {
-		log.Printf("  warning: failed to write album M3U8: %v", err)
+		slog.Warn("failed to write album M3U8", "err", err)
 	} else {
-		log.Printf("  wrote album playlist: %s", dest)
+		slog.Info("wrote album playlist", "path", dest)
 	}
 
 	// Cover (LARGE)
 	if err := cover.SaveAlbumCover(dir, album.Covers); err != nil {
-		log.Printf("  warning: failed to save album cover: %v", err)
+		slog.Warn("failed to save album cover", "err", err)
 	} else {
-		log.Printf("  saved album cover: %s/cover.jpg", dir)
+		slog.Info("saved album cover", "dir", dir)
 	}
 }
 
@@ -337,18 +337,18 @@ func (w *Worker) generateShowAssets(show *Show, results []downloadResult) {
 
 	dest := dir + "/" + storage.Sanitize(show.Name) + ".m3u8"
 	if err := playlist.WriteM3U8(dest, entries, m3u8Meta); err != nil {
-		log.Printf("  warning: failed to write show M3U8: %v", err)
+		slog.Warn("failed to write show M3U8", "err", err)
 	} else {
-		log.Printf("  wrote show playlist: %s", dest)
+		slog.Info("wrote show playlist", "path", dest)
 	}
 
 	// Shows don't have covers at the Show level in our types,
 	// but episodes do — use the first episode's cover if available.
 	if results[0].CoverURL != "" {
 		if err := cover.SavePlaylistCover(dir, []string{results[0].CoverURL}); err != nil {
-			log.Printf("  warning: failed to save show cover: %v", err)
+			slog.Warn("failed to save show cover", "err", err)
 		} else {
-			log.Printf("  saved show cover: %s/cover.jpg", dir)
+			slog.Info("saved show cover", "dir", dir)
 		}
 	}
 }
@@ -369,9 +369,9 @@ func (w *Worker) generatePlaylistAssets(pl *Playlist, results []downloadResult) 
 
 	dest := dir + "/" + storage.Sanitize(pl.Name) + ".m3u8"
 	if err := playlist.WriteM3U8(dest, entries, m3u8Meta); err != nil {
-		log.Printf("  warning: failed to write playlist M3U8: %v", err)
+		slog.Warn("failed to write playlist M3U8", "err", err)
 	} else {
-		log.Printf("  wrote playlist: %s", dest)
+		slog.Info("wrote playlist", "path", dest)
 	}
 
 	// Composite cover from unique track covers
@@ -389,9 +389,9 @@ func (w *Worker) generatePlaylistAssets(pl *Playlist, results []downloadResult) 
 
 	if len(coverURLs) > 0 {
 		if err := cover.SavePlaylistCover(dir, coverURLs); err != nil {
-			log.Printf("  warning: failed to generate playlist cover: %v", err)
+			slog.Warn("failed to generate playlist cover", "err", err)
 		} else {
-			log.Printf("  saved playlist cover: %s/cover.jpg", dir)
+			slog.Info("saved playlist cover", "dir", dir)
 		}
 	}
 }
@@ -454,12 +454,12 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 	for _, altURI := range track.Alternatives {
 		altJSON, err := w.runner.FetchMetadata(creds, altURI)
 		if err != nil {
-			log.Printf("  warning: failed to fetch alternative %s: %v", altURI, err)
+			slog.Warn("failed to fetch alternative", "uri", altURI, "err", err)
 			continue
 		}
 		altMeta, err := spotify.ParseMetadata(altJSON)
 		if err != nil {
-			log.Printf("  warning: failed to parse alternative %s: %v", altURI, err)
+			slog.Warn("failed to parse alternative", "uri", altURI, "err", err)
 			continue
 		}
 		if alt, ok := altMeta.(*spotify.Track); ok {
@@ -481,7 +481,7 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 	// Skip if already downloaded (check against the best candidate's path).
 	outPath := w.store.TrackPath(track, sorted[0].File.Extension())
 	if _, err := os.Stat(outPath); err == nil {
-		log.Printf("  skipping %s - %s (already downloaded)", artist, track.Name)
+		slog.Info("skipping (already downloaded)", "artist", artist, "title", track.Name)
 		if w.progress != nil {
 			w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
 				t.Title = track.Name
@@ -507,9 +507,9 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 		af := cand.File
 		srcURI := cand.TrackURI
 		if srcURI != trackURI {
-			log.Printf("  using alternative %s for %s (format: %s)", srcURI, trackURI, af.Format)
+			slog.Info("using alternative URI", "alt", srcURI, "track", trackURI, "format", af.Format)
 		}
-		log.Printf("  selected format %s for %s", af.Format, trackURI)
+		slog.Info("selected format", "format", af.Format, "uri", trackURI)
 
 		if w.progress != nil {
 			w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
@@ -543,9 +543,9 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 			})
 
 		if err == nil {
-			log.Printf("  tagging %s - %s", artist, track.Name)
+			slog.Info("tagging track", "artist", artist, "title", track.Name)
 			if err := w.tagger.TagTrack(candOutPath, track); err != nil {
-				log.Printf("  warning: tagging failed for %s: %v", trackURI, err)
+				slog.Warn("tagging failed", "uri", trackURI, "err", err)
 			}
 			return &downloadResult{
 				Path:     candOutPath,
@@ -564,7 +564,7 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 		if !fallbackQuality || i == len(sorted)-1 {
 			break
 		}
-		log.Printf("  all retries exhausted for %s [%s], trying next quality level", trackURI, af.Format)
+		slog.Info("trying next quality level", "uri", trackURI, "format", af.Format)
 	}
 
 	return nil, fmt.Errorf("all candidates failed for %s: %w", trackURI, lastErr)
@@ -599,7 +599,7 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 	// Skip if already downloaded.
 	outPath := w.store.EpisodePath(ep, af.Extension())
 	if _, err := os.Stat(outPath); err == nil {
-		log.Printf("  skipping episode %s (already downloaded)", ep.Name)
+		slog.Info("skipping episode (already downloaded)", "title", ep.Name)
 		if w.progress != nil {
 			w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
 				t.Title = ep.Name
@@ -617,14 +617,14 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 		}, nil
 	}
 
-	log.Printf("  selected format %s for %s", af.Format, ep.URI)
+	slog.Info("selected format", "format", af.Format, "uri", ep.URI)
 
 	_, writer, err := w.store.CreateEpisodeWriter(ep, af.Extension())
 	if err != nil {
 		return nil, err
 	}
 
-	log.Printf("  downloading episode: %s", ep.Name)
+	slog.Info("downloading episode", "title", ep.Name)
 	if err := w.runner.FetchAudio(creds, ep.URI, af.FileID, writer); err != nil {
 		writer.Close()
 		return nil, err
@@ -632,9 +632,9 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 	writer.Close()
 
 	// Tag the downloaded episode with metadata and cover art.
-	log.Printf("  tagging episode: %s", ep.Name)
+	slog.Info("tagging episode", "title", ep.Name)
 	if err := w.tagger.TagEpisode(outPath, ep); err != nil {
-		log.Printf("  warning: tagging failed for %s: %v", ep.URI, err)
+		slog.Warn("tagging failed", "uri", ep.URI, "err", err)
 	}
 
 	return &downloadResult{

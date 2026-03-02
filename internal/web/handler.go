@@ -5,10 +5,11 @@ package web
 import (
 	"encoding/json"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/halfdane/fetching/internal/logstore"
 	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
 )
@@ -17,16 +18,18 @@ import (
 type Handler struct {
 	queue    *queue.Queue
 	progress *progress.Store
+	logs     *logstore.Store
 	tmpl     *template.Template
 }
 
-// New creates a Handler with the given queue.
-func New(q *queue.Queue, p *progress.Store) (*Handler, error) {
+// New creates a Handler with the given dependencies.
+// ls may be nil, in which case no log streaming is provided.
+func New(q *queue.Queue, p *progress.Store, ls *logstore.Store) (*Handler, error) {
 	tmpl, err := template.New("").Parse(indexTemplate + jobsPartial)
 	if err != nil {
 		return nil, err
 	}
-	return &Handler{queue: q, progress: p, tmpl: tmpl}, nil
+	return &Handler{queue: q, progress: p, logs: ls, tmpl: tmpl}, nil
 }
 
 // RegisterRoutes attaches all HTTP handlers to the given mux.
@@ -36,6 +39,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/jobs", h.handleEnqueue)
 	mux.HandleFunc("POST /api/jobs/retry", h.handleRetry)
 	mux.HandleFunc("GET /api/jobs", h.handleJobs)
+	mux.HandleFunc("GET /api/logs", h.handleLogs)
 	mux.HandleFunc("GET /api/stream", h.handleStream)
 }
 
@@ -47,7 +51,7 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.tmpl.ExecuteTemplate(w, "index", data); err != nil {
-		log.Printf("template error: %v", err)
+		slog.Error("template error", "err", err)
 	}
 }
 
@@ -79,7 +83,7 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 	fallbackQuality := r.FormValue("fallback_quality") == "on"
 	jobs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: fallbackQuality}, uris...)
 	if err != nil {
-		log.Printf("enqueue error: %v", err)
+		slog.Error("enqueue error", "err", err)
 		http.Error(w, "failed to enqueue", http.StatusInternalServerError)
 		return
 	}
@@ -118,6 +122,20 @@ func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var entries []logstore.Entry
+	if h.logs != nil {
+		entries = h.logs.Recent(maxEntries)
+	}
+	if entries == nil {
+		entries = []logstore.Entry{}
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"entries": entries})
+}
+
+const maxEntries = 300
+
 func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -129,15 +147,22 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch, unsubscribe := h.progress.Subscribe()
-	defer unsubscribe()
+	progressCh, unsubProgress := h.progress.Subscribe()
+	defer unsubProgress()
+
+	var logCh <-chan logstore.Entry
+	if h.logs != nil {
+		var unsubLog func()
+		logCh, unsubLog = h.logs.Subscribe()
+		defer unsubLog()
+	}
 
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case event, ok := <-ch:
+		case event, ok := <-progressCh:
 			if !ok {
 				return
 			}
@@ -146,6 +171,17 @@ func (h *Handler) handleStream(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			_, _ = w.Write([]byte("event: " + event.Type + "\n"))
+			_, _ = w.Write([]byte("data: " + string(payload) + "\n\n"))
+			flusher.Flush()
+		case entry, ok := <-logCh:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(entry)
+			if err != nil {
+				continue
+			}
+			_, _ = w.Write([]byte("event: log\n"))
 			_, _ = w.Write([]byte("data: " + string(payload) + "\n\n"))
 			flusher.Flush()
 		}
