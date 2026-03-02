@@ -12,8 +12,6 @@ const (
 	TrackQueued            TrackStatus = "queued"
 	TrackResolvingMetadata TrackStatus = "resolving_metadata"
 	TrackDownloadingAudio  TrackStatus = "downloading_audio"
-	TrackDownloadingCover  TrackStatus = "downloading_cover"
-	TrackTagging           TrackStatus = "tagging"
 	TrackRetryWaiting      TrackStatus = "retry_waiting"
 	TrackAlreadyPresent    TrackStatus = "already_present"
 	TrackDone              TrackStatus = "done"
@@ -28,7 +26,6 @@ type TrackView struct {
 	Status       TrackStatus `json:"status"`
 	RetryAttempt int         `json:"retryAttempt"`
 	RetryMax     int         `json:"retryMax"`
-	RetryInSec   int         `json:"retryInSec"`
 	ErrorMessage string      `json:"errorMessage,omitempty"`
 }
 

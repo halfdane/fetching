@@ -288,10 +288,8 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             switch (track.status) {
                 case 'queued': return 'Queued';
                 case 'resolving_metadata': return 'Fetching metadata';
-                case 'downloading_audio': return 'Fetching audio data';
-                case 'downloading_cover': return 'Fetching cover art';
-                case 'tagging': return 'Tagging';
-                case 'retry_waiting': return 'Retry ' + (track.retryAttempt || 0) + '/' + (track.retryMax || 0) + ' in ' + (track.retryInSec || 0) + 's';
+                case 'downloading_audio': return 'Processing';
+                case 'retry_waiting': return 'Retry ' + (track.retryAttempt || 0) + '/' + (track.retryMax || 0);
                 case 'already_present': return 'Already present';
                 case 'done': return 'Done';
                 case 'failed': return 'Failed';

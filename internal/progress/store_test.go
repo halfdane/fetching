@@ -140,15 +140,15 @@ func TestUpdateTrackCreatesIfMissing(t *testing.T) {
 	s.UpsertSubmitted(1, "spotify:album:abc")
 
 	s.UpdateTrack(1, "spotify:track:t1", func(tv *TrackView) {
-		tv.Status = TrackTagging
+		tv.Status = TrackDownloadingAudio
 	})
 
 	c := s.Snapshot()[0]
 	if len(c.Tracks) != 1 {
 		t.Fatalf("expected 1 track, got %d", len(c.Tracks))
 	}
-	if c.Tracks[0].Status != TrackTagging {
-		t.Errorf("Status = %q, want %q", c.Tracks[0].Status, TrackTagging)
+	if c.Tracks[0].Status != TrackDownloadingAudio {
+		t.Errorf("Status = %q, want %q", c.Tracks[0].Status, TrackDownloadingAudio)
 	}
 }
 
@@ -307,7 +307,6 @@ func TestRetryWaitingState(t *testing.T) {
 		tv.Status = TrackRetryWaiting
 		tv.RetryAttempt = 2
 		tv.RetryMax = 3
-		tv.RetryInSec = 15
 		tv.ErrorMessage = "timeout"
 	})
 
@@ -321,9 +320,6 @@ func TestRetryWaitingState(t *testing.T) {
 	}
 	if tr.RetryMax != 3 {
 		t.Errorf("RetryMax = %d, want 3", tr.RetryMax)
-	}
-	if tr.RetryInSec != 15 {
-		t.Errorf("RetryInSec = %d, want 15", tr.RetryInSec)
 	}
 	if tr.ErrorMessage != "timeout" {
 		t.Errorf("ErrorMessage = %q, want %q", tr.ErrorMessage, "timeout")
@@ -363,8 +359,8 @@ func TestFullLifecycle(t *testing.T) {
 	s.SetTrackQueued(1, "spotify:track:t1")
 	s.SetTrackQueued(1, "spotify:track:t2")
 
-	// 4. Track 1: resolving → downloading → tagging → done
-	for _, status := range []TrackStatus{TrackResolvingMetadata, TrackDownloadingAudio, TrackTagging, TrackDone} {
+	// 4. Track 1: resolving → downloading → done
+	for _, status := range []TrackStatus{TrackResolvingMetadata, TrackDownloadingAudio, TrackDone} {
 		s.UpdateTrack(1, "spotify:track:t1", func(tv *TrackView) {
 			tv.Status = status
 			if status == TrackDone {

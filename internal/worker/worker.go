@@ -206,7 +206,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 				t.Status = progress.TrackResolvingMetadata
 				t.ErrorMessage = ""
 				t.RetryAttempt = 0
-				t.RetryInSec = 0
 				t.RetryMax = len(trackRetryDelays)
 			})
 		}
@@ -217,7 +216,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 					t.Status = progress.TrackRetryWaiting
 					t.RetryAttempt = retryAttempt
 					t.RetryMax = retryMax
-					t.RetryInSec = int(wait / time.Second)
 					t.ErrorMessage = lastErr.Error()
 				})
 			}
@@ -231,7 +229,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
 					t.Status = progress.TrackFailed
 					t.ErrorMessage = err.Error()
-					t.RetryInSec = 0
 				})
 			}
 			continue
@@ -243,7 +240,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 					t.Title = res.Title
 					t.DurationSec = res.Duration
 					t.ErrorMessage = ""
-					t.RetryInSec = 0
 				})
 			}
 			results = append(results, *res)
@@ -473,7 +469,6 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 				t.DurationSec = track.DurationMS / 1000
 				t.Status = progress.TrackAlreadyPresent
 				t.ErrorMessage = ""
-				t.RetryInSec = 0
 			})
 		}
 		return &downloadResult{
@@ -499,18 +494,6 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 		return nil, err
 	}
 	writer.Close()
-
-	if w.progress != nil {
-		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
-			t.Status = progress.TrackDownloadingCover
-		})
-	}
-
-	if w.progress != nil {
-		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
-			t.Status = progress.TrackTagging
-		})
-	}
 
 	// Tag the downloaded file with metadata and cover art.
 	log.Printf("  tagging %s - %s", artist, track.Name)
@@ -556,7 +539,6 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 				t.DurationSec = ep.DurationMS / 1000
 				t.Status = progress.TrackAlreadyPresent
 				t.ErrorMessage = ""
-				t.RetryInSec = 0
 			})
 		}
 		return &downloadResult{
@@ -581,18 +563,6 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 		return nil, err
 	}
 	writer.Close()
-
-	if w.progress != nil {
-		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
-			t.Status = progress.TrackDownloadingCover
-		})
-	}
-
-	if w.progress != nil {
-		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
-			t.Status = progress.TrackTagging
-		})
-	}
 
 	// Tag the downloaded episode with metadata and cover art.
 	log.Printf("  tagging episode: %s", ep.Name)
