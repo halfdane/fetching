@@ -210,10 +210,10 @@ func (w *Worker) generateAlbumAssets(album *Album, results []downloadResult) {
 	// M3U8
 	entries := resultsToEntries(results)
 	m3u8Meta := playlist.Metadata{
-		"name":       album.Name,
-		"artist":     artist,
-		"date":       album.Date,
-		"label":      album.Label,
+		"name":        album.Name,
+		"artist":      artist,
+		"date":        album.Date,
+		"label":       album.Label,
 		"spotify_uri": album.URI,
 	}
 	if upc := spotify.UPC(album.ExternalIDs); upc != "" {
@@ -340,15 +340,14 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 		// Could be an episode
 		ep, ok := meta.(*spotify.Episode)
 		if !ok {
-			return nil, nil // skip unknown types
+			return nil, fmt.Errorf("unrecognised metadata type for %s", trackURI)
 		}
 		return w.downloadEpisode(creds, ep)
 	}
 
 	af := spotify.PreferAudioFile(track.AudioFiles)
 	if af == nil {
-		log.Printf("  track %s has no audio files, skipping", trackURI)
-		return nil, nil
+		return nil, fmt.Errorf("track %s has no audio files", trackURI)
 	}
 
 	log.Printf("  selected format %s for %s", af.Format, trackURI)
@@ -395,8 +394,7 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 func (w *Worker) downloadEpisode(creds *credentials.Credentials, ep *spotify.Episode) (*downloadResult, error) {
 	af := spotify.PreferAudioFile(ep.AudioFiles)
 	if af == nil {
-		log.Printf("  episode %s has no audio files, skipping", ep.URI)
-		return nil, nil
+		return nil, fmt.Errorf("episode %s has no audio files", ep.URI)
 	}
 
 	log.Printf("  selected format %s for %s", af.Format, ep.URI)
