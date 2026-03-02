@@ -176,8 +176,8 @@ func TestSavePlaylistCoverRouting(t *testing.T) {
 	defer srv.Close()
 
 	cases := []struct {
-		name  string
-		urls  []string
+		name string
+		urls []string
 	}{
 		{"zero urls — no file", []string{}},
 		{"one url — direct download", []string{srv.URL}},
