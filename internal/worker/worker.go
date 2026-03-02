@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -354,17 +355,35 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 		return nil, fmt.Errorf("track %s has no audio files", trackURI)
 	}
 
-	log.Printf("  selected format %s for %s", af.Format, trackURI)
-
-	// Create a writer to the storage location
-	outPath, writer, err := w.store.CreateTrackWriter(track, af.Extension())
-	if err != nil {
-		return nil, err
-	}
-
 	artist := "Unknown"
 	if len(track.Artists) > 0 {
 		artist = track.Artists[0].Name
+	}
+
+	var coverURL string
+	if c := spotify.LargeCover(track.Album.Covers); c != nil {
+		coverURL = spotify.CoverURL(c.FileID)
+	}
+
+	// Skip if already downloaded.
+	outPath := w.store.TrackPath(track, af.Extension())
+	if _, err := os.Stat(outPath); err == nil {
+		log.Printf("  skipping %s - %s (already downloaded)", artist, track.Name)
+		return &downloadResult{
+			Path:     outPath,
+			Duration: track.DurationMS / 1000,
+			Artist:   artist,
+			Title:    track.Name,
+			CoverURL: coverURL,
+		}, nil
+	}
+
+	log.Printf("  selected format %s for %s", af.Format, trackURI)
+
+	// Create a writer to the storage location.
+	_, writer, err := w.store.CreateTrackWriter(track, af.Extension())
+	if err != nil {
+		return nil, err
 	}
 
 	log.Printf("  downloading %s - %s", artist, track.Name)
@@ -374,16 +393,10 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 	}
 	writer.Close()
 
-	// Tag the downloaded file with metadata and cover art
+	// Tag the downloaded file with metadata and cover art.
 	log.Printf("  tagging %s - %s", artist, track.Name)
 	if err := w.tagger.TagTrack(outPath, track); err != nil {
 		log.Printf("  warning: tagging failed for %s: %v", trackURI, err)
-	}
-
-	// Build cover URL for playlist composite
-	var coverURL string
-	if c := spotify.LargeCover(track.Album.Covers); c != nil {
-		coverURL = spotify.CoverURL(c.FileID)
 	}
 
 	return &downloadResult{
@@ -401,9 +414,27 @@ func (w *Worker) downloadEpisode(creds *credentials.Credentials, ep *spotify.Epi
 		return nil, fmt.Errorf("episode %s has no audio files", ep.URI)
 	}
 
+	var coverURL string
+	if c := spotify.LargeCover(ep.Covers); c != nil {
+		coverURL = spotify.CoverURL(c.FileID)
+	}
+
+	// Skip if already downloaded.
+	outPath := w.store.EpisodePath(ep, af.Extension())
+	if _, err := os.Stat(outPath); err == nil {
+		log.Printf("  skipping episode %s (already downloaded)", ep.Name)
+		return &downloadResult{
+			Path:     outPath,
+			Duration: ep.DurationMS / 1000,
+			Artist:   ep.ShowName,
+			Title:    ep.Name,
+			CoverURL: coverURL,
+		}, nil
+	}
+
 	log.Printf("  selected format %s for %s", af.Format, ep.URI)
 
-	outPath, writer, err := w.store.CreateEpisodeWriter(ep, af.Extension())
+	_, writer, err := w.store.CreateEpisodeWriter(ep, af.Extension())
 	if err != nil {
 		return nil, err
 	}
@@ -415,15 +446,10 @@ func (w *Worker) downloadEpisode(creds *credentials.Credentials, ep *spotify.Epi
 	}
 	writer.Close()
 
-	// Tag the downloaded episode with metadata and cover art
+	// Tag the downloaded episode with metadata and cover art.
 	log.Printf("  tagging episode: %s", ep.Name)
 	if err := w.tagger.TagEpisode(outPath, ep); err != nil {
 		log.Printf("  warning: tagging failed for %s: %v", ep.URI, err)
-	}
-
-	var coverURL string
-	if c := spotify.LargeCover(ep.Covers); c != nil {
-		coverURL = spotify.CoverURL(c.FileID)
 	}
 
 	return &downloadResult{
