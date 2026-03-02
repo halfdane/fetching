@@ -1,0 +1,25 @@
+# Go
+/fetching
+*.exe
+*.test
+*.out
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Nix
+result
+result-*
+
+# direnv
+.direnv/
+
+# Editor
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
