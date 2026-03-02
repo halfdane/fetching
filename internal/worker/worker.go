@@ -11,20 +11,22 @@ import (
 	"github.com/halfdane/fetching/internal/queue"
 	"github.com/halfdane/fetching/internal/spotify"
 	"github.com/halfdane/fetching/internal/storage"
+	"github.com/halfdane/fetching/internal/tagger"
 )
 
 // Worker pulls jobs from the queue and processes them.
 type Worker struct {
-	queue   *queue.Queue
-	runner  *cli.Runner
-	creds   *credentials.Store
-	store   *storage.Storage
+	queue        *queue.Queue
+	runner       *cli.Runner
+	creds        *credentials.Store
+	store        *storage.Storage
+	tagger       *tagger.Tagger
 	pollInterval time.Duration
 	concurrency  int
 }
 
 // New creates a worker with the given dependencies.
-func New(q *queue.Queue, runner *cli.Runner, creds *credentials.Store, store *storage.Storage, concurrency int) *Worker {
+func New(q *queue.Queue, runner *cli.Runner, creds *credentials.Store, store *storage.Storage, tgr *tagger.Tagger, concurrency int) *Worker {
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -33,6 +35,7 @@ func New(q *queue.Queue, runner *cli.Runner, creds *credentials.Store, store *st
 		runner:       runner,
 		creds:        creds,
 		store:        store,
+		tagger:       tgr,
 		pollInterval: 2 * time.Second,
 		concurrency:  concurrency,
 	}
@@ -137,41 +140,62 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 		return w.downloadEpisode(creds, ep)
 	}
 
-	log.Printf("  processing track: %s", track)
-
-	if len(track.AudioFiles) == 0 {
+	af := spotify.PreferAudioFile(track.AudioFiles)
+	if af == nil {
 		log.Printf("  track %s has no audio files, skipping", trackURI)
 		return nil
 	}
 
-	// Pick the first available audio file
-	fileID := track.AudioFiles[0].FileID
+	log.Printf("  selected format %s for %s", af.Format, trackURI)
 
 	// Create a writer to the storage location
-	writer, err := w.store.CreateTrackWriter(track)
+	outPath, writer, err := w.store.CreateTrackWriter(track, af.Extension())
 	if err != nil {
 		return err
 	}
-	defer writer.Close()
 
 	log.Printf("  downloading %s - %s", track.Artists[0].Name, track.Name)
-	return w.runner.FetchAudio(creds, trackURI, fileID, writer)
+	if err := w.runner.FetchAudio(creds, trackURI, af.FileID, writer); err != nil {
+		writer.Close()
+		return err
+	}
+	writer.Close()
+
+	// Tag the downloaded file with metadata and cover art
+	log.Printf("  tagging %s - %s", track.Artists[0].Name, track.Name)
+	if err := w.tagger.TagTrack(outPath, track); err != nil {
+		log.Printf("  warning: tagging failed for %s: %v", trackURI, err)
+	}
+
+	return nil
 }
 
 func (w *Worker) downloadEpisode(creds *credentials.Credentials, ep *spotify.Episode) error {
-	if len(ep.AudioFiles) == 0 {
+	af := spotify.PreferAudioFile(ep.AudioFiles)
+	if af == nil {
 		log.Printf("  episode %s has no audio files, skipping", ep.URI)
 		return nil
 	}
 
-	fileID := ep.AudioFiles[0].FileID
+	log.Printf("  selected format %s for %s", af.Format, ep.URI)
 
-	writer, err := w.store.CreateEpisodeWriter(ep)
+	outPath, writer, err := w.store.CreateEpisodeWriter(ep, af.Extension())
 	if err != nil {
 		return err
 	}
-	defer writer.Close()
 
 	log.Printf("  downloading episode: %s", ep.Name)
-	return w.runner.FetchAudio(creds, ep.URI, fileID, writer)
+	if err := w.runner.FetchAudio(creds, ep.URI, af.FileID, writer); err != nil {
+		writer.Close()
+		return err
+	}
+	writer.Close()
+
+	// Tag the downloaded episode with metadata and cover art
+	log.Printf("  tagging episode: %s", ep.Name)
+	if err := w.tagger.TagEpisode(outPath, ep); err != nil {
+		log.Printf("  warning: tagging failed for %s: %v", ep.URI, err)
+	}
+
+	return nil
 }

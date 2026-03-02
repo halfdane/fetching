@@ -25,7 +25,7 @@
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postInstall = ''
               wrapProgram $out/bin/fetching \
-                --prefix PATH : ${fetchingCliPkg}/bin
+                --prefix PATH : ${fetchingCliPkg}/bin:${pkgs.ffmpeg}/bin
             '';
             meta = {
               description = "Spotify music downloader with CLI batch mode and web UI";
@@ -40,6 +40,7 @@
             gotools
             go-tools # staticcheck
             fetchingCliPkg
+            ffmpeg
           ];
         };
       }

@@ -83,3 +83,78 @@ func TrackURIs(meta any) []string {
 		return nil
 	}
 }
+
+// DefaultCover returns the DEFAULT-sized cover from a covers slice,
+// falling back to the first available cover. Returns nil if none exist.
+func DefaultCover(covers []Cover) *Cover {
+	for i := range covers {
+		if covers[i].Size == "DEFAULT" {
+			return &covers[i]
+		}
+	}
+	if len(covers) > 0 {
+		return &covers[0]
+	}
+	return nil
+}
+
+// CoverURL returns the Spotify CDN URL for a cover image file ID.
+func CoverURL(fileID string) string {
+	return "https://i.scdn.co/image/" + fileID
+}
+
+// ISRC returns the ISRC external ID for a track, or empty string if not present.
+func ISRC(ids []ExternalID) string {
+	for _, id := range ids {
+		if id.Type == "isrc" {
+			return id.ID
+		}
+	}
+	return ""
+}
+
+// formatPriority defines preference order for audio formats (lower = better).
+var formatPriority = map[string]int{
+	"FLAC_FLAC":       0,
+	"FLAC_FLAC_24BIT": 1,
+	"OGG_VORBIS_320":  2,
+	"OGG_VORBIS_160":  3,
+	"OGG_VORBIS_96":   4,
+	"AAC_320":         5,
+	"MP3_320":         6,
+	"MP3_256":         7,
+	"AAC_160":         8,
+	"MP3_160":         9,
+	"MP4_128":         10,
+	"MP3_96":          11,
+	"AAC_48":          12,
+	"AAC_24":          13,
+	"XHE_AAC_24":      14,
+	"XHE_AAC_16":      15,
+	"XHE_AAC_12":      16,
+}
+
+// PreferAudioFile selects the best audio file from a list based on format quality.
+// Returns nil if the list is empty.
+func PreferAudioFile(files []AudioFile) *AudioFile {
+	if len(files) == 0 {
+		return nil
+	}
+	best := &files[0]
+	bestPrio := priorityOf(best.Format)
+	for i := 1; i < len(files); i++ {
+		p := priorityOf(files[i].Format)
+		if p < bestPrio {
+			best = &files[i]
+			bestPrio = p
+		}
+	}
+	return best
+}
+
+func priorityOf(format string) int {
+	if p, ok := formatPriority[format]; ok {
+		return p
+	}
+	return 100 // unknown formats last
+}

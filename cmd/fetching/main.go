@@ -15,6 +15,7 @@ import (
 	"github.com/halfdane/fetching/internal/credentials"
 	"github.com/halfdane/fetching/internal/queue"
 	"github.com/halfdane/fetching/internal/storage"
+	"github.com/halfdane/fetching/internal/tagger"
 	"github.com/halfdane/fetching/internal/web"
 	"github.com/halfdane/fetching/internal/worker"
 )
@@ -36,6 +37,7 @@ Batch flags:
   --credentials <path>   Path to credentials JSON file (default: ~/.config/fetching/credentials.json)
   --output <dir>         Output directory for downloaded files (default: ./music)
   --concurrency <n>      Max parallel downloads (default: 1)
+  --verbose              Enable verbose output (default: false)
   <uri> [<uri>...]       Spotify URIs or URLs to download
 
 Serve flags:
@@ -43,6 +45,7 @@ Serve flags:
   --output <dir>         Output directory for downloaded files (default: ./music)
   --port <port>          HTTP listen port (default: 8080)
   --concurrency <n>      Max parallel downloads (default: 1)
+  --verbose              Enable verbose output (default: false)
 `
 
 func main() {
@@ -91,7 +94,7 @@ func dbPath() string {
 	return filepath.Join(p, "fetching.db")
 }
 
-func setupDeps(credPath, outputDir string, concurrency int) (*queue.Queue, *worker.Worker, error) {
+func setupDeps(credPath, outputDir string, concurrency int, verbose bool) (*queue.Queue, *worker.Worker, error) {
 	runner := cli.NewRunner("")
 
 	credDir := filepath.Dir(credPath)
@@ -101,13 +104,14 @@ func setupDeps(credPath, outputDir string, concurrency int) (*queue.Queue, *work
 
 	credStore := credentials.NewStore(credPath, runner.Auth, runner.Reauth)
 	store := storage.New(outputDir)
+	tgr := tagger.New("", verbose)
 
 	q, err := queue.New(dbPath())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	w := worker.New(q, runner, credStore, store, concurrency)
+	w := worker.New(q, runner, credStore, store, tgr, concurrency)
 	return q, w, nil
 }
 
@@ -116,6 +120,7 @@ func runBatch(args []string) error {
 	credPath := fs.String("credentials", defaultCredentialsPath(), "credentials JSON file path")
 	outputDir := fs.String("output", "./music", "output directory")
 	concurrency := fs.Int("concurrency", 1, "max parallel downloads")
+	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
 	uris := fs.Args()
@@ -123,7 +128,7 @@ func runBatch(args []string) error {
 		return fmt.Errorf("no Spotify URIs provided")
 	}
 
-	q, w, err := setupDeps(*credPath, *outputDir, *concurrency)
+	q, w, err := setupDeps(*credPath, *outputDir, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
@@ -147,9 +152,10 @@ func runServe(args []string) error {
 	outputDir := fs.String("output", "./music", "output directory")
 	port := fs.Int("port", 8080, "HTTP listen port")
 	concurrency := fs.Int("concurrency", 1, "max parallel downloads")
+	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
-	q, w, err := setupDeps(*credPath, *outputDir, *concurrency)
+	q, w, err := setupDeps(*credPath, *outputDir, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
