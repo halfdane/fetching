@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"maragu.dev/goqite"
@@ -131,7 +132,28 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("migrate queue database: %w", err)
 		}
 	}
+
+	// Additive column migrations — safe to re-run; SQLite returns an error when
+	// a column already exists, which we treat as a no-op.
+	columnMigrations := []string{
+		`ALTER TABLE jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`,
+	}
+	for _, stmt := range columnMigrations {
+		if _, err := db.Exec(stmt); err != nil {
+			// "duplicate column name" means the column is already present — fine.
+			if !isDuplicateColumnErr(err) {
+				return fmt.Errorf("column migration %q: %w", stmt, err)
+			}
+		}
+	}
+
 	return nil
+}
+
+// isDuplicateColumnErr reports whether err is the SQLite "duplicate column
+// name" error returned when ALTER TABLE ADD COLUMN is run a second time.
+func isDuplicateColumnErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "duplicate column name")
 }
 
 // Enqueue adds one or more Spotify URIs to the queue.
