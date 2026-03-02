@@ -79,6 +79,19 @@ func (t *Tagger) TagTrack(audioPath string, track *spotify.Track) error {
 		meta["isrc"] = isrc
 	}
 
+	// UPC from album
+	if upc := spotify.UPC(track.Album.ExternalIDs); upc != "" {
+		meta["upc"] = upc
+	}
+
+	// Spotify identifiers
+	if track.URI != "" {
+		meta["spotify_track_uri"] = track.URI
+	}
+	if track.Album.URI != "" {
+		meta["spotify_album_uri"] = track.Album.URI
+	}
+
 	// Language
 	if len(track.LanguageOfPerformance) > 0 {
 		meta["language"] = track.LanguageOfPerformance[0]
@@ -106,6 +119,14 @@ func (t *Tagger) TagEpisode(audioPath string, ep *spotify.Episode) error {
 
 	if ep.Language != "" {
 		meta["language"] = ep.Language
+	}
+
+	// Spotify identifiers
+	if ep.URI != "" {
+		meta["spotify_episode_uri"] = ep.URI
+	}
+	if ep.ShowURI != "" {
+		meta["spotify_show_uri"] = ep.ShowURI
 	}
 
 	cover := spotify.DefaultCover(ep.Covers)

@@ -113,6 +113,27 @@ func ISRC(ids []ExternalID) string {
 	return ""
 }
 
+// UPC returns the UPC external ID, or empty string if not present.
+func UPC(ids []ExternalID) string {
+	for _, id := range ids {
+		if id.Type == "upc" {
+			return id.ID
+		}
+	}
+	return ""
+}
+
+// LargeCover returns the LARGE-sized cover from a covers slice,
+// falling back to DEFAULT, then the first available. Returns nil if none.
+func LargeCover(covers []Cover) *Cover {
+	for i := range covers {
+		if covers[i].Size == "LARGE" {
+			return &covers[i]
+		}
+	}
+	return DefaultCover(covers)
+}
+
 // formatPriority defines preference order for audio formats (lower = better).
 var formatPriority = map[string]int{
 	"FLAC_FLAC":       0,

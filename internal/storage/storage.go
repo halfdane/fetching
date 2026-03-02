@@ -98,3 +98,40 @@ func sanitize(name string) string {
 	}
 	return s
 }
+
+// Sanitize is exported for use by other packages that need filesystem-safe names.
+func Sanitize(name string) string {
+	return sanitize(name)
+}
+
+// AlbumDir returns the directory path for an album: <base>/<artist>/<album>.
+func (s *Storage) AlbumDir(artist, album string) string {
+	return filepath.Join(s.BaseDir, sanitize(artist), sanitize(album))
+}
+
+// ShowDir returns the directory path for a show: <base>/<show>.
+func (s *Storage) ShowDir(showName string) string {
+	return filepath.Join(s.BaseDir, sanitize(showName))
+}
+
+// PlaylistDir returns the directory path for a playlist: <base>/Playlists/<name>.
+func (s *Storage) PlaylistDir(playlistName string) string {
+	return filepath.Join(s.BaseDir, "Playlists", sanitize(playlistName))
+}
+
+// TrackPath returns the expected file path for a track (without creating it).
+func (s *Storage) TrackPath(track *spotify.Track, ext string) string {
+	artist := sanitize(firstArtist(track.Artists))
+	album := sanitize(track.Album.Name)
+	filename := fmt.Sprintf("%02d-%s%s", track.Number, sanitize(track.Name), ext)
+	return filepath.Join(s.BaseDir, artist, album, filename)
+}
+
+// EpisodePath returns the expected file path for an episode (without creating it).
+func (s *Storage) EpisodePath(ep *spotify.Episode, ext string) string {
+	show := sanitize(ep.ShowName)
+	if show == "_" {
+		show = sanitize(ep.ShowURI)
+	}
+	return filepath.Join(s.BaseDir, show, sanitize(ep.Name)+ext)
+}
