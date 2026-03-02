@@ -25,3 +25,4 @@ result-*
 .DS_Store
 music
 target
+vendor/

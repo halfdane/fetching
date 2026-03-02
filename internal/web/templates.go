@@ -152,6 +152,7 @@ const jobsPartial = `{{define "jobs"}}<ul id="job-list" class="jobs">
 {{if .}}{{range .}}<li class="job">
     <span class="job-uri">{{.SpotifyURI}}</span>
     <span class="badge badge-{{.Status}}">{{.Status}}</span>
+    {{if .RetryCount}}<span class="retry-count">retry {{.RetryCount}}</span>{{end}}
 </li>
 {{if .Error}}<p class="error-msg">{{.Error}}</p>{{end}}
 {{end}}{{else}}<p class="empty">No jobs in queue.</p>{{end}}

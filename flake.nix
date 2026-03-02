@@ -20,7 +20,7 @@
             pname = "fetching";
             version = fetchingVersion;
             src = ./.;
-            vendorHash = "sha256-q9BCDpLndmvFq67BZEyA8i4q/gyDwiTa7+Sz3JlrnQM=";
+            vendorHash = "sha256-j2cQfEzSaa10+boHb79EhF/1fsp2rwCGbTg/+Q7r2c4=";
             ldflags = [ "-X main.version=v${fetchingVersion}" ];
             nativeBuildInputs = [ pkgs.makeWrapper ];
             postInstall = ''
