@@ -289,5 +289,60 @@ func TestEpisodeAudioFilesJSONField(t *testing.T) {
 	}
 }
 
+// ---- BestCandidate ----
+
+func TestBestCandidateEmpty(t *testing.T) {
+	if got := BestCandidate(nil); got != nil {
+		t.Errorf("expected nil for empty slice, got %+v", got)
+	}
+	if got := BestCandidate([]CandidateFile{}); got != nil {
+		t.Errorf("expected nil for empty slice, got %+v", got)
+	}
+}
+
+func TestBestCandidatePicksBestAcrossURIs(t *testing.T) {
+	// Primary track has only MP3; alternative has FLAC — FLAC should win.
+	candidates := []CandidateFile{
+		{TrackURI: "spotify:track:primary", File: AudioFile{FileID: "mp3-file", Format: "MP3_320"}},
+		{TrackURI: "spotify:track:alt", File: AudioFile{FileID: "flac-file", Format: "FLAC_FLAC"}},
+	}
+	got := BestCandidate(candidates)
+	if got.File.FileID != "flac-file" {
+		t.Errorf("expected FLAC file to win, got format=%s fileID=%s", got.File.Format, got.File.FileID)
+	}
+	if got.TrackURI != "spotify:track:alt" {
+		t.Errorf("expected alt URI, got %s", got.TrackURI)
+	}
+}
+
+func TestBestCandidateSameURIWhenPrimaryWins(t *testing.T) {
+	// Primary has better quality than alternative.
+	candidates := []CandidateFile{
+		{TrackURI: "spotify:track:primary", File: AudioFile{FileID: "flac-file", Format: "FLAC_FLAC"}},
+		{TrackURI: "spotify:track:alt", File: AudioFile{FileID: "ogg-file", Format: "OGG_VORBIS_160"}},
+	}
+	got := BestCandidate(candidates)
+	if got.TrackURI != "spotify:track:primary" {
+		t.Errorf("expected primary URI to win, got %s", got.TrackURI)
+	}
+}
+
+// ---- Track.Alternatives JSON field ----
+
+func TestTrackAlternativesJSONField(t *testing.T) {
+	raw := `{"type":"track","uri":"spotify:track:orig","name":"n","files":[],"alternatives":["spotify:track:alt1","spotify:track:alt2"]}`
+	meta, err := ParseMetadata([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := meta.(*Track)
+	if len(track.Alternatives) != 2 {
+		t.Fatalf("expected 2 alternatives, got %d", len(track.Alternatives))
+	}
+	if track.Alternatives[0] != "spotify:track:alt1" || track.Alternatives[1] != "spotify:track:alt2" {
+		t.Errorf("unexpected alternatives: %v", track.Alternatives)
+	}
+}
+
 // ensure json package is used (avoids import cycle lint)
 var _ = json.Marshal

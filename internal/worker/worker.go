@@ -444,19 +444,55 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 		return w.downloadEpisode(jobID, creds, ep)
 	}
 
-	af := spotify.PreferAudioFile(track.AudioFiles)
-	if af == nil {
-		return nil, fmt.Errorf("track %s has no audio files", trackURI)
-	}
-
 	artist := "Unknown"
 	if len(track.Artists) > 0 {
 		artist = track.Artists[0].Name
 	}
+	// Update title/duration as soon as metadata is known, so it's visible
+	// even if the download fails (e.g. track has no audio files).
 	if w.progress != nil {
 		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
 			t.Title = track.Name
 			t.DurationSec = track.DurationMS / 1000
+		})
+	}
+
+	// Build candidate pool from primary track + all alternatives, then pick
+	// the best format across all of them. Track which URI owns each file
+	// because FetchAudio needs the owning URI, not always the original.
+	candidates := make([]spotify.CandidateFile, 0, len(track.AudioFiles))
+	for _, f := range track.AudioFiles {
+		candidates = append(candidates, spotify.CandidateFile{TrackURI: trackURI, File: f})
+	}
+	for _, altURI := range track.Alternatives {
+		altJSON, err := w.runner.FetchMetadata(creds, altURI)
+		if err != nil {
+			log.Printf("  warning: failed to fetch alternative %s: %v", altURI, err)
+			continue
+		}
+		altMeta, err := spotify.ParseMetadata(altJSON)
+		if err != nil {
+			log.Printf("  warning: failed to parse alternative %s: %v", altURI, err)
+			continue
+		}
+		if alt, ok := altMeta.(*spotify.Track); ok {
+			for _, f := range alt.AudioFiles {
+				candidates = append(candidates, spotify.CandidateFile{TrackURI: altURI, File: f})
+			}
+		}
+	}
+	best := spotify.BestCandidate(candidates)
+	if best == nil {
+		return nil, fmt.Errorf("track %s has no audio files (checked %d alternatives)", trackURI, len(track.Alternatives))
+	}
+	af := &best.File
+	sourceURI := best.TrackURI
+	if sourceURI != trackURI {
+		log.Printf("  using alternative %s for %s (format: %s)", sourceURI, trackURI, af.Format)
+	}
+
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
 			t.Status = progress.TrackDownloadingAudio
 			t.ErrorMessage = ""
 		})
@@ -497,7 +533,7 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 	}
 
 	log.Printf("  downloading %s - %s", artist, track.Name)
-	if err := w.runner.FetchAudio(creds, trackURI, af.FileID, writer); err != nil {
+	if err := w.runner.FetchAudio(creds, sourceURI, af.FileID, writer); err != nil {
 		writer.Close()
 		return nil, err
 	}
@@ -519,14 +555,21 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 }
 
 func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*downloadResult, error) {
+	// Update title/duration as soon as metadata is known, so it's visible
+	// even if the download fails (e.g. episode has no audio files).
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
+			t.Title = ep.Name
+			t.DurationSec = ep.DurationMS / 1000
+		})
+	}
+
 	af := spotify.PreferAudioFile(ep.AudioFiles)
 	if af == nil {
 		return nil, fmt.Errorf("episode %s has no audio files", ep.URI)
 	}
 	if w.progress != nil {
 		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
-			t.Title = ep.Name
-			t.DurationSec = ep.DurationMS / 1000
 			t.Status = progress.TrackDownloadingAudio
 			t.ErrorMessage = ""
 		})

@@ -244,7 +244,7 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
                     const stateClass = statusClass(t.status);
                     const stateText = statusText(t);
                     html += '<li class="track">';
-                    html += '<div class="track-name">' + escapeHtml(t.title || 'Loading metadata…');
+                    html += '<div class="track-name">' + escapeHtml(t.title || trackNameFallback(t));
                     if (t.durationSec > 0) {
                         html += '<span class="duration">' + formatDuration(t.durationSec) + '</span>';
                     }
@@ -282,6 +282,17 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             if (status === 'failed' || status === 'retry_waiting') return 'state-red';
             if (status === 'done' || status === 'already_present') return 'state-green';
             return 'state-blue';
+        }
+
+        function trackNameFallback(track) {
+            switch (track.status) {
+                case 'queued':
+                case 'resolving_metadata':
+                case 'downloading_audio':
+                    return 'Loading metadata\u2026';
+                default:
+                    return track.trackUri || 'Unknown track';
+            }
         }
 
         function statusText(track) {

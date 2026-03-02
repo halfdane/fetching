@@ -99,6 +99,7 @@ type Track struct {
 	IsExplicit            bool             `json:"is_explicit"`
 	ExternalIDs           []ExternalID     `json:"external_ids"`
 	AudioFiles            []AudioFile      `json:"files"`
+	Alternatives          []string         `json:"alternatives"`
 	OriginalTitle         string           `json:"original_title"`
 	VersionTitle          string           `json:"version_title"`
 	LanguageOfPerformance []string         `json:"language_of_performance"`

@@ -179,3 +179,30 @@ func priorityOf(format string) int {
 	}
 	return 100 // unknown formats last
 }
+
+// CandidateFile pairs an AudioFile with the track URI it belongs to.
+// This is needed when pooling files across a track and its alternatives,
+// because FetchAudio requires the owning URI alongside the file ID.
+type CandidateFile struct {
+	TrackURI string
+	File     AudioFile
+}
+
+// BestCandidate selects the highest-quality audio file from a pool that may
+// span multiple track URIs (e.g. a track and its Spotify alternatives).
+// Returns nil if the pool is empty.
+func BestCandidate(candidates []CandidateFile) *CandidateFile {
+	if len(candidates) == 0 {
+		return nil
+	}
+	best := &candidates[0]
+	bestPrio := priorityOf(best.File.Format)
+	for i := 1; i < len(candidates); i++ {
+		p := priorityOf(candidates[i].File.Format)
+		if p < bestPrio {
+			best = &candidates[i]
+			bestPrio = p
+		}
+	}
+	return best
+}

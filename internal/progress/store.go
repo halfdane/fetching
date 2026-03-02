@@ -107,7 +107,6 @@ func (s *Store) SetTrackQueued(jobID int64, trackURI string) {
 	if idx == -1 {
 		c.Tracks = append(c.Tracks, TrackView{
 			TrackURI: trackURI,
-			Title:    "Loading metadata…",
 			Status:   TrackQueued,
 		})
 	} else {
@@ -123,7 +122,7 @@ func (s *Store) UpdateTrack(jobID int64, trackURI string, update func(*TrackView
 	c := s.ensure(jobID)
 	idx := s.findTrack(c, trackURI)
 	if idx == -1 {
-		c.Tracks = append(c.Tracks, TrackView{TrackURI: trackURI, Title: "Loading metadata…", Status: TrackQueued})
+		c.Tracks = append(c.Tracks, TrackView{TrackURI: trackURI, Status: TrackQueued})
 		idx = len(c.Tracks) - 1
 	}
 	update(&c.Tracks[idx])
