@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -15,6 +16,32 @@ import (
 	"github.com/halfdane/fetching/internal/storage"
 	"github.com/halfdane/fetching/internal/tagger"
 )
+
+// trackRetryDelays mirrors the queue retry schedule for per-track transient failures.
+var trackRetryDelays = []time.Duration{
+	1 * time.Second,
+	5 * time.Second,
+	15 * time.Second,
+}
+
+// withRetry calls fn up to 1+len(trackRetryDelays) times, sleeping between
+// attempts. Returns the last error if all attempts fail.
+func withRetry(label string, fn func() error) error {
+	if err := fn(); err == nil {
+		return nil
+	} else {
+		log.Printf("  %s failed (attempt 1): %v", label, err)
+	}
+	for i, d := range trackRetryDelays {
+		time.Sleep(d)
+		if err := fn(); err == nil {
+			return nil
+		} else {
+			log.Printf("  %s failed (attempt %d): %v", label, i+2, err)
+		}
+	}
+	return fmt.Errorf("all %d attempts failed", 1+len(trackRetryDelays))
+}
 
 // Worker pulls jobs from the queue and processes them.
 type Worker struct {
@@ -121,9 +148,13 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 		default:
 		}
 
-		res, err := w.downloadTrack(creds, uri)
-		if err != nil {
-			log.Printf("  track %s failed: %v", uri, err)
+		var res *downloadResult
+		if err := withRetry(uri, func() error {
+			var e error
+			res, e = w.downloadTrack(creds, uri)
+			return e
+		}); err != nil {
+			log.Printf("  track %s permanently failed: %v", uri, err)
 			continue
 		}
 		if res != nil {

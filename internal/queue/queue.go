@@ -42,9 +42,9 @@ type Job struct {
 
 // retryDelays defines the wait time before each successive retry attempt.
 var retryDelays = []time.Duration{
-	1 * time.Minute,
-	5 * time.Minute,
-	15 * time.Minute,
+	1 * time.Second,
+	15 * time.Second,
+	44 * time.Second,
 }
 
 // maxRetries is how many explicit retries we allow before marking a job failed.
