@@ -169,6 +169,10 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
 
     <form id="enqueue-form" method="POST" action="/api/jobs">
         <input id="uri-input" type="text" name="uri" placeholder="Paste one Spotify URI or URL and press Enter" autocomplete="off" required>
+        <label style="display:flex;align-items:center;gap:0.3rem;white-space:nowrap;font-size:0.85rem;color:var(--text-muted);cursor:pointer">
+            <input type="checkbox" name="fallback_quality" id="fallback_quality">
+            Fallback quality
+        </label>
         <button type="submit">Add</button>
     </form>
 
@@ -191,7 +195,7 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             fetch('/api/jobs', {
                 method: 'POST',
                 headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'uri=' + encodeURIComponent(uri)
+                body: 'uri=' + encodeURIComponent(uri) + (document.getElementById('fallback_quality').checked ? '&fallback_quality=on' : '')
             }).then(resp => {
                 if (!resp.ok) {
                     return resp.text().then(msg => Promise.reject(msg || 'submit failed'));

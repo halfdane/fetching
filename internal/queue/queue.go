@@ -32,14 +32,15 @@ const (
 
 // Job is a single download request with status information.
 type Job struct {
-	ID          int64      `json:"id"`
-	SpotifyURI  string     `json:"spotify_uri"`
-	Status      Status     `json:"status"`
-	Error       string     `json:"error,omitempty"`
-	RetryCount  int        `json:"retry_count"`
-	CreatedAt   time.Time  `json:"created_at"`
-	StartedAt   *time.Time `json:"started_at,omitempty"`
-	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ID              int64      `json:"id"`
+	SpotifyURI      string     `json:"spotify_uri"`
+	Status          Status     `json:"status"`
+	Error           string     `json:"error,omitempty"`
+	RetryCount      int        `json:"retry_count"`
+	FallbackQuality bool       `json:"fallback_quality"`
+	CreatedAt       time.Time  `json:"created_at"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 }
 
 // retryDelays defines the wait time before each successive retry attempt.
@@ -138,6 +139,7 @@ func migrate(db *sql.DB) error {
 	// a column already exists, which we treat as a no-op.
 	columnMigrations := []string{
 		`ALTER TABLE jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE jobs ADD COLUMN fallback_quality INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, stmt := range columnMigrations {
 		if _, err := db.Exec(stmt); err != nil {
@@ -200,14 +202,25 @@ func (q *Queue) RecoverStuckJobs() error {
 	return nil
 }
 
+// EnqueueOptions configures how a batch of URIs is enqueued.
+type EnqueueOptions struct {
+	// FallbackQuality enables successive fallback to lower-quality audio
+	// candidates when all retries for the best available file are exhausted.
+	FallbackQuality bool
+}
+
 // Enqueue adds one or more Spotify URIs to the queue.
-func (q *Queue) Enqueue(uris ...string) ([]*Job, error) {
+func (q *Queue) Enqueue(opts EnqueueOptions, uris ...string) ([]*Job, error) {
 	ctx := context.Background()
 	var jobs []*Job
 
 	for _, uri := range uris {
+		fq := 0
+		if opts.FallbackQuality {
+			fq = 1
+		}
 		res, err := q.db.ExecContext(ctx,
-			`INSERT INTO jobs (spotify_uri) VALUES (?)`, uri)
+			`INSERT INTO jobs (spotify_uri, fallback_quality) VALUES (?, ?)`, uri, fq)
 		if err != nil {
 			return nil, fmt.Errorf("insert job for %q: %w", uri, err)
 		}
@@ -219,10 +232,11 @@ func (q *Queue) Enqueue(uris ...string) ([]*Job, error) {
 		}
 
 		jobs = append(jobs, &Job{
-			ID:         jobID,
-			SpotifyURI: uri,
-			Status:     StatusPending,
-			CreatedAt:  time.Now(),
+			ID:              jobID,
+			SpotifyURI:      uri,
+			Status:          StatusPending,
+			FallbackQuality: opts.FallbackQuality,
+			CreatedAt:       time.Now(),
 		})
 	}
 	return jobs, nil
@@ -271,7 +285,7 @@ func (q *Queue) Next() (*Job, error) {
 	}
 
 	row := q.db.QueryRowContext(ctx,
-		`SELECT id, spotify_uri, status, error, retry_count, created_at, started_at, completed_at
+		`SELECT id, spotify_uri, status, error, retry_count, fallback_quality, created_at, started_at, completed_at
 		 FROM jobs WHERE id = ?`, payload.JobID)
 
 	job, err := scanJob(row)
@@ -366,7 +380,7 @@ func (q *Queue) findGoqiteID(ctx context.Context, jobID int64) (string, error) {
 // List returns all jobs ordered by creation time descending.
 func (q *Queue) List() ([]*Job, error) {
 	rows, err := q.db.QueryContext(context.Background(),
-		`SELECT id, spotify_uri, status, error, retry_count, created_at, started_at, completed_at
+		`SELECT id, spotify_uri, status, error, retry_count, fallback_quality, created_at, started_at, completed_at
 		 FROM jobs ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
@@ -398,12 +412,14 @@ func scanJob(s scanner) (*Job, error) {
 	var j Job
 	var startedAt, completedAt sql.NullString
 	var createdAt string
+	var fallbackQualityInt int
 	if err := s.Scan(
-		&j.ID, &j.SpotifyURI, &j.Status, &j.Error, &j.RetryCount,
+		&j.ID, &j.SpotifyURI, &j.Status, &j.Error, &j.RetryCount, &fallbackQualityInt,
 		&createdAt, &startedAt, &completedAt,
 	); err != nil {
 		return nil, err
 	}
+	j.FallbackQuality = fallbackQualityInt != 0
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		j.CreatedAt = t

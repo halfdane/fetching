@@ -4,6 +4,7 @@ package spotify
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // typeProbe is used to peek at the "type" field in raw JSON.
@@ -186,6 +187,21 @@ func priorityOf(format string) int {
 type CandidateFile struct {
 	TrackURI string
 	File     AudioFile
+}
+
+// SortedCandidates returns a copy of candidates sorted from highest to lowest
+// quality (ascending priority value). The first element is the best choice;
+// subsequent elements are fallbacks in decreasing quality order.
+func SortedCandidates(candidates []CandidateFile) []CandidateFile {
+	if len(candidates) == 0 {
+		return nil
+	}
+	sorted := make([]CandidateFile, len(candidates))
+	copy(sorted, candidates)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return priorityOf(sorted[i].File.Format) < priorityOf(sorted[j].File.Format)
+	})
+	return sorted
 }
 
 // BestCandidate selects the highest-quality audio file from a pool that may

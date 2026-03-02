@@ -205,7 +205,6 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 		default:
 		}
 
-		var res *downloadResult
 		if w.progress != nil {
 			w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
 				t.Status = progress.TrackResolvingMetadata
@@ -215,20 +214,8 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 			})
 		}
 
-		if err := withRetry(ctx, uri, func(retryAttempt, retryMax int, wait time.Duration, lastErr error) {
-			if w.progress != nil {
-				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
-					t.Status = progress.TrackRetryWaiting
-					t.RetryAttempt = retryAttempt
-					t.RetryMax = retryMax
-					t.ErrorMessage = lastErr.Error()
-				})
-			}
-		}, func() error {
-			var e error
-			res, e = w.downloadTrack(job.ID, creds, uri)
-			return e
-		}); err != nil {
+		res, err := w.downloadTrack(ctx, job.ID, creds, uri, job.FallbackQuality)
+		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err // propagate; job stays 'running' for crash recovery on next startup
 			}
@@ -422,7 +409,7 @@ func resultsToEntries(results []downloadResult) []playlist.TrackEntry {
 	return entries
 }
 
-func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trackURI string) (*downloadResult, error) {
+func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credentials.Credentials, trackURI string, fallbackQuality bool) (*downloadResult, error) {
 	// Fetch track metadata to get audio file IDs
 	metaJSON, err := w.runner.FetchMetadata(creds, trackURI)
 	if err != nil {
@@ -457,9 +444,9 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 		})
 	}
 
-	// Build candidate pool from primary track + all alternatives, then pick
-	// the best format across all of them. Track which URI owns each file
-	// because FetchAudio needs the owning URI, not always the original.
+	// Build candidate pool from primary track + all alternatives, then sort
+	// by quality. Track which URI owns each file because FetchAudio needs the
+	// owning URI, not always the original.
 	candidates := make([]spotify.CandidateFile, 0, len(track.AudioFiles))
 	for _, f := range track.AudioFiles {
 		candidates = append(candidates, spotify.CandidateFile{TrackURI: trackURI, File: f})
@@ -481,21 +468,9 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 			}
 		}
 	}
-	best := spotify.BestCandidate(candidates)
-	if best == nil {
+	sorted := spotify.SortedCandidates(candidates)
+	if len(sorted) == 0 {
 		return nil, fmt.Errorf("track %s has no audio files (checked %d alternatives)", trackURI, len(track.Alternatives))
-	}
-	af := &best.File
-	sourceURI := best.TrackURI
-	if sourceURI != trackURI {
-		log.Printf("  using alternative %s for %s (format: %s)", sourceURI, trackURI, af.Format)
-	}
-
-	if w.progress != nil {
-		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
-			t.Status = progress.TrackDownloadingAudio
-			t.ErrorMessage = ""
-		})
 	}
 
 	var coverURL string
@@ -503,8 +478,8 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 		coverURL = spotify.CoverURL(c.FileID)
 	}
 
-	// Skip if already downloaded.
-	outPath := w.store.TrackPath(track, af.Extension())
+	// Skip if already downloaded (check against the best candidate's path).
+	outPath := w.store.TrackPath(track, sorted[0].File.Extension())
 	if _, err := os.Stat(outPath); err == nil {
 		log.Printf("  skipping %s - %s (already downloaded)", artist, track.Name)
 		if w.progress != nil {
@@ -524,34 +499,75 @@ func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trac
 		}, nil
 	}
 
-	log.Printf("  selected format %s for %s", af.Format, trackURI)
+	// Outer loop: try each candidate in quality order. Each candidate gets its
+	// own inner retry loop. We advance to the next candidate only when all
+	// retries are exhausted AND fallbackQuality is enabled.
+	var lastErr error
+	for i, cand := range sorted {
+		af := cand.File
+		srcURI := cand.TrackURI
+		if srcURI != trackURI {
+			log.Printf("  using alternative %s for %s (format: %s)", srcURI, trackURI, af.Format)
+		}
+		log.Printf("  selected format %s for %s", af.Format, trackURI)
 
-	// Create a writer to the storage location.
-	_, writer, err := w.store.CreateTrackWriter(track, af.Extension())
-	if err != nil {
-		return nil, err
+		if w.progress != nil {
+			w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
+				t.Status = progress.TrackDownloadingAudio
+				t.RetryAttempt = 0
+				t.RetryMax = len(trackRetryDelays)
+				t.ErrorMessage = ""
+			})
+		}
+
+		candOutPath := w.store.TrackPath(track, af.Extension())
+		err := withRetry(ctx, fmt.Sprintf("%s [%s]", trackURI, af.Format),
+			func(retryAttempt, retryMax int, wait time.Duration, retryErr error) {
+				if w.progress != nil {
+					w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
+						t.Status = progress.TrackRetryWaiting
+						t.RetryAttempt = retryAttempt
+						t.RetryMax = retryMax
+						t.ErrorMessage = retryErr.Error()
+					})
+				}
+			},
+			func() error {
+				_, wr, err := w.store.CreateTrackWriter(track, af.Extension())
+				if err != nil {
+					return err
+				}
+				fetchErr := w.runner.FetchAudio(creds, srcURI, af.FileID, wr)
+				wr.Close()
+				return fetchErr
+			})
+
+		if err == nil {
+			log.Printf("  tagging %s - %s", artist, track.Name)
+			if err := w.tagger.TagTrack(candOutPath, track); err != nil {
+				log.Printf("  warning: tagging failed for %s: %v", trackURI, err)
+			}
+			return &downloadResult{
+				Path:     candOutPath,
+				Duration: track.DurationMS / 1000,
+				Artist:   artist,
+				Title:    track.Name,
+				CoverURL: coverURL,
+			}, nil
+		}
+
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+
+		lastErr = err
+		if !fallbackQuality || i == len(sorted)-1 {
+			break
+		}
+		log.Printf("  all retries exhausted for %s [%s], trying next quality level", trackURI, af.Format)
 	}
 
-	log.Printf("  downloading %s - %s", artist, track.Name)
-	if err := w.runner.FetchAudio(creds, sourceURI, af.FileID, writer); err != nil {
-		writer.Close()
-		return nil, err
-	}
-	writer.Close()
-
-	// Tag the downloaded file with metadata and cover art.
-	log.Printf("  tagging %s - %s", artist, track.Name)
-	if err := w.tagger.TagTrack(outPath, track); err != nil {
-		log.Printf("  warning: tagging failed for %s: %v", trackURI, err)
-	}
-
-	return &downloadResult{
-		Path:     outPath,
-		Duration: track.DurationMS / 1000,
-		Artist:   artist,
-		Title:    track.Name,
-		CoverURL: coverURL,
-	}, nil
+	return nil, fmt.Errorf("all candidates failed for %s: %w", trackURI, lastErr)
 }
 
 func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*downloadResult, error) {

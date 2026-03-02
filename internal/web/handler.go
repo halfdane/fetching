@@ -76,7 +76,8 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobs, err := h.queue.Enqueue(uris...)
+	fallbackQuality := r.FormValue("fallback_quality") == "on"
+	jobs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: fallbackQuality}, uris...)
 	if err != nil {
 		log.Printf("enqueue error: %v", err)
 		http.Error(w, "failed to enqueue", http.StatusInternalServerError)

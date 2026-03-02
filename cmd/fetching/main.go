@@ -40,6 +40,7 @@ Batch flags:
   --track-template <tmpl>  Path template for tracks (default: "{artist}/{album}/{track_number}-{title}")
   --episode-template <t>   Path template for episodes (default: "{show}/{title}")
   --concurrency <n>        Max parallel downloads (default: 1)
+  --fallback-quality       Fall back to lower-quality candidates when all retries fail (default: false)
   --verbose                Enable verbose output (default: false)
   <uri> [<uri>...]         Spotify URIs or URLs to download
 
@@ -131,6 +132,7 @@ func runBatch(args []string) error {
 	trackTmpl := fs.String("track-template", "", "path template for tracks (default: \"{artist}/{album}/{track_number}-{title}\")")
 	episodeTmpl := fs.String("episode-template", "", "path template for episodes (default: \"{show}/{title}\")")
 	concurrency := fs.Int("concurrency", 1, "max parallel downloads")
+	fallbackQuality := fs.Bool("fallback-quality", false, "fall back to lower-quality candidates when all retries fail")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
@@ -149,7 +151,7 @@ func runBatch(args []string) error {
 		return fmt.Errorf("recover stuck jobs: %w", err)
 	}
 
-	if _, err := q.Enqueue(uris...); err != nil {
+	if _, err := q.Enqueue(queue.EnqueueOptions{FallbackQuality: *fallbackQuality}, uris...); err != nil {
 		return fmt.Errorf("enqueue: %w", err)
 	}
 

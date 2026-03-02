@@ -33,7 +33,7 @@ func TestRecoverStuckJobs_ResetsRunningToPending(t *testing.T) {
 	q := newTestQueue(t)
 
 	// Enqueue and claim a job (sets status → running).
-	jobs, err := q.Enqueue("spotify:track:abc")
+	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestRecoverStuckJobs_ResetsRunningToPending(t *testing.T) {
 func TestRecoverStuckJobs_ReenqueuesImmediately(t *testing.T) {
 	q := newTestQueue(t)
 
-	if _, err := q.Enqueue("spotify:track:abc"); err != nil {
+	if _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc"); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 
@@ -99,7 +99,7 @@ func TestRecoverStuckJobs_ReenqueuesImmediately(t *testing.T) {
 func TestRecoverStuckJobs_DoesNotTouchDoneOrFailed(t *testing.T) {
 	q := newTestQueue(t)
 
-	jobs, err := q.Enqueue("spotify:track:done", "spotify:track:failed")
+	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:done", "spotify:track:failed")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestRecoverStuckJobs_DoesNotTouchDoneOrFailed(t *testing.T) {
 func TestRecoverStuckJobs_MultipleJobs(t *testing.T) {
 	q := newTestQueue(t)
 
-	if _, err := q.Enqueue("spotify:track:1", "spotify:track:2", "spotify:track:3"); err != nil {
+	if _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:1", "spotify:track:2", "spotify:track:3"); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestRecoverStuckJobs_MultipleJobs(t *testing.T) {
 func TestNext_DiscardsStaleMessageForDoneJob(t *testing.T) {
 	q := newTestQueue(t)
 
-	jobs, err := q.Enqueue("spotify:track:abc")
+	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestNext_DiscardsStaleMessageForDoneJob(t *testing.T) {
 func TestNext_DiscardsStaleMessageForFailedJob(t *testing.T) {
 	q := newTestQueue(t)
 
-	jobs, err := q.Enqueue("spotify:track:abc")
+	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
