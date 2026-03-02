@@ -13,6 +13,7 @@ import (
 
 	"github.com/halfdane/fetching/internal/cli"
 	"github.com/halfdane/fetching/internal/credentials"
+	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
 	"github.com/halfdane/fetching/internal/storage"
 	"github.com/halfdane/fetching/internal/tagger"
@@ -101,12 +102,12 @@ func dbPath() string {
 	return filepath.Join(p, "fetching.db")
 }
 
-func setupDeps(credPath, outputDir, trackTmpl, episodeTmpl string, concurrency int, verbose bool) (*queue.Queue, *worker.Worker, error) {
+func setupDeps(credPath, outputDir, trackTmpl, episodeTmpl string, concurrency int, verbose bool) (*queue.Queue, *worker.Worker, *progress.Store, error) {
 	runner := cli.NewRunner("")
 
 	credDir := filepath.Dir(credPath)
 	if err := os.MkdirAll(credDir, 0700); err != nil {
-		return nil, nil, fmt.Errorf("create credentials directory: %w", err)
+		return nil, nil, nil, fmt.Errorf("create credentials directory: %w", err)
 	}
 
 	credStore := credentials.NewStore(credPath, runner.Auth, runner.Reauth)
@@ -115,11 +116,12 @@ func setupDeps(credPath, outputDir, trackTmpl, episodeTmpl string, concurrency i
 
 	q, err := queue.New(dbPath())
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	prog := progress.NewStore()
 
-	w := worker.New(q, runner, credStore, store, tgr, concurrency)
-	return q, w, nil
+	w := worker.New(q, runner, credStore, store, tgr, prog, concurrency)
+	return q, w, prog, nil
 }
 
 func runBatch(args []string) error {
@@ -137,7 +139,7 @@ func runBatch(args []string) error {
 		return fmt.Errorf("no Spotify URIs provided")
 	}
 
-	q, w, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
+	q, w, _, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
@@ -166,7 +168,7 @@ func runServe(args []string) error {
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
-	q, w, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
+	q, w, prog, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
@@ -183,7 +185,7 @@ func runServe(args []string) error {
 	}()
 
 	// Start web server
-	handler, err := web.New(q)
+	handler, err := web.New(q, prog)
 	if err != nil {
 		return fmt.Errorf("init web handler: %w", err)
 	}

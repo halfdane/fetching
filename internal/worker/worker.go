@@ -13,6 +13,7 @@ import (
 	"github.com/halfdane/fetching/internal/cover"
 	"github.com/halfdane/fetching/internal/credentials"
 	"github.com/halfdane/fetching/internal/playlist"
+	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
 	"github.com/halfdane/fetching/internal/spotify"
 	"github.com/halfdane/fetching/internal/storage"
@@ -28,21 +29,28 @@ var trackRetryDelays = []time.Duration{
 
 // withRetry calls fn up to 1+len(trackRetryDelays) times, sleeping between
 // attempts. Returns the last error if all attempts fail.
-func withRetry(label string, fn func() error) error {
+func withRetry(label string, onRetry func(retryAttempt, retryMax int, wait time.Duration, lastErr error), fn func() error) error {
 	if err := fn(); err == nil {
 		return nil
 	} else {
 		log.Printf("  %s failed (attempt 1): %v", label, err)
-	}
-	for i, d := range trackRetryDelays {
-		time.Sleep(d)
-		if err := fn(); err == nil {
-			return nil
-		} else {
-			log.Printf("  %s failed (attempt %d): %v", label, i+2, err)
+		lastErr := err
+		for i, d := range trackRetryDelays {
+			retryAttempt := i + 1
+			retryMax := len(trackRetryDelays)
+			if onRetry != nil {
+				onRetry(retryAttempt, retryMax, d, lastErr)
+			}
+			time.Sleep(d)
+			if err := fn(); err == nil {
+				return nil
+			} else {
+				lastErr = err
+				log.Printf("  %s failed (attempt %d): %v", label, i+2, err)
+			}
 		}
+		return fmt.Errorf("all %d attempts failed: %w", 1+len(trackRetryDelays), lastErr)
 	}
-	return fmt.Errorf("all %d attempts failed", 1+len(trackRetryDelays))
 }
 
 // Worker pulls jobs from the queue and processes them.
@@ -52,12 +60,13 @@ type Worker struct {
 	creds        *credentials.Store
 	store        *storage.Storage
 	tagger       *tagger.Tagger
+	progress     *progress.Store
 	pollInterval time.Duration
 	concurrency  int
 }
 
 // New creates a worker with the given dependencies.
-func New(q *queue.Queue, runner *cli.Runner, creds *credentials.Store, store *storage.Storage, tgr *tagger.Tagger, concurrency int) *Worker {
+func New(q *queue.Queue, runner *cli.Runner, creds *credentials.Store, store *storage.Storage, tgr *tagger.Tagger, prog *progress.Store, concurrency int) *Worker {
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -67,6 +76,7 @@ func New(q *queue.Queue, runner *cli.Runner, creds *credentials.Store, store *st
 		creds:        creds,
 		store:        store,
 		tagger:       tgr,
+		progress:     prog,
 		pollInterval: 2 * time.Second,
 		concurrency:  concurrency,
 	}
@@ -122,6 +132,10 @@ type downloadResult struct {
 }
 
 func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
+	if w.progress != nil {
+		w.progress.UpsertSubmitted(job.ID, job.SpotifyURI)
+	}
+
 	creds, err := w.creds.Get()
 	if err != nil {
 		return err
@@ -141,6 +155,42 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 	// Step 2: Resolve individual track URIs
 	trackURIs := spotify.TrackURIs(meta)
 
+	if w.progress != nil {
+		kind := "collection"
+		title := job.SpotifyURI
+		coverURL := ""
+		switch v := meta.(type) {
+		case *spotify.Album:
+			kind = "album"
+			title = v.Name
+			if c := spotify.LargeCover(v.Covers); c != nil {
+				coverURL = spotify.CoverURL(c.FileID)
+			}
+		case *spotify.Playlist:
+			kind = "playlist"
+			title = v.Name
+		case *spotify.Show:
+			kind = "show"
+			title = v.Name
+		case *spotify.Track:
+			kind = "track"
+			title = v.Name
+			if c := spotify.LargeCover(v.Album.Covers); c != nil {
+				coverURL = spotify.CoverURL(c.FileID)
+			}
+		case *spotify.Episode:
+			kind = "show"
+			title = v.ShowName
+			if c := spotify.LargeCover(v.Covers); c != nil {
+				coverURL = spotify.CoverURL(c.FileID)
+			}
+		}
+		w.progress.SetCollectionMeta(job.ID, kind, title, coverURL, len(trackURIs))
+		for _, uri := range trackURIs {
+			w.progress.SetTrackQueued(job.ID, uri)
+		}
+	}
+
 	// Step 3: For each track, fetch its metadata, download, and tag
 	var results []downloadResult
 	for _, uri := range trackURIs {
@@ -151,21 +201,61 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 		}
 
 		var res *downloadResult
-		if err := withRetry(uri, func() error {
+		if w.progress != nil {
+			w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
+				t.Status = progress.TrackResolvingMetadata
+				t.ErrorMessage = ""
+				t.RetryAttempt = 0
+				t.RetryInSec = 0
+				t.RetryMax = len(trackRetryDelays)
+			})
+		}
+
+		if err := withRetry(uri, func(retryAttempt, retryMax int, wait time.Duration, lastErr error) {
+			if w.progress != nil {
+				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
+					t.Status = progress.TrackRetryWaiting
+					t.RetryAttempt = retryAttempt
+					t.RetryMax = retryMax
+					t.RetryInSec = int(wait / time.Second)
+					t.ErrorMessage = lastErr.Error()
+				})
+			}
+		}, func() error {
 			var e error
-			res, e = w.downloadTrack(creds, uri)
+			res, e = w.downloadTrack(job.ID, creds, uri)
 			return e
 		}); err != nil {
 			log.Printf("  track %s permanently failed: %v", uri, err)
+			if w.progress != nil {
+				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
+					t.Status = progress.TrackFailed
+					t.ErrorMessage = err.Error()
+					t.RetryInSec = 0
+				})
+			}
 			continue
 		}
 		if res != nil {
+			if w.progress != nil {
+				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
+					t.Status = progress.TrackDone
+					t.Title = res.Title
+					t.DurationSec = res.Duration
+					t.ErrorMessage = ""
+					t.RetryInSec = 0
+				})
+			}
 			results = append(results, *res)
 		}
 	}
 
 	// Step 4: Generate M3U8 playlist and cover
 	w.generatePlaylistAndCover(meta, results)
+
+	if w.progress != nil {
+		w.progress.MarkCollectionTerminal(job.ID)
+	}
 
 	return nil
 }
@@ -328,7 +418,7 @@ func resultsToEntries(results []downloadResult) []playlist.TrackEntry {
 	return entries
 }
 
-func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) (*downloadResult, error) {
+func (w *Worker) downloadTrack(jobID int64, creds *credentials.Credentials, trackURI string) (*downloadResult, error) {
 	// Fetch track metadata to get audio file IDs
 	metaJSON, err := w.runner.FetchMetadata(creds, trackURI)
 	if err != nil {
@@ -347,7 +437,7 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 		if !ok {
 			return nil, fmt.Errorf("unrecognised metadata type for %s", trackURI)
 		}
-		return w.downloadEpisode(creds, ep)
+		return w.downloadEpisode(jobID, creds, ep)
 	}
 
 	af := spotify.PreferAudioFile(track.AudioFiles)
@@ -359,6 +449,14 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 	if len(track.Artists) > 0 {
 		artist = track.Artists[0].Name
 	}
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
+			t.Title = track.Name
+			t.DurationSec = track.DurationMS / 1000
+			t.Status = progress.TrackDownloadingAudio
+			t.ErrorMessage = ""
+		})
+	}
 
 	var coverURL string
 	if c := spotify.LargeCover(track.Album.Covers); c != nil {
@@ -369,6 +467,15 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 	outPath := w.store.TrackPath(track, af.Extension())
 	if _, err := os.Stat(outPath); err == nil {
 		log.Printf("  skipping %s - %s (already downloaded)", artist, track.Name)
+		if w.progress != nil {
+			w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
+				t.Title = track.Name
+				t.DurationSec = track.DurationMS / 1000
+				t.Status = progress.TrackAlreadyPresent
+				t.ErrorMessage = ""
+				t.RetryInSec = 0
+			})
+		}
 		return &downloadResult{
 			Path:     outPath,
 			Duration: track.DurationMS / 1000,
@@ -393,6 +500,18 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 	}
 	writer.Close()
 
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
+			t.Status = progress.TrackDownloadingCover
+		})
+	}
+
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
+			t.Status = progress.TrackTagging
+		})
+	}
+
 	// Tag the downloaded file with metadata and cover art.
 	log.Printf("  tagging %s - %s", artist, track.Name)
 	if err := w.tagger.TagTrack(outPath, track); err != nil {
@@ -408,10 +527,18 @@ func (w *Worker) downloadTrack(creds *credentials.Credentials, trackURI string) 
 	}, nil
 }
 
-func (w *Worker) downloadEpisode(creds *credentials.Credentials, ep *spotify.Episode) (*downloadResult, error) {
+func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*downloadResult, error) {
 	af := spotify.PreferAudioFile(ep.AudioFiles)
 	if af == nil {
 		return nil, fmt.Errorf("episode %s has no audio files", ep.URI)
+	}
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
+			t.Title = ep.Name
+			t.DurationSec = ep.DurationMS / 1000
+			t.Status = progress.TrackDownloadingAudio
+			t.ErrorMessage = ""
+		})
 	}
 
 	var coverURL string
@@ -423,6 +550,15 @@ func (w *Worker) downloadEpisode(creds *credentials.Credentials, ep *spotify.Epi
 	outPath := w.store.EpisodePath(ep, af.Extension())
 	if _, err := os.Stat(outPath); err == nil {
 		log.Printf("  skipping episode %s (already downloaded)", ep.Name)
+		if w.progress != nil {
+			w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
+				t.Title = ep.Name
+				t.DurationSec = ep.DurationMS / 1000
+				t.Status = progress.TrackAlreadyPresent
+				t.ErrorMessage = ""
+				t.RetryInSec = 0
+			})
+		}
 		return &downloadResult{
 			Path:     outPath,
 			Duration: ep.DurationMS / 1000,
@@ -445,6 +581,18 @@ func (w *Worker) downloadEpisode(creds *credentials.Credentials, ep *spotify.Epi
 		return nil, err
 	}
 	writer.Close()
+
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
+			t.Status = progress.TrackDownloadingCover
+		})
+	}
+
+	if w.progress != nil {
+		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
+			t.Status = progress.TrackTagging
+		})
+	}
 
 	// Tag the downloaded episode with metadata and cover art.
 	log.Printf("  tagging episode: %s", ep.Name)
