@@ -145,6 +145,10 @@ func runBatch(args []string) error {
 	}
 	defer q.Close()
 
+	if err := q.RecoverStuckJobs(); err != nil {
+		return fmt.Errorf("recover stuck jobs: %w", err)
+	}
+
 	if _, err := q.Enqueue(uris...); err != nil {
 		return fmt.Errorf("enqueue: %w", err)
 	}
@@ -173,6 +177,10 @@ func runServe(args []string) error {
 		return err
 	}
 	defer q.Close()
+
+	if err := q.RecoverStuckJobs(); err != nil {
+		return fmt.Errorf("recover stuck jobs: %w", err)
+	}
 
 	// Start worker in background
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

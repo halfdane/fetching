@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -29,7 +30,7 @@ var trackRetryDelays = []time.Duration{
 
 // withRetry calls fn up to 1+len(trackRetryDelays) times, sleeping between
 // attempts. Returns the last error if all attempts fail.
-func withRetry(label string, onRetry func(retryAttempt, retryMax int, wait time.Duration, lastErr error), fn func() error) error {
+func withRetry(ctx context.Context, label string, onRetry func(retryAttempt, retryMax int, wait time.Duration, lastErr error), fn func() error) error {
 	if err := fn(); err == nil {
 		return nil
 	} else {
@@ -41,7 +42,11 @@ func withRetry(label string, onRetry func(retryAttempt, retryMax int, wait time.
 			if onRetry != nil {
 				onRetry(retryAttempt, retryMax, d, lastErr)
 			}
-			time.Sleep(d)
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			if err := fn(); err == nil {
 				return nil
 			} else {
@@ -210,7 +215,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 			})
 		}
 
-		if err := withRetry(uri, func(retryAttempt, retryMax int, wait time.Duration, lastErr error) {
+		if err := withRetry(ctx, uri, func(retryAttempt, retryMax int, wait time.Duration, lastErr error) {
 			if w.progress != nil {
 				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {
 					t.Status = progress.TrackRetryWaiting
@@ -224,6 +229,9 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 			res, e = w.downloadTrack(job.ID, creds, uri)
 			return e
 		}); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err // propagate; job stays 'running' for crash recovery on next startup
+			}
 			log.Printf("  track %s permanently failed: %v", uri, err)
 			if w.progress != nil {
 				w.progress.UpdateTrack(job.ID, uri, func(t *progress.TrackView) {

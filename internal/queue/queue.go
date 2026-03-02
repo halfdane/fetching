@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -156,6 +157,49 @@ func isDuplicateColumnErr(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "duplicate column name")
 }
 
+// RecoverStuckJobs resets all jobs that were left in 'running' state (e.g. due
+// to a server crash) back to 'pending' and re-enqueues them for immediate
+// processing. It is safe to call on an empty database or when no jobs are stuck.
+// It must be called before the worker begins polling.
+func (q *Queue) RecoverStuckJobs() error {
+	ctx := context.Background()
+
+	rows, err := q.db.QueryContext(ctx,
+		`SELECT id FROM jobs WHERE status = 'running'`)
+	if err != nil {
+		return fmt.Errorf("list stuck jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return fmt.Errorf("scan stuck job id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate stuck jobs: %w", err)
+	}
+
+	for _, id := range ids {
+		_, err := q.db.ExecContext(ctx,
+			`UPDATE jobs SET status = 'pending', started_at = NULL WHERE id = ?`, id)
+		if err != nil {
+			return fmt.Errorf("reset stuck job %d: %w", id, err)
+		}
+
+		body, _ := json.Marshal(goqitePayload{JobID: id})
+		if err := q.gq.Send(ctx, goqite.Message{Body: body}); err != nil {
+			return fmt.Errorf("re-enqueue stuck job %d: %w", id, err)
+		}
+
+		log.Printf("queue: recovered stuck job %d", id)
+	}
+	return nil
+}
+
 // Enqueue adds one or more Spotify URIs to the queue.
 func (q *Queue) Enqueue(uris ...string) ([]*Job, error) {
 	ctx := context.Background()
@@ -200,6 +244,21 @@ func (q *Queue) Next() (*Job, error) {
 	if err := json.Unmarshal(msg.Body, &payload); err != nil {
 		_ = q.gq.Delete(ctx, msg.ID)
 		return nil, fmt.Errorf("parse goqite message payload: %w", err)
+	}
+
+	// Guard: discard stale messages for jobs that are already done or failed.
+	// This can happen when RecoverStuckJobs sent a fresh message and the original
+	// invisible message later resurfaced after the visibility timeout.
+	var currentStatus Status
+	if err := q.db.QueryRowContext(ctx,
+		`SELECT status FROM jobs WHERE id = ?`, payload.JobID,
+	).Scan(&currentStatus); err != nil {
+		_ = q.gq.Delete(ctx, msg.ID)
+		return nil, fmt.Errorf("check job %d status: %w", payload.JobID, err)
+	}
+	if currentStatus == StatusDone || currentStatus == StatusFailed {
+		_ = q.gq.Delete(ctx, msg.ID)
+		return nil, nil
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
