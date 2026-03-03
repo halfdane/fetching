@@ -3,8 +3,10 @@
 package web
 
 import (
+	"embed"
 	"encoding/json"
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -13,6 +15,9 @@ import (
 	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 // Handler holds dependencies for the web UI.
 type Handler struct {
@@ -34,13 +39,19 @@ func New(q *queue.Queue, p *progress.Store, ls *logstore.Store) (*Handler, error
 
 // RegisterRoutes attaches all HTTP handlers to the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /", h.handleIndex)
+	// GET /{$} matches only the exact root "/"; the static file server below
+	// catches everything else (icons, manifest.json, etc.).
+	mux.HandleFunc("GET /{$}", h.handleIndex)
 	mux.HandleFunc("POST /api/enqueue", h.handleEnqueue)
 	mux.HandleFunc("POST /api/jobs", h.handleEnqueue)
 	mux.HandleFunc("POST /api/jobs/retry", h.handleRetry)
 	mux.HandleFunc("GET /api/jobs", h.handleJobs)
 	mux.HandleFunc("GET /api/logs", h.handleLogs)
 	mux.HandleFunc("GET /api/stream", h.handleStream)
+
+	// Serve embedded static assets (SVGs, PNGs, manifest.json) at root.
+	staticFS, _ := fs.Sub(staticFiles, "static")
+	mux.Handle("GET /", http.FileServerFS(staticFS))
 }
 
 func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {

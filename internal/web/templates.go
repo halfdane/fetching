@@ -7,6 +7,10 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>fetching</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon-512-00000000.png">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#181e2b">
     <style>
         :root {
             --bg: #1a1a2e;
