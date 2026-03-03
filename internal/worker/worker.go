@@ -257,29 +257,20 @@ func (w *Worker) generatePlaylistAndCover(meta any, results []fetchResult) {
 	}
 
 	switch v := meta.(type) {
-	case *Album:
+	case *spotify.Album:
 		w.generateAlbumAssets(v, results)
-	case *Playlist:
+	case *spotify.Playlist:
 		w.generatePlaylistAssets(v, results)
-	case *Show:
+	case *spotify.Show:
 		w.generateShowAssets(v, results)
-	case *Track:
+	case *spotify.Track:
 		// Single track — no playlist to generate
-	case *Episode:
+	case *spotify.Episode:
 		// Single episode — no playlist to generate
 	}
 }
 
-// Import types used in switch (they're from spotify package but we reference via meta).
-type (
-	Album    = spotify.Album
-	Playlist = spotify.Playlist
-	Show     = spotify.Show
-	Track    = spotify.Track
-	Episode  = spotify.Episode
-)
-
-func (w *Worker) generateAlbumAssets(album *Album, results []fetchResult) {
+func (w *Worker) generateAlbumAssets(album *spotify.Album, results []fetchResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -320,7 +311,7 @@ func (w *Worker) generateAlbumAssets(album *Album, results []fetchResult) {
 	}
 }
 
-func (w *Worker) generateShowAssets(show *Show, results []fetchResult) {
+func (w *Worker) generateShowAssets(show *spotify.Show, results []fetchResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -353,7 +344,7 @@ func (w *Worker) generateShowAssets(show *Show, results []fetchResult) {
 	}
 }
 
-func (w *Worker) generatePlaylistAssets(pl *Playlist, results []fetchResult) {
+func (w *Worker) generatePlaylistAssets(pl *spotify.Playlist, results []fetchResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -428,7 +419,7 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 		if !ok {
 			return nil, fmt.Errorf("unrecognised metadata type for %s", trackURI)
 		}
-		return w.fetchEpisode(jobID, creds, ep)
+		return w.fetchEpisode(ctx, jobID, creds, ep)
 	}
 
 	artist := "Unknown"
@@ -570,7 +561,7 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 	return nil, fmt.Errorf("all candidates failed for %s: %w", trackURI, lastErr)
 }
 
-func (w *Worker) fetchEpisode(jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*fetchResult, error) {
+func (w *Worker) fetchEpisode(ctx context.Context, jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*fetchResult, error) {
 	// Update title/duration as soon as metadata is known, so it's visible
 	// even if the fetch fails (e.g. episode has no audio files).
 	if w.progress != nil {
@@ -617,17 +608,30 @@ func (w *Worker) fetchEpisode(jobID int64, creds *credentials.Credentials, ep *s
 		}, nil
 	}
 
-	_, writer, err := w.store.CreateEpisodeWriter(ep, af.Extension())
+	slog.Info("fetching episode", "title", ep.Name)
+	err := withRetry(ctx, fmt.Sprintf("episode %s", ep.URI),
+		func(retryAttempt, retryMax int, wait time.Duration, retryErr error) {
+			if w.progress != nil {
+				w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
+					t.Status = progress.TrackRetryWaiting
+					t.RetryAttempt = retryAttempt
+					t.RetryMax = retryMax
+					t.ErrorMessage = retryErr.Error()
+				})
+			}
+		},
+		func() error {
+			_, wr, err := w.store.CreateEpisodeWriter(ep, af.Extension())
+			if err != nil {
+				return err
+			}
+			fetchErr := w.runner.FetchAudio(creds, ep.URI, af.FileID, wr)
+			wr.Close()
+			return fetchErr
+		})
 	if err != nil {
 		return nil, err
 	}
-
-	slog.Info("fetching episode", "title", ep.Name)
-	if err := w.runner.FetchAudio(creds, ep.URI, af.FileID, writer); err != nil {
-		writer.Close()
-		return nil, err
-	}
-	writer.Close()
 
 	// Tag the fetched episode with metadata and cover art.
 	slog.Info("tagging episode", "title", ep.Name)
