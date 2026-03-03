@@ -140,6 +140,32 @@ func (s *Store) MarkCollectionTerminal(jobID int64) {
 	s.broadcastSnapshot()
 }
 
+// Remove deletes one or more collections from the store and broadcasts
+// the updated snapshot. Used when retrying — old terminal entries are
+// removed before the fresh job is inserted.
+func (s *Store) Remove(jobIDs ...int64) {
+	if len(jobIDs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	for _, id := range jobIDs {
+		delete(s.byID, id)
+	}
+	keep := s.order[:0]
+	toRemove := make(map[int64]bool, len(jobIDs))
+	for _, id := range jobIDs {
+		toRemove[id] = true
+	}
+	for _, id := range s.order {
+		if !toRemove[id] {
+			keep = append(keep, id)
+		}
+	}
+	s.order = keep
+	s.mu.Unlock()
+	s.broadcastSnapshot()
+}
+
 func (s *Store) Snapshot() []CollectionView {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -123,7 +123,40 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleRetry(w http.ResponseWriter, r *http.Request) {
-	h.handleEnqueue(w, r)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	uri := strings.TrimSpace(r.FormValue("uri"))
+	if uri == "" {
+		http.Error(w, "uri is required", http.StatusBadRequest)
+		return
+	}
+
+	fallbackQuality := r.FormValue("fallback_quality") == "on"
+	result, err := h.queue.Retry(queue.EnqueueOptions{FallbackQuality: fallbackQuality}, uri)
+	if err != nil {
+		slog.Error("retry error", "err", err)
+		http.Error(w, "failed to retry", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove stale progress entries for the deleted jobs, then register the new one.
+	h.progress.Remove(result.DeletedIDs...)
+	h.progress.UpsertSubmitted(result.NewJob.ID, result.NewJob.SpotifyURI)
+
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jobId":      result.NewJob.ID,
+			"sourceUri":  result.NewJob.SpotifyURI,
+			"acceptedAt": result.NewJob.CreatedAt,
+		})
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (h *Handler) handleJobs(w http.ResponseWriter, r *http.Request) {
