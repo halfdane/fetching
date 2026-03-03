@@ -43,10 +43,10 @@ func New(binary string, verbose bool) *Tagger {
 func (t *Tagger) TagTrack(audioPath string, track *spotify.Track) error {
 	// Build metadata key-value pairs
 	meta := map[string]string{
-		"title":        track.Name,
-		"album":        track.Album.Name,
-		"track":        fmt.Sprintf("%d", track.Number),
-		"disc":         fmt.Sprintf("%d", track.DiscNumber),
+		"title": track.Name,
+		"album": track.Album.Name,
+		"track": fmt.Sprintf("%d", track.Number),
+		"disc":  fmt.Sprintf("%d", track.DiscNumber),
 	}
 
 	// Artists

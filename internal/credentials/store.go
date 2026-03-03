@@ -29,8 +29,8 @@ func (c *Credentials) JSON() ([]byte, error) {
 
 // Store manages credential persistence and automatic refresh.
 type Store struct {
-	path string
-	mu   sync.Mutex
+	path  string
+	mu    sync.Mutex
 	creds *Credentials
 
 	// authFn runs fetching-cli auth and returns fresh credentials.

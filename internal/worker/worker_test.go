@@ -173,7 +173,7 @@ func (f *fakeCreds) Get() (*credentials.Credentials, error) {
 // fakeTagger implements AudioTagger. If err is non-nil it is returned on every call.
 type fakeTagger struct{ err error }
 
-func (f *fakeTagger) TagTrack(_ string, _ *spotify.Track) error   { return f.err }
+func (f *fakeTagger) TagTrack(_ string, _ *spotify.Track) error     { return f.err }
 func (f *fakeTagger) TagEpisode(_ string, _ *spotify.Episode) error { return f.err }
 
 // newTestWorker builds a Worker backed by a real in-memory queue and a temp storage dir.
