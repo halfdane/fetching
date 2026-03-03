@@ -1,4 +1,4 @@
-// Package storage handles writing downloaded audio files to disk using a
+// Package storage handles writing fetched audio files to disk using a
 // path template: tokens like {artist}, {album}, {track_number} are expanded
 // to form the path relative to the base directory.
 package storage
@@ -14,7 +14,7 @@ import (
 	"github.com/halfdane/fetching/internal/spotify"
 )
 
-// Storage manages the output directory for downloaded files.
+// Storage manages the output directory for fetched files.
 type Storage struct {
 	BaseDir         string
 	TrackTemplate   string

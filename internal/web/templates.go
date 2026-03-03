@@ -424,7 +424,7 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             switch (track.status) {
                 case 'queued':
                 case 'resolving_metadata':
-                case 'downloading_audio':
+                case 'fetching_audio':
                     return 'Loading metadata\u2026';
                 default:
                     return track.trackUri || 'Unknown track';
@@ -435,7 +435,7 @@ const indexTemplate = `{{define "index"}}<!DOCTYPE html>
             switch (track.status) {
                 case 'queued': return 'Queued';
                 case 'resolving_metadata': return 'Fetching metadata';
-                case 'downloading_audio': return 'Processing';
+                case 'fetching_audio': return 'Fetching';
                 case 'retry_waiting': return 'Retry ' + (track.retryAttempt || 0) + '/' + (track.retryMax || 0);
                 case 'already_present': return 'Already present';
                 case 'done': return 'Done';

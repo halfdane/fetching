@@ -11,7 +11,7 @@ type TrackStatus string
 const (
 	TrackQueued            TrackStatus = "queued"
 	TrackResolvingMetadata TrackStatus = "resolving_metadata"
-	TrackDownloadingAudio  TrackStatus = "downloading_audio"
+	TrackFetchingAudio     TrackStatus = "fetching_audio"
 	TrackRetryWaiting      TrackStatus = "retry_waiting"
 	TrackAlreadyPresent    TrackStatus = "already_present"
 	TrackDone              TrackStatus = "done"

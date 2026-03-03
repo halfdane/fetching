@@ -7,7 +7,7 @@ let
 in
 {
   options.services.fetching = {
-    enable = lib.mkEnableOption "fetching Spotify music downloader";
+    enable = lib.mkEnableOption "fetching Spotify music fetcher";
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -24,7 +24,7 @@ in
     outputDir = lib.mkOption {
       type = lib.types.str;
       default = "/var/lib/fetching/music";
-      description = "Directory where downloaded music files are stored.";
+      description = "Directory where fetched music files are stored.";
     };
 
     port = lib.mkOption {
@@ -36,7 +36,7 @@ in
     concurrency = lib.mkOption {
       type = lib.types.int;
       default = 1;
-      description = "Maximum number of parallel downloads.";
+      description = "Maximum number of parallel fetches.";
     };
 
     user = lib.mkOption {
@@ -99,7 +99,7 @@ in
     ];
 
     systemd.services.fetching = {
-      description = "fetching Spotify music downloader";
+      description = "fetching Spotify music fetcher";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];

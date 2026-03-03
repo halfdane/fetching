@@ -180,7 +180,7 @@ func TestSavePlaylistCoverRouting(t *testing.T) {
 		urls []string
 	}{
 		{"zero urls — no file", []string{}},
-		{"one url — direct download", []string{srv.URL}},
+		{"one url — direct fetch", []string{srv.URL}},
 		{"two urls — split", []string{srv.URL, srv.URL}},
 		{"three urls — L-shape", []string{srv.URL, srv.URL, srv.URL}},
 		{"four urls — 2x2 grid", []string{srv.URL, srv.URL, srv.URL, srv.URL}},

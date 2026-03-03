@@ -117,15 +117,15 @@ func TestUpdateTrackStatus(t *testing.T) {
 	s.SetTrackQueued(1, "spotify:track:t1")
 
 	s.UpdateTrack(1, "spotify:track:t1", func(tv *TrackView) {
-		tv.Status = TrackDownloadingAudio
+		tv.Status = TrackFetchingAudio
 		tv.Title = "My Track"
 		tv.DurationSec = 210
 	})
 
 	c := s.Snapshot()[0]
 	tr := c.Tracks[0]
-	if tr.Status != TrackDownloadingAudio {
-		t.Errorf("Status = %q, want %q", tr.Status, TrackDownloadingAudio)
+	if tr.Status != TrackFetchingAudio {
+		t.Errorf("Status = %q, want %q", tr.Status, TrackFetchingAudio)
 	}
 	if tr.Title != "My Track" {
 		t.Errorf("Title = %q, want %q", tr.Title, "My Track")
@@ -140,15 +140,15 @@ func TestUpdateTrackCreatesIfMissing(t *testing.T) {
 	s.UpsertSubmitted(1, "spotify:album:abc")
 
 	s.UpdateTrack(1, "spotify:track:t1", func(tv *TrackView) {
-		tv.Status = TrackDownloadingAudio
+		tv.Status = TrackFetchingAudio
 	})
 
 	c := s.Snapshot()[0]
 	if len(c.Tracks) != 1 {
 		t.Fatalf("expected 1 track, got %d", len(c.Tracks))
 	}
-	if c.Tracks[0].Status != TrackDownloadingAudio {
-		t.Errorf("Status = %q, want %q", c.Tracks[0].Status, TrackDownloadingAudio)
+	if c.Tracks[0].Status != TrackFetchingAudio {
+		t.Errorf("Status = %q, want %q", c.Tracks[0].Status, TrackFetchingAudio)
 	}
 }
 
@@ -359,8 +359,8 @@ func TestFullLifecycle(t *testing.T) {
 	s.SetTrackQueued(1, "spotify:track:t1")
 	s.SetTrackQueued(1, "spotify:track:t2")
 
-	// 4. Track 1: resolving → downloading → done
-	for _, status := range []TrackStatus{TrackResolvingMetadata, TrackDownloadingAudio, TrackDone} {
+	// 4. Track 1: resolving → fetching → done
+	for _, status := range []TrackStatus{TrackResolvingMetadata, TrackFetchingAudio, TrackDone} {
 		s.UpdateTrack(1, "spotify:track:t1", func(tv *TrackView) {
 			tv.Status = status
 			if status == TrackDone {

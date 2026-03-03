@@ -105,7 +105,7 @@ func (f *fakeRunner) FetchAudio(_ *credentials.Credentials, _, _ string, w io.Wr
 
 **Test cases to write:**
 - Full happy path: single track → file on disk, job marked `done`
-- Audio download fails → `withRetry` retries; after all retries, job completes (track skipped)
+- Audio fetch fails → `withRetry` retries; after all retries, job completes (track skipped)
 - Metadata fetch fails → job marked `failed` and eventually retried at queue level
 - Album with mixed success/failure → partial results → M3U8 still written for successful tracks
 - Context cancellation mid-loop → job fails fast

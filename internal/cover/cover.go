@@ -22,17 +22,17 @@ const (
 	Half = OutputSize / 2
 )
 
-// SaveAlbumCover downloads the LARGE cover for an album and saves it as cover.jpg
+// SaveAlbumCover fetches the LARGE cover for an album and saves it as cover.jpg
 // in the given directory.
 func SaveAlbumCover(dir string, covers []spotify.Cover) error {
 	c := largeCover(covers)
 	if c == nil {
 		return nil // no cover available
 	}
-	return downloadToFile(spotify.CoverURL(c.FileID), coverPath(dir))
+	return fetchToFile(spotify.CoverURL(c.FileID), coverPath(dir))
 }
 
-// SaveShowCover downloads the LARGE cover for a show and saves it as cover.jpg.
+// SaveShowCover fetches the LARGE cover for a show and saves it as cover.jpg.
 func SaveShowCover(dir string, covers []spotify.Cover) error {
 	return SaveAlbumCover(dir, covers) // same logic
 }
@@ -52,7 +52,7 @@ func SavePlaylistCover(dir string, coverURLs []string) error {
 
 	switch len(coverURLs) {
 	case 1:
-		return downloadToFile(coverURLs[0], dest)
+		return fetchToFile(coverURLs[0], dest)
 	case 2:
 		return compositeTwo(coverURLs, dest)
 	case 3:
@@ -192,7 +192,7 @@ func fetchImage(url string) (image.Image, error) {
 	return img, err
 }
 
-func downloadToFile(url, dest string) error {
+func fetchToFile(url, dest string) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		return fmt.Errorf("download cover: %w", err)

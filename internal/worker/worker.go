@@ -1,4 +1,4 @@
-// Package worker processes download jobs from the queue sequentially.
+// Package worker processes fetch jobs from the queue sequentially.
 package worker
 
 import (
@@ -126,8 +126,8 @@ func (w *Worker) Run(ctx context.Context, oneShot bool) error {
 	}
 }
 
-// downloadResult holds the outcome of downloading a single track or episode.
-type downloadResult struct {
+// fetchResult holds the outcome of fetching a single track or episode.
+type fetchResult struct {
 	Path     string
 	Duration int // seconds
 	Artist   string
@@ -196,8 +196,8 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 		}
 	}
 
-	// Step 3: For each track, fetch its metadata, download, and tag
-	var results []downloadResult
+	// Step 3: For each track, fetch its metadata, fetch audio, and tag
+	var results []fetchResult
 	for _, uri := range trackURIs {
 		select {
 		case <-ctx.Done():
@@ -214,7 +214,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 			})
 		}
 
-		res, err := w.downloadTrack(ctx, job.ID, creds, uri, job.FallbackQuality)
+		res, err := w.fetchTrack(ctx, job.ID, creds, uri, job.FallbackQuality)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err
@@ -251,7 +251,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 	return nil
 }
 
-func (w *Worker) generatePlaylistAndCover(meta any, results []downloadResult) {
+func (w *Worker) generatePlaylistAndCover(meta any, results []fetchResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -279,7 +279,7 @@ type (
 	Episode  = spotify.Episode
 )
 
-func (w *Worker) generateAlbumAssets(album *Album, results []downloadResult) {
+func (w *Worker) generateAlbumAssets(album *Album, results []fetchResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -320,7 +320,7 @@ func (w *Worker) generateAlbumAssets(album *Album, results []downloadResult) {
 	}
 }
 
-func (w *Worker) generateShowAssets(show *Show, results []downloadResult) {
+func (w *Worker) generateShowAssets(show *Show, results []fetchResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -353,7 +353,7 @@ func (w *Worker) generateShowAssets(show *Show, results []downloadResult) {
 	}
 }
 
-func (w *Worker) generatePlaylistAssets(pl *Playlist, results []downloadResult) {
+func (w *Worker) generatePlaylistAssets(pl *Playlist, results []fetchResult) {
 	if len(results) == 0 {
 		return
 	}
@@ -396,7 +396,7 @@ func (w *Worker) generatePlaylistAssets(pl *Playlist, results []downloadResult) 
 	}
 }
 
-func resultsToEntries(results []downloadResult) []playlist.TrackEntry {
+func resultsToEntries(results []fetchResult) []playlist.TrackEntry {
 	entries := make([]playlist.TrackEntry, len(results))
 	for i, r := range results {
 		entries[i] = playlist.TrackEntry{
@@ -409,7 +409,7 @@ func resultsToEntries(results []downloadResult) []playlist.TrackEntry {
 	return entries
 }
 
-func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credentials.Credentials, trackURI string, fallbackQuality bool) (*downloadResult, error) {
+func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials.Credentials, trackURI string, fallbackQuality bool) (*fetchResult, error) {
 	// Fetch track metadata to get audio file IDs
 	metaJSON, err := w.runner.FetchMetadata(creds, trackURI)
 	if err != nil {
@@ -428,7 +428,7 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 		if !ok {
 			return nil, fmt.Errorf("unrecognised metadata type for %s", trackURI)
 		}
-		return w.downloadEpisode(jobID, creds, ep)
+		return w.fetchEpisode(jobID, creds, ep)
 	}
 
 	artist := "Unknown"
@@ -436,7 +436,7 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 		artist = track.Artists[0].Name
 	}
 	// Update title/duration as soon as metadata is known, so it's visible
-	// even if the download fails (e.g. track has no audio files).
+	// even if the fetch fails (e.g. track has no audio files).
 	if w.progress != nil {
 		w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
 			t.Title = track.Name
@@ -478,10 +478,10 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 		coverURL = spotify.CoverURL(c.FileID)
 	}
 
-	// Skip if already downloaded (check against the best candidate's path).
+	// Skip if already fetched (check against the best candidate's path).
 	outPath := w.store.TrackPath(track, sorted[0].File.Extension())
 	if _, err := os.Stat(outPath); err == nil {
-		slog.Info("skipping (already downloaded)", "artist", artist, "title", track.Name)
+		slog.Info("skipping (already fetched)", "artist", artist, "title", track.Name)
 		if w.progress != nil {
 			w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
 				t.Title = track.Name
@@ -490,7 +490,7 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 				t.ErrorMessage = ""
 			})
 		}
-		return &downloadResult{
+		return &fetchResult{
 			Path:     outPath,
 			Duration: track.DurationMS / 1000,
 			Artist:   artist,
@@ -513,7 +513,7 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 
 		if w.progress != nil {
 			w.progress.UpdateTrack(jobID, trackURI, func(t *progress.TrackView) {
-				t.Status = progress.TrackDownloadingAudio
+				t.Status = progress.TrackFetchingAudio
 				t.RetryAttempt = 0
 				t.RetryMax = len(trackRetryDelays)
 				t.ErrorMessage = ""
@@ -547,7 +547,7 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 			if err := w.tagger.TagTrack(candOutPath, track); err != nil {
 				slog.Warn("tagging failed", "uri", trackURI, "err", err)
 			}
-			return &downloadResult{
+			return &fetchResult{
 				Path:     candOutPath,
 				Duration: track.DurationMS / 1000,
 				Artist:   artist,
@@ -570,9 +570,9 @@ func (w *Worker) downloadTrack(ctx context.Context, jobID int64, creds *credenti
 	return nil, fmt.Errorf("all candidates failed for %s: %w", trackURI, lastErr)
 }
 
-func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*downloadResult, error) {
+func (w *Worker) fetchEpisode(jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*fetchResult, error) {
 	// Update title/duration as soon as metadata is known, so it's visible
-	// even if the download fails (e.g. episode has no audio files).
+	// even if the fetch fails (e.g. episode has no audio files).
 	if w.progress != nil {
 		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
 			t.Title = ep.Name
@@ -586,7 +586,7 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 	}
 	if w.progress != nil {
 		w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
-			t.Status = progress.TrackDownloadingAudio
+			t.Status = progress.TrackFetchingAudio
 			t.ErrorMessage = ""
 		})
 	}
@@ -596,10 +596,10 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 		coverURL = spotify.CoverURL(c.FileID)
 	}
 
-	// Skip if already downloaded.
+	// Skip if already fetched.
 	outPath := w.store.EpisodePath(ep, af.Extension())
 	if _, err := os.Stat(outPath); err == nil {
-		slog.Info("skipping episode (already downloaded)", "title", ep.Name)
+		slog.Info("skipping episode (already fetched)", "title", ep.Name)
 		if w.progress != nil {
 			w.progress.UpdateTrack(jobID, ep.URI, func(t *progress.TrackView) {
 				t.Title = ep.Name
@@ -608,7 +608,7 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 				t.ErrorMessage = ""
 			})
 		}
-		return &downloadResult{
+		return &fetchResult{
 			Path:     outPath,
 			Duration: ep.DurationMS / 1000,
 			Artist:   ep.ShowName,
@@ -617,27 +617,25 @@ func (w *Worker) downloadEpisode(jobID int64, creds *credentials.Credentials, ep
 		}, nil
 	}
 
-	slog.Info("selected format", "format", af.Format, "uri", ep.URI)
-
 	_, writer, err := w.store.CreateEpisodeWriter(ep, af.Extension())
 	if err != nil {
 		return nil, err
 	}
 
-	slog.Info("downloading episode", "title", ep.Name)
+	slog.Info("fetching episode", "title", ep.Name)
 	if err := w.runner.FetchAudio(creds, ep.URI, af.FileID, writer); err != nil {
 		writer.Close()
 		return nil, err
 	}
 	writer.Close()
 
-	// Tag the downloaded episode with metadata and cover art.
+	// Tag the fetched episode with metadata and cover art.
 	slog.Info("tagging episode", "title", ep.Name)
 	if err := w.tagger.TagEpisode(outPath, ep); err != nil {
 		slog.Warn("tagging failed", "uri", ep.URI, "err", err)
 	}
 
-	return &downloadResult{
+	return &fetchResult{
 		Path:     outPath,
 		Duration: ep.DurationMS / 1000,
 		Artist:   ep.ShowName,

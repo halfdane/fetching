@@ -1,13 +1,13 @@
 # fetching
 
-Spotify music downloader with CLI batch mode and web UI. Wraps [fetching-cli](https://github.com/halfdane/fetching-cli/) for authentication, metadata retrieval, and audio downloading.
+Spotify music fetcher with CLI batch mode and web UI. Wraps [fetching-cli](https://github.com/halfdane/fetching-cli/) for authentication, metadata retrieval, and audio fetching.
 
 ## Features
 
-- **Batch mode**: download playlists, albums, tracks, shows, or episodes from the command line
+- **Batch mode**: fetch playlists, albums, tracks, shows, or episodes from the command line
 - **Web UI**: interactive queue management with live status updates
 - **Persistent queue**: SQLite-backed job queue survives restarts
-- **Sequential processing**: downloads one track at a time by default (configurable concurrency)
+- **Sequential processing**: fetches one track at a time by default (configurable concurrency)
 - **Automatic credentials**: handles OAuth auth and token refresh transparently
 - **NixOS module**: systemd service with optional nginx reverse proxy
 
@@ -45,7 +45,7 @@ Spotify music downloader with CLI batch mode and web UI. Wraps [fetching-cli](ht
 
 ### Binary (GitHub release)
 
-Download a prebuilt binary from the [Releases](https://github.com/halfdane/fetching/releases) page.
+Grab a prebuilt binary from the [Releases](https://github.com/halfdane/fetching/releases) page.
 
 ### Build from source
 
@@ -61,7 +61,7 @@ go build -o fetching ./cmd/fetching
 
 ### Batch mode
 
-Download one or more Spotify URIs and exit when done:
+Fetch one or more Spotify URIs and exit when done:
 
 ```sh
 fetching batch spotify:album:7FwAtuhhWivxvK4aPgyyUD spotify:track:12l8e8JfVOgX7jQewjyNbU
@@ -85,7 +85,7 @@ Start the server with a background worker:
 fetching serve --port 8080
 ```
 
-Then open `http://localhost:8080` to paste Spotify URIs and monitor the download queue.
+Then open `http://localhost:8080` to paste Spotify URIs and monitor the fetch queue.
 
 ### Credentials
 

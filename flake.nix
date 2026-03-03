@@ -1,5 +1,5 @@
 {
-  description = "fetching — Spotify music downloader with CLI batch mode and web UI";
+  description = "fetching — Spotify music fetcher with CLI batch mode and web UI";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
@@ -28,7 +28,7 @@
                 --prefix PATH : ${fetchingCliPkg}/bin:${pkgs.ffmpeg}/bin
             '';
             meta = {
-              description = "Spotify music downloader with CLI batch mode and web UI";
+              description = "Spotify music fetcher with CLI batch mode and web UI";
               mainProgram = "fetching";
             };
           };
