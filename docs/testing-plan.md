@@ -11,8 +11,8 @@
 | `queue` | ✅ covered | Enqueue, Next, Complete, Fail, List, Retry, RecoverStuckJobs | SQLite `:memory:` DB |
 | `progress` | ✅ covered | Snapshot, log, concurrent access | — |
 | `web` | ✅ covered | Enqueue, retry, list, SSE stream, JSON/HTML | `httptest` + mock queue |
-| `worker` | ❌ not covered | — | Needs mocks for all external I/O |
-| `tagger` | ❌ not covered | — | Needs mock for ffmpeg subprocess |
+| `worker` | ✅ covered | Happy path, audio-fail skip, metadata-fail, album M3U8, ctx cancel, skip-already-present | Interface mocks |
+| `tagger` | ✅ covered | TagTrack/TagEpisode happy + failure, metadata args, buildArgs | TestMain helper-process |
 | `cli` | ❌ not covered | — | Wraps external binary |
 | `credentials` | ❌ not covered | — | Filesystem I/O |
 
@@ -43,62 +43,26 @@ The packages above with ✅ (first four) are pure functions or local file I/O; t
 
 ---
 
-## Phase 3 — Worker (interface mocks)
+## Phase 3 — Worker (interface mocks) ✅ done
 
-The worker depends on four external things. Introduce interfaces so tests can inject fakes.
+`internal/worker/deps.go` defines three interfaces:
+- `MetadataFetcher` — `FetchMetadata` + `FetchAudio` (satisfied by `*cli.Runner`)
+- `CredentialProvider` — `Get()` (satisfied by `*credentials.Store`)
+- `AudioTagger` — `TagTrack` + `TagEpisode` (satisfied by `*tagger.Tagger`)
 
-### Define interfaces
+`Worker` struct fields and `New()` use these interfaces, eliminating the `cli` and `tagger` package imports.
 
-```go
-// internal/worker/deps.go
+`internal/worker/worker_test.go` — 12 tests (7 new + 5 existing `withRetry`):
+- `TestRun_SingleTrackHappyPath` — track → .ogg on disk, job `done`
+- `TestRun_EpisodeHappyPath` — episode → .ogg, job `done`
+- `TestRun_MetadataFetchFails` — top-level error propagated from `processJob`
+- `TestRun_AudioFetchFails_TrackSkipped` — audio error → track skipped, job still `done`
+- `TestRun_Album_WritesPlaylistFile` — 2 tracks + .m3u8 produced
+- `TestRun_ContextCancelled_BeforeProcessing` — pre-cancelled ctx returns immediately
+- `TestRun_AlreadyFetched_SkipsAudio` — second run does not call `FetchAudio` again
 
-type MetadataRunner interface {
-    FetchMetadata(creds *credentials.Credentials, uri string) ([]byte, error)
-    FetchAudio(creds *credentials.Credentials, uri, fileID string, w io.Writer) error
-}
-
-type CredentialStore interface {
-    Get() (*credentials.Credentials, error)
-}
-
-type AudioTagger interface {
-    TagTrack(path string, track *spotify.Track) error
-    TagEpisode(path string, ep *spotify.Episode) error
-}
-```
-
-The `storage.Storage` and `queue.Queue` can be used directly in tests (using
-`t.TempDir()` + `:memory:` DB) rather than mocked.
-
-### Fake implementations (in `_test.go` files)
-
-```go
-type fakeRunner struct {
-    trackJSON  []byte
-    audioError error
-}
-
-func (f *fakeRunner) FetchMetadata(_ *credentials.Credentials, _ string) ([]byte, error) {
-    return f.trackJSON, nil
-}
-
-func (f *fakeRunner) FetchAudio(_ *credentials.Credentials, _, _ string, w io.Writer) error {
-    if f.audioError != nil {
-        return f.audioError
-    }
-    _, _ = w.Write([]byte("fake audio data"))
-    return nil
-}
-```
-
-**Test cases to write:**
-- Full happy path: single track → file on disk, job marked `done`
-- Audio fetch fails → `withRetry` retries; after all retries, job completes (track skipped)
-- Metadata fetch fails → job marked `failed` and eventually retried at queue level
-- Album with mixed success/failure → partial results → M3U8 still written for successful tracks
-- Context cancellation mid-loop → job fails fast
-
-**File:** `internal/worker/worker_test.go`
+**Bug fixes found by tests:**
+- `fetchTrack` and `fetchEpisode` now remove the partial/empty output file when audio download fails, so a later `os.Stat` skip-check is not fooled into thinking the track was already downloaded.
 
 ---
 
@@ -120,16 +84,23 @@ HTML templates live in `internal/web/templates/*.html` (real files, loaded via `
 
 ---
 
-## Phase 5 — Tagger (subprocess mock)
+## Phase 5 — Tagger (subprocess mock) ✅ done
 
-The tagger shells out to `ffmpeg`. Options:
+`internal/tagger/tagger.go` gains an unexported `cmdFunc func(string, ...string) *exec.Cmd`
+field (nil = use `exec.Command`). No public API change; `New()` is unchanged.
 
-1. **Wrap the call** behind an interface `type FFmpegRunner interface { Run(args ...string) error }` and inject a fake in tests.
-2. **Integration test only** behind a build tag: `//go:build integration` — requires ffmpeg on PATH.
+`internal/tagger/tagger_test.go` uses the **TestMain helper-process** pattern:
+the test binary re-invokes itself with `GO_WANT_HELPER_PROCESS=1` as a minimal
+stub that copies the input file to the output path (simulating ffmpeg's
+copy-then-rename strategy). `FAKE_FFMPEG_FAIL=1` forces failure;
+`FAKE_FFMPEG_ARGS_FILE=<path>` captures the argument list.
 
-Recommended: do both. Unit tests use the fake; the integration test is gated and only runs in CI where ffmpeg is available.
-
-**File:** `internal/tagger/tagger_test.go`
+8 tests:
+- `TestTagTrack_HappyPath` / `TestTagEpisode_HappyPath` — file intact after tag
+- `TestTagTrack_FfmpegFailure` / `TestTagEpisode_FfmpegFailure` — error propagated, temp file cleaned up
+- `TestTagTrack_PassesMetadataArgs` / `TestTagEpisode_PassesMetadataArgs` — title/album/artist in ffmpeg args
+- `TestBuildArgs_OGGNoCoverDoesNotUsePicStream` — OGG branch avoids `-map`/`-c:v`
+- `TestBuildArgs_MP3HasId3v2` — MP3 branch includes `-id3v2_version 3`
 
 ---
 
@@ -167,9 +138,10 @@ internal/
   playlist/      playlist_test.go       ✅ done
   storage/       storage_test.go        ✅ done
   cover/         cover_test.go          ✅ done
-  queue/         queue_test.go          Phase 2
-  worker/        worker_test.go         Phase 3
-               deps.go                Phase 3 (interfaces)
-  web/           handler_test.go        Phase 4
-  tagger/        tagger_test.go         Phase 5
+  queue/         queue_test.go          ✅ done (Phase 2)
+  progress/      store_test.go          ✅ done
+  worker/        worker_test.go         ✅ done (Phase 3)
+               deps.go                ✅ done (Phase 3 interfaces)
+  web/           handler_test.go        ✅ done (Phase 4)
+  tagger/        tagger_test.go         ✅ done (Phase 5)
 ```
