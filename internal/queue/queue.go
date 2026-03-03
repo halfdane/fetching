@@ -11,7 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -140,6 +140,9 @@ func migrate(db *sql.DB) error {
 	columnMigrations := []string{
 		`ALTER TABLE jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE jobs ADD COLUMN fallback_quality INTEGER NOT NULL DEFAULT 0`,
+		// Stores the goqite message ID while the job is running, eliminating
+		// the need to scan the entire goqite table to find the message on completion.
+		`ALTER TABLE jobs ADD COLUMN goqite_msg_id TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range columnMigrations {
 		if _, err := db.Exec(stmt); err != nil {
@@ -187,7 +190,8 @@ func (q *Queue) RecoverStuckJobs() error {
 
 	for _, id := range ids {
 		_, err := q.db.ExecContext(ctx,
-			`UPDATE jobs SET status = 'pending', started_at = NULL WHERE id = ?`, id)
+			// Clear goqite_msg_id: the old invisible message is no longer ours to delete.
+			`UPDATE jobs SET status = 'pending', started_at = NULL, goqite_msg_id = '' WHERE id = ?`, id)
 		if err != nil {
 			return fmt.Errorf("reset stuck job %d: %w", id, err)
 		}
@@ -197,7 +201,7 @@ func (q *Queue) RecoverStuckJobs() error {
 			return fmt.Errorf("re-enqueue stuck job %d: %w", id, err)
 		}
 
-		log.Printf("queue: recovered stuck job %d", id)
+		slog.Info("queue: recovered stuck job", "id", id)
 	}
 	return nil
 }
@@ -277,8 +281,8 @@ func (q *Queue) Next() (*Job, error) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = q.db.ExecContext(ctx,
-		`UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?`,
-		now, payload.JobID,
+		`UPDATE jobs SET status = 'running', started_at = ?, goqite_msg_id = ? WHERE id = ?`,
+		now, string(msg.ID), payload.JobID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("mark job %d running: %w", payload.JobID, err)
@@ -309,18 +313,13 @@ func (q *Queue) Fail(id int64, errMsg string) error {
 func (q *Queue) finishJob(id int64, finalStatus Status, errMsg string) error {
 	ctx := context.Background()
 
-	// Load current retry count.
+	// Load current retry count and stored goqite message ID in one query.
 	var retryCount int
+	var msgID string
 	if err := q.db.QueryRowContext(ctx,
-		`SELECT retry_count FROM jobs WHERE id = ?`, id,
-	).Scan(&retryCount); err != nil {
-		return fmt.Errorf("load retry count for job %d: %w", id, err)
-	}
-
-	// Find the goqite message ID for this job.
-	msgID, err := q.findGoqiteID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("find goqite message for job %d: %w", id, err)
+		`SELECT retry_count, goqite_msg_id FROM jobs WHERE id = ?`, id,
+	).Scan(&retryCount, &msgID); err != nil {
+		return fmt.Errorf("load job %d: %w", id, err)
 	}
 
 	if finalStatus == StatusFailed && retryCount < maxRetries {
@@ -334,7 +333,7 @@ func (q *Queue) finishJob(id int64, finalStatus Status, errMsg string) error {
 			return fmt.Errorf("re-enqueue job %d: %w", id, err)
 		}
 
-		_, err = q.db.ExecContext(ctx,
+		_, err := q.db.ExecContext(ctx,
 			`UPDATE jobs SET status = 'pending', retry_count = retry_count + 1, error = ? WHERE id = ?`,
 			errMsg, id)
 		return err
@@ -345,36 +344,51 @@ func (q *Queue) finishJob(id int64, finalStatus Status, errMsg string) error {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = q.db.ExecContext(ctx,
+	_, err := q.db.ExecContext(ctx,
 		`UPDATE jobs SET status = ?, error = ?, completed_at = ? WHERE id = ?`,
 		finalStatus, errMsg, now, id)
 	return err
 }
 
-// findGoqiteID returns the goqite message ID currently associated with job id.
-func (q *Queue) findGoqiteID(ctx context.Context, jobID int64) (string, error) {
-	rows, err := q.db.QueryContext(ctx,
-		`SELECT id, body FROM goqite WHERE queue = 'spotify'`)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
+// RetryResult holds the outcome of a Retry call.
+type RetryResult struct {
+	NewJob     *Job
+	DeletedIDs []int64 // previous terminal job IDs removed from the DB
+}
 
+// Retry enqueues a fresh job for the given URI after deleting any existing
+// terminal-state (done/failed) jobs for it. This is the "clean clone" pattern:
+// old rows are removed so the UI shows only the new pending job.
+func (q *Queue) Retry(opts EnqueueOptions, uri string) (*RetryResult, error) {
+	ctx := context.Background()
+
+	rows, err := q.db.QueryContext(ctx,
+		`SELECT id FROM jobs WHERE spotify_uri = ? AND status IN ('done', 'failed')`, uri)
+	if err != nil {
+		return nil, fmt.Errorf("find terminal jobs for %q: %w", uri, err)
+	}
+	var deletedIDs []int64
 	for rows.Next() {
-		var msgID string
-		var body []byte
-		if err := rows.Scan(&msgID, &body); err != nil {
-			continue
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
 		}
-		var p goqitePayload
-		if err := json.Unmarshal(body, &p); err != nil {
-			continue
-		}
-		if p.JobID == jobID {
-			return msgID, nil
+		deletedIDs = append(deletedIDs, id)
+	}
+	rows.Close()
+
+	for _, id := range deletedIDs {
+		if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id); err != nil {
+			return nil, fmt.Errorf("delete old job %d: %w", id, err)
 		}
 	}
-	return "", nil
+
+	jobs, err := q.Enqueue(opts, uri)
+	if err != nil {
+		return nil, err
+	}
+	return &RetryResult{NewJob: jobs[0], DeletedIDs: deletedIDs}, nil
 }
 
 // List returns all jobs ordered by creation time descending.
