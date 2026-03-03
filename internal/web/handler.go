@@ -19,6 +19,9 @@ import (
 //go:embed static
 var staticFiles embed.FS
 
+//go:embed templates
+var templateFiles embed.FS
+
 // Handler holds dependencies for the web UI.
 type Handler struct {
 	queue    *queue.Queue
@@ -30,7 +33,7 @@ type Handler struct {
 // New creates a Handler with the given dependencies.
 // ls may be nil, in which case no log streaming is provided.
 func New(q *queue.Queue, p *progress.Store, ls *logstore.Store) (*Handler, error) {
-	tmpl, err := template.New("").Parse(indexTemplate + jobsPartial)
+	tmpl, err := template.New("").ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}

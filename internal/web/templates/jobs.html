@@ -1,0 +1,12 @@
+{{define "jobs"}}<ul id="job-list" class="jobs">
+{{if .}}{{range .}}<li class="collection">
+    <div class="collection-header">
+        {{if and .CoverURL (not .PlaceholderCover)}}<img class="cover" src="{{.CoverURL}}" alt="cover">{{else}}<div class="cover cover-placeholder">Cover</div>{{end}}
+        <div class="collection-main">
+            <div class="collection-title">{{.Title}}</div>
+            <div class="collection-meta">{{.Kind}} · {{.DoneTracks}}/{{.TotalTracks}} done</div>
+            <div class="progress"><div class="progress-fill" style="width:0%"></div></div>
+        </div>
+    </div>
+</li>{{end}}{{else}}<p class="empty">No jobs yet.</p>{{end}}
+</ul>{{end}}
