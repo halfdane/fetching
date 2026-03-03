@@ -8,50 +8,38 @@
 | `playlist` | ✅ covered | M3U8 generation | Writes to `t.TempDir()` |
 | `storage` | ✅ covered | Path construction, sanitization | Pure path logic, no disk writes |
 | `cover` | ✅ covered | Drawing, composition, HTTP routing | Uses `httptest.Server` for network calls |
-| `queue` | ❌ not covered | — | Needs SQLite in-memory DB |
+| `queue` | ✅ covered | Enqueue, Next, Complete, Fail, List, Retry, RecoverStuckJobs | SQLite `:memory:` DB |
+| `progress` | ✅ covered | Snapshot, log, concurrent access | — |
+| `web` | ✅ covered | Enqueue, retry, list, SSE stream, JSON/HTML | `httptest` + mock queue |
 | `worker` | ❌ not covered | — | Needs mocks for all external I/O |
 | `tagger` | ❌ not covered | — | Needs mock for ffmpeg subprocess |
 | `cli` | ❌ not covered | — | Wraps external binary |
 | `credentials` | ❌ not covered | — | Filesystem I/O |
-| `web` | ❌ not covered | — | HTTP handler, needs mock queue |
 
 ---
 
 ## Phase 1 — Low-hanging fruit (done)
 
-The packages above with ✅ are already tested. They share a property: **all logic is pure functions or local file I/O**, so tests need no mocks and run offline.
+The packages above with ✅ (first four) are pure functions or local file I/O; tests need no mocks and run offline.
 
 ---
 
-## Phase 2 — Queue (SQLite in-memory)
+## Phase 2 — Queue (SQLite in-memory) ✅ done
 
-The `queue` package is fully self-contained once given a DB path. Go's `database/sql` accepts
-`":memory:"` for SQLite, so no mocks are needed — just an in-process DB.
+`internal/queue/queue_test.go` — 21 tests covering:
+- `Enqueue` creates jobs with `pending` status; `FallbackQuality` flag stored; multi-URI batch
+- `Next` returns `nil` on empty queue; marks claimed job `running`, sets `StartedAt` and `goqite_msg_id`; second call returns nil while job is running
+- `Complete` marks job `done`, clears `goqite_msg_id`
+- `Fail` with retries remaining → re-enqueues, increments `retry_count` (overrides `retryDelays` to `[1ms]`)
+- `Fail` after max retries → marks job `failed` with error text (overrides `retryDelays` to `[]`)
+- `List` returns all jobs newest-first (`ORDER BY created_at DESC, id DESC`)
+- `Retry` deletes terminal jobs and creates a fresh pending one; no-op when nothing to delete; does not touch running jobs
+- `RecoverStuckJobs` resets running jobs after visibility timeout; discards stale goqite messages
 
-**Approach:** pass `":memory:"` to `queue.New()`
-
-```go
-func TestEnqueueAndNext(t *testing.T) {
-    q, _ := queue.New(":memory:")
-    defer q.Close()
-
-    jobs, err := q.Enqueue("spotify:track:abc")
-    // ...
-    job, err := q.Next()
-    // ...
-}
-```
-
-**Test cases to write:**
-- `Enqueue` → creates job with `pending` status
-- `Next` → returns job, marks it `running`; returns nil on empty queue
-- `Complete` → marks job `done`, removes from goqite
-- `Fail` with retries remaining → re-enqueues with delay, increments `retry_count`
-- `Fail` after max retries → marks job `failed` permanently
-- `List` → returns all jobs newest-first
-- Crash recovery: goqite visibility timeout re-surfaces unacked message
-
-**File:** `internal/queue/queue_test.go`
+**Key implementation notes:**
+- `maxRetries()` is a function (not a `var`) so test overrides of `retryDelays` take effect at call-time
+- `finishJob` clears `goqite_msg_id` in the terminal `UPDATE`
+- `List` uses `ORDER BY created_at DESC, id DESC` to be deterministic when rows share a second-level timestamp
 
 ---
 
@@ -114,49 +102,21 @@ func (f *fakeRunner) FetchAudio(_ *credentials.Credentials, _, _ string, w io.Wr
 
 ---
 
-## Phase 4 — Web handler
+## Phase 4 — Web handler ✅ done
 
-The web handler only needs a mock `Queuer` interface.
+`internal/web/handler_test.go` covers the HTTP layer via `httptest.NewRecorder` and a `fakeQueue`
+stub implementing the `Queuer` interface:
 
-### Define interface
-
-```go
-// internal/web/handler.go (or deps.go)
-
-type Queuer interface {
-    Enqueue(uris ...string) ([]*queue.Job, error)
-    List() ([]*queue.Job, error)
-}
-```
-
-### Testing approach
-
-Use Go's `net/http/httptest` package:
-
-```go
-func TestHandlerEnqueue(t *testing.T) {
-    fakeQ := &fakeQueue{}
-    h := web.NewHandler(fakeQ)
-    srv := httptest.NewServer(h)
-    defer srv.Close()
-
-    resp, _ := http.PostForm(srv.URL+"/enqueue", url.Values{"uri": {"spotify:track:abc"}})
-    if resp.StatusCode != http.StatusSeeOther {
-        t.Errorf("expected redirect, got %d", resp.StatusCode)
-    }
-    if len(fakeQ.enqueued) != 1 || fakeQ.enqueued[0] != "spotify:track:abc" {
-        t.Errorf("unexpected enqueued: %v", fakeQ.enqueued)
-    }
-}
-```
-
-**Test cases to write:**
-- `GET /` → 200, renders job list
+- `GET /` → 200, renders index template with job list
 - `POST /enqueue` with valid URI → 303 redirect, job added
-- `POST /enqueue` with empty URI → 400
-- `GET /jobs` (HTMX partial) → 200, HTML fragment containing job statuses
+- `POST /enqueue` with `Accept: application/json` → 200 JSON
+- `POST /retry` → deletes terminal jobs, creates fresh pending job
+- `GET /jobs` → 200, SSR job-list partial (HTMX target)
+- `GET /api/stream` → SSE endpoint; sends `snapshot` + `log` events
 
-**File:** `internal/web/handler_test.go`
+HTML templates live in `internal/web/templates/*.html` (real files, loaded via `//go:embed`):
+- `index.html` — full page with CSS + JS (SSE client, retry buttons, log console)
+- `jobs.html` — SSR partial (`{{define "jobs"}}`)
 
 ---
 
