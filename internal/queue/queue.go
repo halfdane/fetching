@@ -50,8 +50,9 @@ var retryDelays = []time.Duration{
 	44 * time.Second,
 }
 
-// maxRetries is how many explicit retries we allow before marking a job failed.
-var maxRetries = len(retryDelays)
+// maxRetries returns how many explicit retries are allowed before a job is permanently failed.
+// Evaluated at call-time so tests can override retryDelays cleanly.
+func maxRetries() int { return len(retryDelays) }
 
 // jobTimeout is the goqite visibility timeout: if a running job isn't acked
 // within this window (e.g. worker crash), the message becomes available again.
@@ -322,7 +323,7 @@ func (q *Queue) finishJob(id int64, finalStatus Status, errMsg string) error {
 		return fmt.Errorf("load job %d: %w", id, err)
 	}
 
-	if finalStatus == StatusFailed && retryCount < maxRetries {
+	if finalStatus == StatusFailed && retryCount < maxRetries() {
 		delay := retryDelays[retryCount]
 		body, _ := json.Marshal(goqitePayload{JobID: id})
 
@@ -345,7 +346,7 @@ func (q *Queue) finishJob(id int64, finalStatus Status, errMsg string) error {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := q.db.ExecContext(ctx,
-		`UPDATE jobs SET status = ?, error = ?, completed_at = ? WHERE id = ?`,
+		`UPDATE jobs SET status = ?, error = ?, completed_at = ?, goqite_msg_id = '' WHERE id = ?`,
 		finalStatus, errMsg, now, id)
 	return err
 }
@@ -395,7 +396,7 @@ func (q *Queue) Retry(opts EnqueueOptions, uri string) (*RetryResult, error) {
 func (q *Queue) List() ([]*Job, error) {
 	rows, err := q.db.QueryContext(context.Background(),
 		`SELECT id, spotify_uri, status, error, retry_count, fallback_quality, created_at, started_at, completed_at
-		 FROM jobs ORDER BY created_at DESC`)
+		 FROM jobs ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
 	}
