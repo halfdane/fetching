@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/halfdane/fetching/internal/cli"
 	"github.com/halfdane/fetching/internal/cover"
 	"github.com/halfdane/fetching/internal/credentials"
 	"github.com/halfdane/fetching/internal/playlist"
@@ -18,7 +17,6 @@ import (
 	"github.com/halfdane/fetching/internal/queue"
 	"github.com/halfdane/fetching/internal/spotify"
 	"github.com/halfdane/fetching/internal/storage"
-	"github.com/halfdane/fetching/internal/tagger"
 )
 
 // trackRetryDelays mirrors the queue retry schedule for per-track transient failures.
@@ -61,17 +59,17 @@ func withRetry(ctx context.Context, label string, onRetry func(retryAttempt, ret
 // Worker pulls jobs from the queue and processes them.
 type Worker struct {
 	queue        *queue.Queue
-	runner       *cli.Runner
-	creds        *credentials.Store
+	runner       MetadataFetcher
+	creds        CredentialProvider
 	store        *storage.Storage
-	tagger       *tagger.Tagger
+	tagger       AudioTagger
 	progress     *progress.Store
 	pollInterval time.Duration
 	concurrency  int
 }
 
 // New creates a worker with the given dependencies.
-func New(q *queue.Queue, runner *cli.Runner, creds *credentials.Store, store *storage.Storage, tgr *tagger.Tagger, prog *progress.Store, concurrency int) *Worker {
+func New(q *queue.Queue, runner MetadataFetcher, creds CredentialProvider, store *storage.Storage, tgr AudioTagger, prog *progress.Store, concurrency int) *Worker {
 	if concurrency < 1 {
 		concurrency = 1
 	}
@@ -548,8 +546,13 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 		}
 
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			os.Remove(candOutPath)
 			return nil, err
 		}
+
+		// Remove the partial/empty file so a later os.Stat skip-check won't
+		// falsely believe the track is already downloaded.
+		os.Remove(candOutPath)
 
 		lastErr = err
 		if !fallbackQuality || i == len(sorted)-1 {
@@ -630,10 +633,10 @@ func (w *Worker) fetchEpisode(ctx context.Context, jobID int64, creds *credentia
 			return fetchErr
 		})
 	if err != nil {
+		// Remove partial file so the next attempt won't be falsely skipped.
+		os.Remove(outPath)
 		return nil, err
 	}
-
-	// Tag the fetched episode with metadata and cover art.
 	slog.Info("tagging episode", "title", ep.Name)
 	if err := w.tagger.TagEpisode(outPath, ep); err != nil {
 		slog.Warn("tagging failed", "uri", ep.URI, "err", err)

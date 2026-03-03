@@ -25,6 +25,9 @@ type Tagger struct {
 	Binary string
 	// Verbose controls ffmpeg output. When false, ffmpeg output is suppressed.
 	Verbose bool
+	// cmdFunc creates the ffmpeg subprocess; defaults to exec.Command.
+	// Override in tests to inject a fake binary without touching PATH.
+	cmdFunc func(name string, args ...string) *exec.Cmd
 }
 
 // New creates a Tagger. If binary is empty, "ffmpeg" is used.
@@ -156,12 +159,16 @@ func (t *Tagger) tag(audioPath string, meta map[string]string, cover *spotify.Co
 	tmpOut := strings.TrimSuffix(audioPath, origExt) + ".tagged" + origExt
 	args := t.buildArgs(audioPath, tmpOut, meta, coverPath)
 
-	cmd := exec.Command(t.Binary, args...)
+	cmd := exec.Command
+	if t.cmdFunc != nil {
+		cmd = t.cmdFunc
+	}
+	ffmpeg := cmd(t.Binary, args...)
 	if t.Verbose {
-		cmd.Stderr = os.Stderr
+		ffmpeg.Stderr = os.Stderr
 	}
 
-	if err := cmd.Run(); err != nil {
+	if err := ffmpeg.Run(); err != nil {
 		os.Remove(tmpOut)
 		return fmt.Errorf("ffmpeg tag %q: %w", audioPath, err)
 	}
