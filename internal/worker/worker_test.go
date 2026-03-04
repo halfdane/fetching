@@ -3,14 +3,12 @@ package worker
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/halfdane/fetching/internal/credentials"
 	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
 	"github.com/halfdane/fetching/internal/spotify"
@@ -145,29 +143,22 @@ func TestWithRetry_OnRetryCallbackFired(t *testing.T) {
 // ---- Fakes used by processJob / Run tests ---------------------------------
 
 // fakeRunner implements MetadataFetcher. metaFn is called for FetchMetadata;
-// audioFn (optional) is called for FetchAudio — defaults to writing "fake audio".
+// audioFn (optional) is called for FetchAudio — defaults to writing "fake audio"
+// to the output path.
 type fakeRunner struct {
 	metaFn  func(uri string) ([]byte, error)
-	audioFn func(uri, fileID string, w io.Writer) error
+	audioFn func(uri, fileID, outputPath string) error
 }
 
-func (f *fakeRunner) FetchMetadata(_ *credentials.Credentials, uri string) ([]byte, error) {
+func (f *fakeRunner) FetchMetadata(uri string) ([]byte, error) {
 	return f.metaFn(uri)
 }
 
-func (f *fakeRunner) FetchAudio(_ *credentials.Credentials, uri, fileID string, w io.Writer) error {
+func (f *fakeRunner) FetchAudio(uri, fileID, outputPath string) error {
 	if f.audioFn != nil {
-		return f.audioFn(uri, fileID, w)
+		return f.audioFn(uri, fileID, outputPath)
 	}
-	_, _ = w.Write([]byte("fake audio data"))
-	return nil
-}
-
-// fakeCreds implements CredentialProvider, always returning a stub token.
-type fakeCreds struct{}
-
-func (f *fakeCreds) Get() (*credentials.Credentials, error) {
-	return &credentials.Credentials{AccessToken: "test"}, nil
+	return os.WriteFile(outputPath, []byte("fake audio data"), 0644)
 }
 
 // fakeTagger implements AudioTagger. If err is non-nil it is returned on every call.
@@ -188,7 +179,6 @@ func newTestWorker(t *testing.T, runner MetadataFetcher, tgr AudioTagger) (*Work
 	return &Worker{
 		queue:        q,
 		runner:       runner,
-		creds:        &fakeCreds{},
 		store:        storage.New(dir),
 		tagger:       tgr,
 		progress:     progress.NewStore(),
@@ -344,7 +334,7 @@ func TestRun_AudioFetchFails_TrackSkipped(t *testing.T) {
 
 	runner := &fakeRunner{
 		metaFn: func(_ string) ([]byte, error) { return []byte(trackJSON), nil },
-		audioFn: func(_, _ string, _ io.Writer) error {
+		audioFn: func(_, _, _ string) error {
 			return errors.New("server error")
 		},
 	}
@@ -438,9 +428,9 @@ func TestRun_AlreadyFetched_SkipsAudio(t *testing.T) {
 	audioCalls := 0
 	runner := &fakeRunner{
 		metaFn: func(_ string) ([]byte, error) { return []byte(trackJSON), nil },
-		audioFn: func(_, _ string, _ io.Writer) error {
+		audioFn: func(_, _, outputPath string) error {
 			audioCalls++
-			return nil
+			return os.WriteFile(outputPath, []byte("fake audio data"), 0644)
 		},
 	}
 	w, q := newTestWorker(t, runner, &fakeTagger{})

@@ -12,7 +12,6 @@ import (
 	"syscall"
 
 	"github.com/halfdane/fetching/internal/cli"
-	"github.com/halfdane/fetching/internal/credentials"
 	"github.com/halfdane/fetching/internal/logstore"
 	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
@@ -36,7 +35,6 @@ Commands:
   version     Print the version and exit
 
 Batch flags:
-  --credentials <path>     Path to credentials JSON file (default: ~/.config/fetching/credentials.json)
   --output <dir>           Output directory for downloaded files (default: ./music)
   --track-template <tmpl>  Path template for tracks (default: "{artist}/{album}/{track_number}-{title}")
   --episode-template <t>   Path template for episodes (default: "{show}/{title}")
@@ -46,7 +44,6 @@ Batch flags:
   <uri> [<uri>...]         Spotify URIs or URLs to download
 
 Serve flags:
-  --credentials <path>     Path to credentials JSON file (default: ~/.config/fetching/credentials.json)
   --output <dir>           Output directory for downloaded files (default: ./music)
   --track-template <tmpl>  Path template for tracks (default: "{artist}/{album}/{track_number}-{title}")
   --episode-template <t>   Path template for episodes (default: "{show}/{title}")
@@ -56,6 +53,8 @@ Serve flags:
 
 Template tokens (tracks):   {artist} {album_artist} {album} {title} {track_number} {disc_number} {year}
 Template tokens (episodes): {show} {title} {year} {episode_number}
+
+Credentials are managed by fetching-cli and stored at ~/.config/fetching-cli/credentials.json.
 `
 
 func main() {
@@ -86,14 +85,6 @@ func main() {
 	}
 }
 
-func defaultCredentialsPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		dir = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	return filepath.Join(dir, "fetching", "credentials.json")
-}
-
 func dbPath() string {
 	dir, err := os.UserCacheDir()
 	if err != nil {
@@ -104,31 +95,23 @@ func dbPath() string {
 	return filepath.Join(p, "fetching.db")
 }
 
-func setupDeps(credPath, outputDir, trackTmpl, episodeTmpl string, concurrency int, verbose bool) (*queue.Queue, *worker.Worker, *progress.Store, error) {
+func setupDeps(outputDir, trackTmpl, episodeTmpl string, concurrency int, verbose bool) (*cli.Runner, *queue.Queue, *worker.Worker, *progress.Store, error) {
 	runner := cli.NewRunner("")
-
-	credDir := filepath.Dir(credPath)
-	if err := os.MkdirAll(credDir, 0700); err != nil {
-		return nil, nil, nil, fmt.Errorf("create credentials directory: %w", err)
-	}
-
-	credStore := credentials.NewStore(credPath, runner.Auth, runner.Reauth)
 	store := storage.NewWithTemplates(outputDir, trackTmpl, episodeTmpl)
 	tgr := tagger.New("", verbose)
 
 	q, err := queue.New(dbPath())
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	prog := progress.NewStore()
 
-	w := worker.New(q, runner, credStore, store, tgr, prog, concurrency)
-	return q, w, prog, nil
+	w := worker.New(q, runner, store, tgr, prog, concurrency)
+	return runner, q, w, prog, nil
 }
 
 func runBatch(args []string) error {
 	fs := flag.NewFlagSet("batch", flag.ExitOnError)
-	credPath := fs.String("credentials", defaultCredentialsPath(), "credentials JSON file path")
 	outputDir := fs.String("output", "./music", "output directory")
 	trackTmpl := fs.String("track-template", "", "path template for tracks (default: \"{artist}/{album}/{track_number}-{title}\")")
 	episodeTmpl := fs.String("episode-template", "", "path template for episodes (default: \"{show}/{title}\")")
@@ -142,11 +125,16 @@ func runBatch(args []string) error {
 		return fmt.Errorf("no Spotify URIs provided")
 	}
 
-	q, w, _, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
+	runner, q, w, _, err := setupDeps(*outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
 	defer q.Close()
+
+	// Ensure credentials are valid before processing any jobs.
+	if err := runner.EnsureAuth(); err != nil {
+		return fmt.Errorf("authentication: %w", err)
+	}
 
 	if err := q.RecoverStuckJobs(); err != nil {
 		return fmt.Errorf("recover stuck jobs: %w", err)
@@ -166,7 +154,6 @@ func runBatch(args []string) error {
 
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	credPath := fs.String("credentials", defaultCredentialsPath(), "credentials JSON file path")
 	outputDir := fs.String("output", "./music", "output directory")
 	trackTmpl := fs.String("track-template", "", "path template for tracks (default: \"{artist}/{album}/{track_number}-{title}\")")
 	episodeTmpl := fs.String("episode-template", "", "path template for episodes (default: \"{show}/{title}\")")
@@ -175,11 +162,16 @@ func runServe(args []string) error {
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
-	q, w, prog, err := setupDeps(*credPath, *outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
+	runner, q, w, prog, err := setupDeps(*outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
 	defer q.Close()
+
+	// Ensure credentials are valid before starting.
+	if err := runner.EnsureAuth(); err != nil {
+		return fmt.Errorf("authentication: %w", err)
+	}
 
 	if err := q.RecoverStuckJobs(); err != nil {
 		return fmt.Errorf("recover stuck jobs: %w", err)

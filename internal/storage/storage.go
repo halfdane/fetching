@@ -88,6 +88,34 @@ func (s *Storage) CreateEpisodeWriter(ep *spotify.Episode, ext string) (string, 
 	return path, f, nil
 }
 
+// PrepareTrackPath returns the output file path for a track after ensuring
+// the parent directory exists. Unlike CreateTrackWriter it does NOT create
+// the file — callers that write via an external process (e.g. fetching-cli -o)
+// should use this instead.
+func (s *Storage) PrepareTrackPath(track *spotify.Track, ext string) (string, error) {
+	path := s.TrackPath(track, ext)
+	if err := s.withinBaseDir(path); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return "", fmt.Errorf("create directory %s: %w", filepath.Dir(path), err)
+	}
+	return path, nil
+}
+
+// PrepareEpisodePath returns the output file path for an episode after
+// ensuring the parent directory exists. Does NOT create the file.
+func (s *Storage) PrepareEpisodePath(ep *spotify.Episode, ext string) (string, error) {
+	path := s.EpisodePath(ep, ext)
+	if err := s.withinBaseDir(path); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return "", fmt.Errorf("create directory %s: %w", filepath.Dir(path), err)
+	}
+	return path, nil
+}
+
 // PlaylistDir returns the directory path for a playlist: <base>/Playlists/<name>.
 // Playlists collect tracks from many albums so they get their own dedicated dir.
 func (s *Storage) PlaylistDir(playlistName string) string {

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/halfdane/fetching/internal/cover"
-	"github.com/halfdane/fetching/internal/credentials"
 	"github.com/halfdane/fetching/internal/playlist"
 	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
@@ -60,7 +59,6 @@ func withRetry(ctx context.Context, label string, onRetry func(retryAttempt, ret
 type Worker struct {
 	queue        *queue.Queue
 	runner       MetadataFetcher
-	creds        CredentialProvider
 	store        *storage.Storage
 	tagger       AudioTagger
 	progress     *progress.Store
@@ -69,14 +67,13 @@ type Worker struct {
 }
 
 // New creates a worker with the given dependencies.
-func New(q *queue.Queue, runner MetadataFetcher, creds CredentialProvider, store *storage.Storage, tgr AudioTagger, prog *progress.Store, concurrency int) *Worker {
+func New(q *queue.Queue, runner MetadataFetcher, store *storage.Storage, tgr AudioTagger, prog *progress.Store, concurrency int) *Worker {
 	if concurrency < 1 {
 		concurrency = 1
 	}
 	return &Worker{
 		queue:        q,
 		runner:       runner,
-		creds:        creds,
 		store:        store,
 		tagger:       tgr,
 		progress:     prog,
@@ -139,13 +136,8 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 		w.progress.UpsertSubmitted(job.ID, job.SpotifyURI)
 	}
 
-	creds, err := w.creds.Get()
-	if err != nil {
-		return err
-	}
-
 	// Step 1: Fetch metadata for the URI
-	metaJSON, err := w.runner.FetchMetadata(creds, job.SpotifyURI)
+	metaJSON, err := w.runner.FetchMetadata(job.SpotifyURI)
 	if err != nil {
 		return err
 	}
@@ -212,7 +204,7 @@ func (w *Worker) processJob(ctx context.Context, job *queue.Job) error {
 			})
 		}
 
-		res, err := w.fetchTrack(ctx, job.ID, creds, uri, job.FallbackQuality)
+		res, err := w.fetchTrack(ctx, job.ID, uri, job.FallbackQuality)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return err
@@ -398,9 +390,9 @@ func resultsToEntries(results []fetchResult) []playlist.TrackEntry {
 	return entries
 }
 
-func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials.Credentials, trackURI string, fallbackQuality bool) (*fetchResult, error) {
+func (w *Worker) fetchTrack(ctx context.Context, jobID int64, trackURI string, fallbackQuality bool) (*fetchResult, error) {
 	// Fetch track metadata to get audio file IDs
-	metaJSON, err := w.runner.FetchMetadata(creds, trackURI)
+	metaJSON, err := w.runner.FetchMetadata(trackURI)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +409,7 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 		if !ok {
 			return nil, fmt.Errorf("unrecognised metadata type for %s", trackURI)
 		}
-		return w.fetchEpisode(ctx, jobID, creds, ep)
+		return w.fetchEpisode(ctx, jobID, ep)
 	}
 
 	artist := "Unknown"
@@ -441,7 +433,7 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 		candidates = append(candidates, spotify.CandidateFile{TrackURI: trackURI, File: f})
 	}
 	for _, altURI := range track.Alternatives {
-		altJSON, err := w.runner.FetchMetadata(creds, altURI)
+		altJSON, err := w.runner.FetchMetadata(altURI)
 		if err != nil {
 			slog.Warn("failed to fetch alternative", "uri", altURI, "err", err)
 			continue
@@ -509,7 +501,11 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 			})
 		}
 
-		candOutPath := w.store.TrackPath(track, af.Extension())
+		candOutPath, prepErr := w.store.PrepareTrackPath(track, af.Extension())
+		if prepErr != nil {
+			lastErr = prepErr
+			break
+		}
 		err := withRetry(ctx, fmt.Sprintf("%s [%s]", trackURI, af.Format),
 			func(retryAttempt, retryMax int, wait time.Duration, retryErr error) {
 				if w.progress != nil {
@@ -522,13 +518,7 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 				}
 			},
 			func() error {
-				_, wr, err := w.store.CreateTrackWriter(track, af.Extension())
-				if err != nil {
-					return err
-				}
-				fetchErr := w.runner.FetchAudio(creds, srcURI, af.FileID, wr)
-				wr.Close()
-				return fetchErr
+				return w.runner.FetchAudio(srcURI, af.FileID, candOutPath)
 			})
 
 		if err == nil {
@@ -564,7 +554,7 @@ func (w *Worker) fetchTrack(ctx context.Context, jobID int64, creds *credentials
 	return nil, fmt.Errorf("all candidates failed for %s: %w", trackURI, lastErr)
 }
 
-func (w *Worker) fetchEpisode(ctx context.Context, jobID int64, creds *credentials.Credentials, ep *spotify.Episode) (*fetchResult, error) {
+func (w *Worker) fetchEpisode(ctx context.Context, jobID int64, ep *spotify.Episode) (*fetchResult, error) {
 	// Update title/duration as soon as metadata is known, so it's visible
 	// even if the fetch fails (e.g. episode has no audio files).
 	if w.progress != nil {
@@ -591,7 +581,10 @@ func (w *Worker) fetchEpisode(ctx context.Context, jobID int64, creds *credentia
 	}
 
 	// Skip if already fetched.
-	outPath := w.store.EpisodePath(ep, af.Extension())
+	outPath, prepErr := w.store.PrepareEpisodePath(ep, af.Extension())
+	if prepErr != nil {
+		return nil, prepErr
+	}
 	if _, err := os.Stat(outPath); err == nil {
 		slog.Info("skipping episode (already fetched)", "title", ep.Name)
 		if w.progress != nil {
@@ -624,13 +617,7 @@ func (w *Worker) fetchEpisode(ctx context.Context, jobID int64, creds *credentia
 			}
 		},
 		func() error {
-			_, wr, err := w.store.CreateEpisodeWriter(ep, af.Extension())
-			if err != nil {
-				return err
-			}
-			fetchErr := w.runner.FetchAudio(creds, ep.URI, af.FileID, wr)
-			wr.Close()
-			return fetchErr
+			return w.runner.FetchAudio(ep.URI, af.FileID, outPath)
 		})
 	if err != nil {
 		// Remove partial file so the next attempt won't be falsely skipped.
