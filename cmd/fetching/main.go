@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -97,6 +98,9 @@ func dbPath() string {
 
 func setupDeps(outputDir, trackTmpl, episodeTmpl string, concurrency int, verbose bool) (*cli.Runner, *queue.Queue, *worker.Worker, *progress.Store, error) {
 	runner := cli.NewRunner("")
+	if _, err := exec.LookPath(runner.Binary); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("%q not found on PATH — install fetching-cli or check your $PATH: %w", runner.Binary, err)
+	}
 	store := storage.NewWithTemplates(outputDir, trackTmpl, episodeTmpl)
 	tgr := tagger.New("", verbose)
 
