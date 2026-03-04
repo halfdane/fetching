@@ -65,8 +65,9 @@ type goqitePayload struct {
 
 // Queue manages jobs via goqite + an auxiliary status table.
 type Queue struct {
-	db *sql.DB
-	gq *goqite.Queue
+	db     *sql.DB
+	gq     *goqite.Queue
+	notify chan struct{}
 }
 
 // New opens (or creates) a SQLite database at the given path and initialises
@@ -91,7 +92,7 @@ func New(dbPath string) (*Queue, error) {
 		Timeout:    jobTimeout,
 	})
 
-	return &Queue{db: db, gq: gq}, nil
+	return &Queue{db: db, gq: gq, notify: make(chan struct{}, 1)}, nil
 }
 
 func migrate(db *sql.DB) error {
@@ -244,6 +245,13 @@ func (q *Queue) Enqueue(opts EnqueueOptions, uris ...string) ([]*Job, error) {
 			CreatedAt:       time.Now(),
 		})
 	}
+
+	// Wake the worker if it's waiting for work.
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+
 	return jobs, nil
 }
 
@@ -416,6 +424,13 @@ func (q *Queue) List() ([]*Job, error) {
 // Close closes the underlying database.
 func (q *Queue) Close() error {
 	return q.db.Close()
+}
+
+// Notify returns a channel that is signalled (non-blocking) whenever new work
+// is enqueued. Workers can select on this to wake up immediately instead of
+// polling on a timer.
+func (q *Queue) Notify() <-chan struct{} {
+	return q.notify
 }
 
 // scanner is satisfied by both *sql.Row and *sql.Rows.
