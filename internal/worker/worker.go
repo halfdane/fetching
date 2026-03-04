@@ -85,9 +85,17 @@ func New(q *queue.Queue, runner MetadataFetcher, store *storage.Storage, tgr Aud
 // Run starts processing jobs until the context is cancelled.
 // When oneShot is true, it processes all pending jobs and returns.
 func (w *Worker) Run(ctx context.Context, oneShot bool) error {
+	notify := w.queue.Notify()
+	// sem limits the number of concurrently running jobs.
+	sem := make(chan struct{}, w.concurrency)
+
 	for {
 		select {
 		case <-ctx.Done():
+			// Drain the semaphore so all in-flight jobs have finished.
+			for i := 0; i < w.concurrency; i++ {
+				sem <- struct{}{}
+			}
 			return ctx.Err()
 		default:
 		}
@@ -98,26 +106,44 @@ func (w *Worker) Run(ctx context.Context, oneShot bool) error {
 			if oneShot {
 				return err
 			}
-			time.Sleep(w.pollInterval)
+			w.waitForWork(ctx, notify)
 			continue
 		}
 
 		if job == nil {
 			if oneShot {
+				// Wait for all in-flight jobs to finish before returning.
+				for i := 0; i < w.concurrency; i++ {
+					sem <- struct{}{}
+				}
 				return nil // all done
 			}
-			time.Sleep(w.pollInterval)
+			w.waitForWork(ctx, notify)
 			continue
 		}
 
 		slog.Info("processing job", "id", job.ID, "uri", job.SpotifyURI)
-		if err := w.processJob(ctx, job); err != nil {
-			slog.Error("job failed", "id", job.ID, "err", err)
-			_ = w.queue.Fail(job.ID, err.Error())
-		} else {
-			slog.Info("job completed", "id", job.ID)
-			_ = w.queue.Complete(job.ID)
-		}
+		sem <- struct{}{} // acquire slot
+		go func(j *queue.Job) {
+			defer func() { <-sem }() // release slot
+			if err := w.processJob(ctx, j); err != nil {
+				slog.Error("job failed", "id", j.ID, "err", err)
+				_ = w.queue.Fail(j.ID, err.Error())
+			} else {
+				slog.Info("job completed", "id", j.ID)
+				_ = w.queue.Complete(j.ID)
+			}
+		}(job)
+	}
+}
+
+// waitForWork blocks until either new work is signalled, the poll interval
+// elapses (as a fallback for delayed re-enqueues), or the context is cancelled.
+func (w *Worker) waitForWork(ctx context.Context, notify <-chan struct{}) {
+	select {
+	case <-notify:
+	case <-time.After(w.pollInterval):
+	case <-ctx.Done():
 	}
 }
 
