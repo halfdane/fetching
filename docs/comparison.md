@@ -1,6 +1,6 @@
 # Implementation Comparison: Go vs Rust
 
-> Go implementation: `main` branch (v0.1.5, commit `a4d87cb`)
+> Go implementation: `main` branch (v0.1.5, commit `a4d87cb`, updated after IPC/auth refactor)
 > Rust implementation: `main-old` branch (v1.0.6, commit `67480f9`)
 >
 > Individual reviews: [review-go.md](review-go.md) · [review-rust.md](review-rust.md)
@@ -11,8 +11,8 @@
 
 | Dimension                   | Go (`main`)                   | Rust (`main-old`)                        |
 |-----------------------------|-------------------------------|------------------------------------------|
-| Total LOC                   | 6 653                         | 5 560                                    |
-| Production code (est.)      | ~3 750                        | ~4 700                                   |
+| Total LOC                   | ~6 480                        | 5 560                                    |
+| Production code (est.)      | ~3 600                        | ~4 700                                   |
 | Test code (est.)            | ~2 900 (44 % of total)        | ~900 (16 % of total)                     |
 | Test functions              | 149                           | 80                                       |
 | Test files                  | 10 (separate `_test.go`)      | 13 (inline `#[cfg(test)]` modules)       |
@@ -58,7 +58,7 @@ justified by the native dependency, but it adds friction for new contributors.
 
 | File                        | Go LOC | File                        | Rust LOC |
 |-----------------------------|--------|-----------------------------|----------|
-| `worker/worker.go`          | 653    | `core/src/db.rs`            | 1 061    |
+| `worker/worker.go`          | ~640   | `core/src/db.rs`            | 1 061    |
 | `queue/queue.go`            | 456    | `core/src/coordinator.rs`   | 672      |
 | `tagger/tagger.go`          | 321    | `core/src/runner.rs`        | 398      |
 | `progress/store.go`         | 277    | `core/src/audio_librespot.rs`| 353     |
@@ -116,8 +116,9 @@ The most fundamental architectural difference is how librespot is integrated.
 
 The **Go** version shells out to `fetching-cli` for every metadata fetch and audio download.
 This provides clean process isolation and keeps the Go module dependency-free, but it
-introduces a silent runtime dependency and adds serialisation overhead (credentials and audio
-are piped via stdin/stdout/file descriptors for every call).
+introduces a runtime dependency on the companion binary. Authentication and credential
+management are fully delegated to `fetching-cli` — the Go server never handles OAuth tokens.
+Metadata is returned as JSON on stdout; audio is written directly to disk via the `-o` flag.
 
 The **Rust** version compiles librespot directly. Authentication happens once per server
 start; subsequent calls reuse the in-memory `Arc<Session>`. This is faster, more reliable,
@@ -250,6 +251,7 @@ gaps: Go in the assets generation path; Rust in the production runner and HTTP h
 | Retry from web UI              | ✅ `POST /api/jobs/retry`    | ❌ Not exposed via API              |
 | Log streaming                  | ✅ `GET /api/logs` + SSE     | ❌                                   |
 | Configurable path templates    | ✅ Rich token set             | ❌ Fixed path structure             |
+| Auth delegation to CLI         | ✅ Full (CLI owns credentials)| N/A (linked directly)               |
 | History survives restart       | ❌                           | ✅                                   |
 | NixOS module                   | ✅                           | ❌                                   |
 

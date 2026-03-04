@@ -1,6 +1,6 @@
 # Code Review — Go Implementation (`main` branch)
 
-> Reviewed against: `a4d87cb` (v0.1.5)
+> Reviewed against: `a4d87cb` (v0.1.5), updated after IPC/auth refactor
 > Scope: all Go source under `cmd/` and `internal/`
 
 ---
@@ -28,16 +28,16 @@ at most two). The naming avoids stutter and follows Go conventions throughout.
 - **Early-return + guard clauses** are used consistently across worker.go and handler.go.
 - **`context.Context` propagation** through the worker loop correctly cancels in-flight
   retries when the server shuts down.
-- **Interface injection** (`MetadataFetcher`, `CredentialProvider`, `AudioTagger`) makes
-  every dependency in `Worker` swappable in tests without build tags.
+- **Interface injection** (`MetadataFetcher`, `AudioTagger`) makes every dependency in
+  `Worker` swappable in tests without build tags. Credential management was fully
+  delegated to `fetching-cli`, eliminating the former `CredentialProvider` interface.
 - **Structured logging** (`log/slog`) is used instead of raw `fmt.Println`.
 
-### 🟡 `worker.go` is 653 LOC — consider splitting
+### 🟡 `worker.go` is ~640 LOC — consider splitting
 
 `processJob` handles metadata resolution, per-track fetching, playlist generation, and
-cover art, all in one file. The `generate*Assets` family of methods (lines 250–390) could
-live in a `worker_assets.go` file to reduce cognitive load when reading the main processing
-path.
+cover art, all in one file. The `generate*Assets` family of methods could live in a
+`worker_assets.go` file to reduce cognitive load when reading the main processing path.
 
 ### 🟡 Poll-based idle loop
 
@@ -59,24 +59,19 @@ is exemplary.
 
 ### 🔴 CRITICAL — `fetching-cli` subprocess is an implicit runtime dependency
 
-`cli/runner.go` shells out to `fetching-cli` for every metadata fetch and audio download.
-The binary must be on `PATH` at runtime. If it is absent, jobs silently fail with an
-obscure `exec.Command` error rather than a build-time or startup-time failure.
+`cli/runner.go` shells out to `fetching-cli` for every metadata fetch, audio download,
+and now also for authentication (`EnsureAuth`). The binary must be on `PATH` at runtime.
 
-**Impact:** A user who installs the Go binary without the companion CLI will see no
-immediate error — the server will start, accept queued URLs, and immediately fail every job
-with a message like `"fetching-cli auth: exec: "fetching-cli": executable file not found in
-$PATH"`.
+Since the auth refactor, `EnsureAuth()` is called at startup before any job processing,
+so a missing binary *will* cause an immediate startup failure. However, the error comes
+from `exec.Command` and is not particularly descriptive.
 
-**Suggested mitigations:**
-1. Validate the binary at startup and return a descriptive error or log a clear warning.
-2. Embed the binary path in the `Runner` struct and require it to be non-empty, so the
-   failure is caught in `setupDeps`.
+**Suggested mitigation:** Add an explicit `exec.LookPath` check in `setupDeps` for a
+clearer error message:
 
 ```go
-// In setupDeps, after NewRunner:
 if _, err := exec.LookPath(runner.Binary); err != nil {
-    return nil, nil, nil, fmt.Errorf("%q not found on PATH — see README: %w", runner.Binary, err)
+    return nil, nil, nil, nil, fmt.Errorf("%q not found on PATH — see README: %w", runner.Binary, err)
 }
 ```
 
@@ -143,13 +138,10 @@ override pattern — all clean and well-understood.
 
 ### 🟢 No secrets in code
 
-Credentials are read from a file path and never logged.
-
-### 🟡 Credentials passed via `/dev/stdin`
-
-The CLI runner pipes credentials JSON to `fetching-cli` via stdin with the flag
-`--credentials /dev/stdin`. On most systems this is fine, but it depends on the subprocess
-reading stdin before producing output. A race condition is unlikely but worth documenting.
+Credentials are fully managed by `fetching-cli` and stored at
+`~/.config/fetching-cli/credentials.json`. The Go server never reads, stores, or transmits
+OAuth tokens — it simply calls `EnsureAuth()` at startup and trusts the CLI to handle
+refresh transparently on subsequent calls.
 
 ### 🟢 Graceful shutdown via signal context
 
@@ -199,5 +191,5 @@ misleading.
 | Test coverage  | ✅ Good; gap in `generate*Assets` and `main.go` wiring |
 | Security       | ✅ No obvious vulnerabilities |
 | Performance    | 🟡 Poll loop; concurrency field unused |
-| Architecture   | 🔴 Runtime binary dependency unvalidated at startup |
+| Architecture   | � Runtime binary dependency — fails at startup but error could be clearer |
 | Documentation  | 🟡 Minor usage-string gap |
