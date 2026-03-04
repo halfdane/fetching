@@ -66,6 +66,45 @@ func NewStore() *Store {
 	}
 }
 
+// JobSummary is the minimal information needed to seed the progress store
+// from persisted queue data on startup. Kept here to avoid importing the
+// queue package.
+type JobSummary struct {
+	ID        int64
+	SourceURI string
+	Terminal  bool   // true when status is "done" or "failed"
+	Error     string // non-empty when the job failed
+}
+
+// SeedFromJobs populates the store with stub entries for jobs that already
+// exist in the database. This restores the "history" view in the web UI
+// after a server restart. Jobs are inserted oldest-first so the order
+// slice matches the original insertion order.
+func (s *Store) SeedFromJobs(jobs []JobSummary) {
+	s.mu.Lock()
+	for _, j := range jobs {
+		if _, exists := s.byID[j.ID]; exists {
+			continue
+		}
+		c := &CollectionView{
+			JobID:            j.ID,
+			SourceURI:        j.SourceURI,
+			Kind:             "collection",
+			Title:            j.SourceURI,
+			PlaceholderCover: true,
+			Terminal:         j.Terminal,
+			Tracks:           []TrackView{},
+		}
+		if j.Terminal && j.Error != "" {
+			c.Title = j.SourceURI + " (failed)"
+		}
+		s.byID[j.ID] = c
+		s.order = append(s.order, j.ID)
+	}
+	s.mu.Unlock()
+	// Don't broadcast — this is called before any subscribers exist.
+}
+
 func (s *Store) UpsertSubmitted(jobID int64, sourceURI string) {
 	s.mu.Lock()
 	if _, ok := s.byID[jobID]; !ok {

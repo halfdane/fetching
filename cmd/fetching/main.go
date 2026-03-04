@@ -181,6 +181,21 @@ func runServe(args []string) error {
 		return fmt.Errorf("recover stuck jobs: %w", err)
 	}
 
+	// Seed the progress store with existing jobs from the database so the
+	// web UI shows history immediately after a restart.
+	if jobs, err := q.List(); err == nil {
+		summaries := make([]progress.JobSummary, len(jobs))
+		for i, j := range jobs {
+			summaries[i] = progress.JobSummary{
+				ID:        j.ID,
+				SourceURI: j.SpotifyURI,
+				Terminal:  j.Status == queue.StatusDone || j.Status == queue.StatusFailed,
+				Error:     j.Error,
+			}
+		}
+		prog.SeedFromJobs(summaries)
+	}
+
 	// Start worker in background
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
