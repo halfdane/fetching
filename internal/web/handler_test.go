@@ -22,7 +22,7 @@ func newTestHandler(t *testing.T) (*Handler, *queue.Queue, *progress.Store) {
 	t.Cleanup(func() { q.Close() })
 
 	p := progress.NewStore()
-	h, err := New(q, p, nil)
+	h, err := New(q, p, nil, false)
 	if err != nil {
 		t.Fatalf("web.New: %v", err)
 	}

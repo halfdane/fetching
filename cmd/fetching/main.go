@@ -50,6 +50,7 @@ Serve flags:
   --episode-template <t>   Path template for episodes (default: "{show}/{title}")
   --port <port>            HTTP listen port (default: 8080)
   --concurrency <n>        Max parallel downloads (default: 1)
+  --fallback-quality       Default fallback to lower-quality candidates (per-request UI override available) (default: false)
   --verbose                Enable verbose output (default: false)
 
 Template tokens (tracks):   {artist} {album_artist} {album} {title} {track_number} {disc_number} {year}
@@ -163,6 +164,7 @@ func runServe(args []string) error {
 	episodeTmpl := fs.String("episode-template", "", "path template for episodes (default: \"{show}/{title}\")")
 	port := fs.Int("port", 8080, "HTTP listen port")
 	concurrency := fs.Int("concurrency", 1, "max parallel downloads")
+	fallbackQuality := fs.Bool("fallback-quality", false, "default fallback to lower-quality candidates (per-request UI override available)")
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
@@ -210,7 +212,7 @@ func runServe(args []string) error {
 	ls := logstore.New()
 	slog.SetDefault(slog.New(ls.Handler(os.Stderr)))
 
-	handler, err := web.New(q, prog, ls)
+	handler, err := web.New(q, prog, ls, *fallbackQuality)
 	if err != nil {
 		return fmt.Errorf("init web handler: %w", err)
 	}

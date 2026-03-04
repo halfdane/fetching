@@ -24,20 +24,23 @@ var templateFiles embed.FS
 
 // Handler holds dependencies for the web UI.
 type Handler struct {
-	queue    *queue.Queue
-	progress *progress.Store
-	logs     *logstore.Store
-	tmpl     *template.Template
+	queue                  *queue.Queue
+	progress               *progress.Store
+	logs                   *logstore.Store
+	tmpl                   *template.Template
+	defaultFallbackQuality bool
 }
 
 // New creates a Handler with the given dependencies.
 // ls may be nil, in which case no log streaming is provided.
-func New(q *queue.Queue, p *progress.Store, ls *logstore.Store) (*Handler, error) {
+// defaultFallbackQuality sets the server-wide default for the fallback-quality
+// option; individual requests may override it via the fallback_quality form field.
+func New(q *queue.Queue, p *progress.Store, ls *logstore.Store, defaultFallbackQuality bool) (*Handler, error) {
 	tmpl, err := template.New("").ParseFS(templateFiles, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
-	return &Handler{queue: q, progress: p, logs: ls, tmpl: tmpl}, nil
+	return &Handler{queue: q, progress: p, logs: ls, tmpl: tmpl, defaultFallbackQuality: defaultFallbackQuality}, nil
 }
 
 // RegisterRoutes attaches all HTTP handlers to the given mux.
@@ -94,7 +97,7 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fallbackQuality := r.FormValue("fallback_quality") == "on"
+	fallbackQuality := h.defaultFallbackQuality || r.FormValue("fallback_quality") == "on"
 	jobs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: fallbackQuality}, uris...)
 	if err != nil {
 		slog.Error("enqueue error", "err", err)
@@ -137,7 +140,7 @@ func (h *Handler) handleRetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fallbackQuality := r.FormValue("fallback_quality") == "on"
+	fallbackQuality := h.defaultFallbackQuality || r.FormValue("fallback_quality") == "on"
 	result, err := h.queue.Retry(queue.EnqueueOptions{FallbackQuality: fallbackQuality}, uri)
 	if err != nil {
 		slog.Error("retry error", "err", err)
