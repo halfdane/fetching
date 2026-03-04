@@ -181,6 +181,45 @@ func (s *Store) MarkCollectionTerminal(jobID int64) {
 	s.broadcastSnapshot()
 }
 
+// SnapshotJob returns a copy of the CollectionView for the given job, or nil
+// if it is not present in the store.
+func (s *Store) SnapshotJob(id int64) *CollectionView {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.byID[id]
+	if !ok {
+		return nil
+	}
+	cp := *c
+	if len(c.Tracks) > 0 {
+		cp.Tracks = append([]TrackView(nil), c.Tracks...)
+	} else {
+		cp.Tracks = []TrackView{}
+	}
+	return &cp
+}
+
+// SeedFromResults populates the store with fully-formed CollectionViews
+// recovered from persisted job results. Called on startup before any
+// subscribers exist, so no broadcast is needed.
+func (s *Store) SeedFromResults(views []CollectionView) {
+	s.mu.Lock()
+	for _, v := range views {
+		if _, exists := s.byID[v.JobID]; exists {
+			continue
+		}
+		cp := v
+		if len(v.Tracks) > 0 {
+			cp.Tracks = append([]TrackView(nil), v.Tracks...)
+		} else {
+			cp.Tracks = []TrackView{}
+		}
+		s.byID[v.JobID] = &cp
+		s.order = append(s.order, v.JobID)
+	}
+	s.mu.Unlock()
+}
+
 // Remove deletes one or more collections from the store and broadcasts
 // the updated snapshot. Used when retrying — old terminal entries are
 // removed before the fresh job is inserted.

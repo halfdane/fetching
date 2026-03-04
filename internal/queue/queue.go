@@ -32,15 +32,18 @@ const (
 
 // Job is a single download request with status information.
 type Job struct {
-	ID              int64      `json:"id"`
-	SpotifyURI      string     `json:"spotify_uri"`
-	Status          Status     `json:"status"`
-	Error           string     `json:"error,omitempty"`
-	RetryCount      int        `json:"retry_count"`
-	FallbackQuality bool       `json:"fallback_quality"`
-	CreatedAt       time.Time  `json:"created_at"`
-	StartedAt       *time.Time `json:"started_at,omitempty"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ID              int64           `json:"id"`
+	SpotifyURI      string          `json:"spotify_uri"`
+	Status          Status          `json:"status"`
+	Error           string          `json:"error,omitempty"`
+	RetryCount      int             `json:"retry_count"`
+	FallbackQuality bool            `json:"fallback_quality"`
+	CreatedAt       time.Time       `json:"created_at"`
+	StartedAt       *time.Time      `json:"started_at,omitempty"`
+	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
+	// Result holds the serialised CollectionView snapshot saved when the job
+	// completed successfully. Used to restore UI history after a restart.
+	Result          json.RawMessage `json:"result,omitempty"`
 }
 
 // retryDelays defines the wait time before each successive retry attempt.
@@ -145,6 +148,8 @@ func migrate(db *sql.DB) error {
 		// Stores the goqite message ID while the job is running, eliminating
 		// the need to scan the entire goqite table to find the message on completion.
 		`ALTER TABLE jobs ADD COLUMN goqite_msg_id TEXT NOT NULL DEFAULT ''`,
+		// Stores the final CollectionView JSON snapshot so UI history survives restarts.
+		`ALTER TABLE jobs ADD COLUMN result TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, stmt := range columnMigrations {
 		if _, err := db.Exec(stmt); err != nil {
@@ -298,7 +303,7 @@ func (q *Queue) Next() (*Job, error) {
 	}
 
 	row := q.db.QueryRowContext(ctx,
-		`SELECT id, spotify_uri, status, error, retry_count, fallback_quality, created_at, started_at, completed_at
+		`SELECT id, spotify_uri, status, error, retry_count, fallback_quality, created_at, started_at, completed_at, result
 		 FROM jobs WHERE id = ?`, payload.JobID)
 
 	job, err := scanJob(row)
@@ -317,6 +322,14 @@ func (q *Queue) Complete(id int64) error {
 // exponential back-off; otherwise it is permanently marked failed.
 func (q *Queue) Fail(id int64, errMsg string) error {
 	return q.finishJob(id, StatusFailed, errMsg)
+}
+
+// StoreResult persists a serialised CollectionView snapshot against a
+// completed job so the UI can restore full history after a restart.
+func (q *Queue) StoreResult(id int64, data json.RawMessage) error {
+	_, err := q.db.ExecContext(context.Background(),
+		`UPDATE jobs SET result = ? WHERE id = ?`, string(data), id)
+	return err
 }
 
 func (q *Queue) finishJob(id int64, finalStatus Status, errMsg string) error {
@@ -403,7 +416,7 @@ func (q *Queue) Retry(opts EnqueueOptions, uri string) (*RetryResult, error) {
 // List returns all jobs ordered by creation time descending.
 func (q *Queue) List() ([]*Job, error) {
 	rows, err := q.db.QueryContext(context.Background(),
-		`SELECT id, spotify_uri, status, error, retry_count, fallback_quality, created_at, started_at, completed_at
+		`SELECT id, spotify_uri, status, error, retry_count, fallback_quality, created_at, started_at, completed_at, result
 		 FROM jobs ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
@@ -440,16 +453,19 @@ type scanner interface {
 
 func scanJob(s scanner) (*Job, error) {
 	var j Job
-	var startedAt, completedAt sql.NullString
+	var startedAt, completedAt, result sql.NullString
 	var createdAt string
 	var fallbackQualityInt int
 	if err := s.Scan(
 		&j.ID, &j.SpotifyURI, &j.Status, &j.Error, &j.RetryCount, &fallbackQualityInt,
-		&createdAt, &startedAt, &completedAt,
+		&createdAt, &startedAt, &completedAt, &result,
 	); err != nil {
 		return nil, err
 	}
 	j.FallbackQuality = fallbackQualityInt != 0
+	if result.Valid && result.String != "" {
+		j.Result = json.RawMessage(result.String)
+	}
 
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		j.CreatedAt = t

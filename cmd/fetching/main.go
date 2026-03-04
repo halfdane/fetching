@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -181,15 +182,32 @@ func runServe(args []string) error {
 	// Seed the progress store with existing jobs from the database so the
 	// web UI shows history immediately after a restart.
 	if jobs, err := q.List(); err == nil {
-		summaries := make([]progress.JobSummary, len(jobs))
-		for i, j := range jobs {
-			summaries[i] = progress.JobSummary{
-				ID:        j.ID,
-				SourceURI: j.SpotifyURI,
-				Terminal:  j.Status == queue.StatusDone || j.Status == queue.StatusFailed,
+		var results []progress.CollectionView
+		var stubs []progress.JobSummary
+		for _, j := range jobs {
+			if j.Status == queue.StatusDone && len(j.Result) > 0 {
+				// Job completed and has a persisted snapshot — restore it fully.
+				var cv progress.CollectionView
+				if err := json.Unmarshal(j.Result, &cv); err == nil {
+					results = append(results, cv)
+					continue
+				}
 			}
+			if j.Status != queue.StatusDone && j.Status != queue.StatusFailed {
+				// Pending/running job: show a stub so the worker can fill it in.
+				stubs = append(stubs, progress.JobSummary{
+					ID:        j.ID,
+					SourceURI: j.SpotifyURI,
+				})
+			}
+			// Terminal jobs without a persisted result are silently skipped.
 		}
-		prog.SeedFromJobs(summaries)
+		if len(results) > 0 {
+			prog.SeedFromResults(results)
+		}
+		if len(stubs) > 0 {
+			prog.SeedFromJobs(stubs)
+		}
 	}
 
 	// Start worker in background

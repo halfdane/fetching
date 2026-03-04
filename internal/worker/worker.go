@@ -3,6 +3,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -128,6 +129,14 @@ func (w *Worker) Run(ctx context.Context, oneShot bool) error {
 				_ = w.queue.Fail(j.ID, err.Error())
 			} else {
 				slog.Info("job completed", "id", j.ID)
+				// Persist the final CollectionView so it survives a restart.
+				if w.progress != nil {
+					if snap := w.progress.SnapshotJob(j.ID); snap != nil {
+						if data, merr := json.Marshal(snap); merr == nil {
+							_ = w.queue.StoreResult(j.ID, data)
+						}
+					}
+				}
 				_ = w.queue.Complete(j.ID)
 			}
 		}(job)
