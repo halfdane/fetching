@@ -187,7 +187,6 @@ func runServe(args []string) error {
 				ID:        j.ID,
 				SourceURI: j.SpotifyURI,
 				Terminal:  j.Status == queue.StatusDone || j.Status == queue.StatusFailed,
-				Error:     j.Error,
 			}
 		}
 		prog.SeedFromJobs(summaries)

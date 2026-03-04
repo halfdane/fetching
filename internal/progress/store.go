@@ -72,17 +72,22 @@ func NewStore() *Store {
 type JobSummary struct {
 	ID        int64
 	SourceURI string
-	Terminal  bool   // true when status is "done" or "failed"
-	Error     string // non-empty when the job failed
+	Terminal  bool // true when status is "done" or "failed"
 }
 
-// SeedFromJobs populates the store with stub entries for jobs that already
-// exist in the database. This restores the "history" view in the web UI
-// after a server restart. Jobs are inserted oldest-first so the order
-// slice matches the original insertion order.
+// SeedFromJobs populates the store with stub entries for jobs that are not
+// yet complete. This ensures the worker re-displays in-progress or pending
+// jobs in the web UI after a server restart. Terminal (done/failed) jobs are
+// intentionally skipped — their full metadata (title, tracks, cover) was
+// never persisted, so showing a bare URI stub would be misleading.
+// Jobs are inserted oldest-first so the order slice matches the original
+// insertion order.
 func (s *Store) SeedFromJobs(jobs []JobSummary) {
 	s.mu.Lock()
 	for _, j := range jobs {
+		if j.Terminal {
+			continue // can't reconstruct metadata for completed jobs
+		}
 		if _, exists := s.byID[j.ID]; exists {
 			continue
 		}
@@ -92,11 +97,8 @@ func (s *Store) SeedFromJobs(jobs []JobSummary) {
 			Kind:             "collection",
 			Title:            j.SourceURI,
 			PlaceholderCover: true,
-			Terminal:         j.Terminal,
+			Terminal:         false,
 			Tracks:           []TrackView{},
-		}
-		if j.Terminal && j.Error != "" {
-			c.Title = j.SourceURI + " (failed)"
 		}
 		s.byID[j.ID] = c
 		s.order = append(s.order, j.ID)
