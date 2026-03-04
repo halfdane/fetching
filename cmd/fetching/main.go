@@ -168,16 +168,11 @@ func runServe(args []string) error {
 	verbose := fs.Bool("verbose", false, "enable verbose output")
 	fs.Parse(args)
 
-	runner, q, w, prog, err := setupDeps(*outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
+	_, q, w, prog, err := setupDeps(*outputDir, *trackTmpl, *episodeTmpl, *concurrency, *verbose)
 	if err != nil {
 		return err
 	}
 	defer q.Close()
-
-	// Ensure credentials are valid before starting.
-	if err := runner.EnsureAuth(); err != nil {
-		return fmt.Errorf("authentication: %w", err)
-	}
 
 	if err := q.RecoverStuckJobs(); err != nil {
 		return fmt.Errorf("recover stuck jobs: %w", err)

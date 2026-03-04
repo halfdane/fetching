@@ -7,11 +7,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1772440706,
-        "narHash": "sha256-9VvdD+vp+gQSNq+lJQmi9xg+y5C1OzotY9WClNIbTTo=",
+        "lastModified": 1772647914,
+        "narHash": "sha256-GxG88JaS6OBB8lexyrNSYboYIJh25DHh/o48mHJrpr8=",
         "owner": "halfdane",
         "repo": "fetching-cli",
-        "rev": "4016ed1e512f281dbd598ad43737f0a4ca7322d6",
+        "rev": "8c05a0d8673b52efce285843aea802a98f28b6e2",
         "type": "github"
       },
       "original": {
