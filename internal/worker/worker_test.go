@@ -253,7 +253,7 @@ func TestRun_SingleTrackHappyPath(t *testing.T) {
 		metaFn: func(_ string) ([]byte, error) { return []byte(trackJSON), nil },
 	}
 	w, q := newTestWorker(t, runner, &fakeTagger{})
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
 
 	if err := w.Run(context.Background(), true); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -278,7 +278,7 @@ func TestRun_EpisodeHappyPath(t *testing.T) {
 		metaFn: func(_ string) ([]byte, error) { return []byte(episodeJSON), nil },
 	}
 	w, q := newTestWorker(t, runner, &fakeTagger{})
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:episode:e1")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:episode:e1")
 
 	if err := w.Run(context.Background(), true); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -306,7 +306,7 @@ func TestRun_MetadataFetchFails(t *testing.T) {
 		},
 	}
 	w, q := newTestWorker(t, runner, &fakeTagger{})
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
 
 	// Grab the job and call processJob directly so we can assert on the returned
 	// error without having to exhaust the queue's own retry schedule.
@@ -339,7 +339,7 @@ func TestRun_AudioFetchFails_TrackSkipped(t *testing.T) {
 		},
 	}
 	w, q := newTestWorker(t, runner, &fakeTagger{})
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
 
 	if err := w.Run(context.Background(), true); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -373,7 +373,7 @@ func TestRun_Album_WritesPlaylistFile(t *testing.T) {
 		},
 	}
 	w, q := newTestWorker(t, runner, &fakeTagger{})
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:album:a")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:album:a")
 
 	if err := w.Run(context.Background(), true); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -401,7 +401,7 @@ func TestRun_ContextCancelled_BeforeProcessing(t *testing.T) {
 		},
 	}
 	w, q := newTestWorker(t, runner, &fakeTagger{})
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before Run
@@ -436,7 +436,7 @@ func TestRun_AlreadyFetched_SkipsAudio(t *testing.T) {
 	w, q := newTestWorker(t, runner, &fakeTagger{})
 
 	// First run: file is downloaded (audioCalls == 1).
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
 	if err := w.Run(context.Background(), true); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestRun_AlreadyFetched_SkipsAudio(t *testing.T) {
 	}
 
 	// Second run: file already exists — audio fetch must not be called.
-	_, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
+	_, _, _ = q.Enqueue(queue.EnqueueOptions{}, "spotify:track:t1")
 	if err := w.Run(context.Background(), true); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}

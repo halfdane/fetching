@@ -5,6 +5,7 @@ package web
 import (
 	"embed"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -51,6 +52,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/enqueue", h.handleEnqueue)
 	mux.HandleFunc("POST /api/jobs", h.handleEnqueue)
 	mux.HandleFunc("POST /api/jobs/retry", h.handleRetry)
+	mux.HandleFunc("DELETE /api/jobs/done", h.handleClearDone)
 	mux.HandleFunc("GET /api/jobs", h.handleJobs)
 	mux.HandleFunc("GET /api/logs", h.handleLogs)
 	mux.HandleFunc("GET /api/stream", h.handleStream)
@@ -98,12 +100,17 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fallbackQuality := h.defaultFallbackQuality || r.FormValue("fallback_quality") == "on"
-	jobs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: fallbackQuality}, uris...)
+	jobs, trimmedIDs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: fallbackQuality}, uris...)
 	if err != nil {
+		if errors.Is(err, queue.ErrQueueFull) {
+			http.Error(w, "Queue is full — all 100 slots are occupied by pending or running jobs. Please wait for jobs to finish.", http.StatusServiceUnavailable)
+			return
+		}
 		slog.Error("enqueue error", "err", err)
 		http.Error(w, "failed to enqueue", http.StatusInternalServerError)
 		return
 	}
+	h.progress.Remove(trimmedIDs...)
 
 	for _, j := range jobs {
 		h.progress.UpsertSubmitted(j.ID, j.SpotifyURI)
@@ -159,6 +166,24 @@ func (h *Handler) handleRetry(w http.ResponseWriter, r *http.Request) {
 			"sourceUri":  result.NewJob.SpotifyURI,
 			"acceptedAt": result.NewJob.CreatedAt,
 		})
+		return
+	}
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (h *Handler) handleClearDone(w http.ResponseWriter, r *http.Request) {
+	ids, err := h.queue.ClearDone()
+	if err != nil {
+		slog.Error("clear done error", "err", err)
+		http.Error(w, "failed to clear done jobs", http.StatusInternalServerError)
+		return
+	}
+	h.progress.Remove(ids...)
+
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"cleared": len(ids)})
 		return
 	}
 

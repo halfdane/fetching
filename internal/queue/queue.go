@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -45,6 +46,16 @@ type Job struct {
 	// completed successfully. Used to restore UI history after a restart.
 	Result          json.RawMessage `json:"result,omitempty"`
 }
+
+// maxJobs is the maximum number of job rows kept in the database.
+// When a new job would exceed this limit, the oldest terminal (done/failed)
+// jobs are auto-trimmed. If there are no terminal jobs to trim, ErrQueueFull
+// is returned and the caller should surface an error to the user.
+const maxJobs = 100
+
+// ErrQueueFull is returned by Enqueue when the job queue has reached its
+// maximum capacity and no terminal jobs are available to trim.
+var ErrQueueFull = errors.New("job queue is full — all 100 slots are occupied by pending or running jobs")
 
 // retryDelays defines the wait time before each successive retry attempt.
 var retryDelays = []time.Duration{
@@ -221,9 +232,42 @@ type EnqueueOptions struct {
 }
 
 // Enqueue adds one or more Spotify URIs to the queue.
-func (q *Queue) Enqueue(opts EnqueueOptions, uris ...string) ([]*Job, error) {
+// If the total job count would exceed maxJobs, the oldest terminal (done/failed)
+// jobs are automatically deleted to make room. The IDs of any auto-trimmed jobs
+// are returned as trimmedIDs so callers can evict them from in-memory stores.
+// ErrQueueFull is returned when there are not enough terminal jobs to trim.
+func (q *Queue) Enqueue(opts EnqueueOptions, uris ...string) (jobs []*Job, trimmedIDs []int64, err error) {
 	ctx := context.Background()
-	var jobs []*Job
+
+	// Auto-trim oldest terminal jobs when the new URIs would push us over the limit.
+	var total int
+	if err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs`).Scan(&total); err != nil {
+		return nil, nil, fmt.Errorf("count jobs: %w", err)
+	}
+	if need := (total + len(uris)) - maxJobs; need > 0 {
+		rows, err := q.db.QueryContext(ctx,
+			`SELECT id FROM jobs WHERE status IN ('done', 'failed') ORDER BY created_at ASC, id ASC LIMIT ?`, need)
+		if err != nil {
+			return nil, nil, fmt.Errorf("find terminal jobs to trim: %w", err)
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			trimmedIDs = append(trimmedIDs, id)
+		}
+		rows.Close()
+		if len(trimmedIDs) < need {
+			return nil, nil, ErrQueueFull
+		}
+		for _, id := range trimmedIDs {
+			if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id); err != nil {
+				return nil, nil, fmt.Errorf("auto-trim job %d: %w", id, err)
+			}
+		}
+	}
 
 	for _, uri := range uris {
 		fq := 0
@@ -233,13 +277,13 @@ func (q *Queue) Enqueue(opts EnqueueOptions, uris ...string) ([]*Job, error) {
 		res, err := q.db.ExecContext(ctx,
 			`INSERT INTO jobs (spotify_uri, fallback_quality) VALUES (?, ?)`, uri, fq)
 		if err != nil {
-			return nil, fmt.Errorf("insert job for %q: %w", uri, err)
+			return nil, trimmedIDs, fmt.Errorf("insert job for %q: %w", uri, err)
 		}
 		jobID, _ := res.LastInsertId()
 
 		body, _ := json.Marshal(goqitePayload{JobID: jobID})
 		if err := q.gq.Send(ctx, goqite.Message{Body: body}); err != nil {
-			return nil, fmt.Errorf("send goqite message for job %d: %w", jobID, err)
+			return nil, trimmedIDs, fmt.Errorf("send goqite message for job %d: %w", jobID, err)
 		}
 
 		jobs = append(jobs, &Job{
@@ -257,7 +301,34 @@ func (q *Queue) Enqueue(opts EnqueueOptions, uris ...string) ([]*Job, error) {
 	default:
 	}
 
-	return jobs, nil
+	return jobs, trimmedIDs, nil
+}
+
+// ClearDone deletes all completed (done) jobs from the database and returns
+// their IDs so callers can evict them from in-memory stores.
+// Failed jobs are intentionally kept so they remain visible for investigation.
+func (q *Queue) ClearDone() ([]int64, error) {
+	ctx := context.Background()
+	rows, err := q.db.QueryContext(ctx, `SELECT id FROM jobs WHERE status = 'done'`)
+	if err != nil {
+		return nil, fmt.Errorf("list done jobs: %w", err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id); err != nil {
+			return nil, fmt.Errorf("delete done job %d: %w", id, err)
+		}
+	}
+	return ids, nil
 }
 
 // Next claims and returns the next pending job, or nil if the queue is empty.
@@ -406,11 +477,11 @@ func (q *Queue) Retry(opts EnqueueOptions, uri string) (*RetryResult, error) {
 		}
 	}
 
-	jobs, err := q.Enqueue(opts, uri)
+	newJobs, autoTrimmed, err := q.Enqueue(opts, uri)
 	if err != nil {
 		return nil, err
 	}
-	return &RetryResult{NewJob: jobs[0], DeletedIDs: deletedIDs}, nil
+	return &RetryResult{NewJob: newJobs[0], DeletedIDs: append(deletedIDs, autoTrimmed...)}, nil
 }
 
 // List returns all jobs ordered by creation time descending.

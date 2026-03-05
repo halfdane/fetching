@@ -34,7 +34,7 @@ func TestRecoverStuckJobs_ResetsRunningToPending(t *testing.T) {
 	q := newTestQueue(t)
 
 	// Enqueue and claim a job (sets status → running).
-	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
+	jobs, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestRecoverStuckJobs_ResetsRunningToPending(t *testing.T) {
 func TestRecoverStuckJobs_ReenqueuesImmediately(t *testing.T) {
 	q := newTestQueue(t)
 
-	if _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc"); err != nil {
+	if _, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc"); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestRecoverStuckJobs_ReenqueuesImmediately(t *testing.T) {
 func TestRecoverStuckJobs_DoesNotTouchDoneOrFailed(t *testing.T) {
 	q := newTestQueue(t)
 
-	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:done", "spotify:track:failed")
+	jobs, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:done", "spotify:track:failed")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestRecoverStuckJobs_DoesNotTouchDoneOrFailed(t *testing.T) {
 func TestRecoverStuckJobs_MultipleJobs(t *testing.T) {
 	q := newTestQueue(t)
 
-	if _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:1", "spotify:track:2", "spotify:track:3"); err != nil {
+	if _, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:1", "spotify:track:2", "spotify:track:3"); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestRecoverStuckJobs_MultipleJobs(t *testing.T) {
 func TestNext_DiscardsStaleMessageForDoneJob(t *testing.T) {
 	q := newTestQueue(t)
 
-	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
+	jobs, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestNext_DiscardsStaleMessageForDoneJob(t *testing.T) {
 func TestNext_DiscardsStaleMessageForFailedJob(t *testing.T) {
 	q := newTestQueue(t)
 
-	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
+	jobs, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestNext_DiscardsStaleMessageForFailedJob(t *testing.T) {
 // TestEnqueue_CreatesPendingJob verifies Enqueue inserts a job with pending status.
 func TestEnqueue_CreatesPendingJob(t *testing.T) {
 	q := newTestQueue(t)
-	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
+	jobs, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestEnqueue_CreatesPendingJob(t *testing.T) {
 // TestEnqueue_FallbackQualityStored verifies the FallbackQuality option is persisted.
 func TestEnqueue_FallbackQualityStored(t *testing.T) {
 	q := newTestQueue(t)
-	jobs, err := q.Enqueue(EnqueueOptions{FallbackQuality: true}, "spotify:track:abc")
+	jobs, _, err := q.Enqueue(EnqueueOptions{FallbackQuality: true}, "spotify:track:abc")
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestEnqueue_FallbackQualityStored(t *testing.T) {
 // TestEnqueue_MultipleBatch verifies Enqueue with multiple URIs creates one job each.
 func TestEnqueue_MultipleBatch(t *testing.T) {
 	q := newTestQueue(t)
-	jobs, err := q.Enqueue(EnqueueOptions{}, "spotify:track:a", "spotify:track:b", "spotify:track:c")
+	jobs, _, err := q.Enqueue(EnqueueOptions{}, "spotify:track:a", "spotify:track:b", "spotify:track:c")
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestNext_EmptyQueueReturnsNil(t *testing.T) {
 // and populates StartedAt and GoqiteMsgID.
 func TestNext_MarksJobRunning(t *testing.T) {
 	q := newTestQueue(t)
-	enqueued, _ := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
+	enqueued, _, _ := q.Enqueue(EnqueueOptions{}, "spotify:track:abc")
 
 	job, err := q.Next()
 	if err != nil {
@@ -453,7 +453,7 @@ func TestRetry_DeletesTerminalJobAndCreatesNew(t *testing.T) {
 	defer func() { retryDelays = origDelays }()
 
 	q := newTestQueue(t)
-	enqueued, _ := q.Enqueue(EnqueueOptions{}, "spotify:album:xyz")
+	enqueued, _, _ := q.Enqueue(EnqueueOptions{}, "spotify:album:xyz")
 	oldID := enqueued[0].ID
 
 	// Process and permanently fail the job.

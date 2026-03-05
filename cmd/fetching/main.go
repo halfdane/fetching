@@ -146,7 +146,7 @@ func runBatch(args []string) error {
 		return fmt.Errorf("recover stuck jobs: %w", err)
 	}
 
-	if _, err := q.Enqueue(queue.EnqueueOptions{FallbackQuality: *fallbackQuality}, uris...); err != nil {
+	if _, _, err := q.Enqueue(queue.EnqueueOptions{FallbackQuality: *fallbackQuality}, uris...); err != nil {
 		return fmt.Errorf("enqueue: %w", err)
 	}
 

@@ -219,6 +219,22 @@
             line-height: 1;
         }
         .log-panel-close:hover { color: var(--text); background: transparent; }
+        .queue-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 0.75rem;
+        }
+        .clear-done-btn {
+            padding: 0.4rem 0.9rem;
+            border-radius: 6px;
+            background: transparent;
+            border: 1px solid var(--text-muted);
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        .clear-done-btn:hover { border-color: var(--danger); color: var(--danger); background: transparent; }
         #log-console {
             flex: 1;
             overflow-y: auto;
@@ -238,6 +254,10 @@
         <input id="uri-input" type="text" name="uri" placeholder="Paste one Spotify URI or URL and press Enter" autocomplete="off" required>
         <button type="submit">Add</button>
     </form>
+
+    <div class="queue-actions">
+        <button class="clear-done-btn" id="clear-done-btn" type="button">Clear done</button>
+    </div>
 
     {{template "jobs" .Collections}}
 
@@ -307,6 +327,13 @@
         const list = document.getElementById('job-list');
         const form = document.getElementById('enqueue-form');
         const uriInput = document.getElementById('uri-input');
+
+        document.getElementById('clear-done-btn').onclick = function() {
+            fetch('/api/jobs/done', {
+                method: 'DELETE',
+                headers: { 'Accept': 'application/json' }
+            }).catch(function() {});
+        };
 
         form.addEventListener('submit', function(e) {
             e.preventDefault();
