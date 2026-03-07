@@ -15,12 +15,6 @@ in
       description = "The fetching package to use.";
     };
 
-    credentialsFile = lib.mkOption {
-      type = lib.types.str;
-      default = "/var/lib/fetching/credentials.json";
-      description = "Path to the Spotify credentials JSON file.";
-    };
-
     outputDir = lib.mkOption {
       type = lib.types.str;
       default = "/var/lib/fetching/music";
@@ -95,7 +89,6 @@ in
 
     systemd.tmpfiles.rules = [
       "d ${cfg.outputDir} 0755 ${cfg.user} ${cfg.group} -"
-      "d ${builtins.dirOf cfg.credentialsFile} 0700 ${cfg.user} ${cfg.group} -"
     ];
 
     systemd.services.fetching = {
@@ -111,7 +104,6 @@ in
         ExecStart = lib.concatStringsSep " " [
           "${cfg.package}/bin/fetching"
           "serve"
-          "--credentials" cfg.credentialsFile
           "--output" cfg.outputDir
           "--port" (toString cfg.port)
           "--concurrency" (toString cfg.concurrency)
@@ -124,9 +116,12 @@ in
         # Hardening
         NoNewPrivileges = true;
         ProtectSystem = "strict";
+        # fetching-cli stores Spotify credentials at
+        # ~/.config/fetching-cli/credentials.json (resolved under the
+        # service home /var/lib/fetching via StateDirectory).
+        # StateDirectory already grants RW access to /var/lib/fetching.
         ReadWritePaths = [
           cfg.outputDir
-          (builtins.dirOf cfg.credentialsFile)
           "/var/cache/fetching"
         ];
         ProtectHome = true;
