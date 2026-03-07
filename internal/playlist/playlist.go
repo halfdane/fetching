@@ -39,7 +39,7 @@ func WriteM3U8(dest string, entries []TrackEntry, meta Metadata) error {
 	// Write metadata as comments.
 	for k, v := range meta {
 		if v != "" {
-			b.WriteString(fmt.Sprintf("#PLAYLIST:%s=%s\n", k, v))
+			b.WriteString(fmt.Sprintf("# %s=%s\n", k, v))
 		}
 	}
 
