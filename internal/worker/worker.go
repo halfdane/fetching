@@ -18,9 +18,10 @@ import (
 
 // trackRetryDelays mirrors the queue retry schedule for per-track transient failures.
 var trackRetryDelays = []time.Duration{
-	1 * time.Second,
-	5 * time.Second,
-	15 * time.Second,
+	10 * time.Second,
+	30 * time.Second,
+	90 * time.Second,
+	270 * time.Second,
 }
 
 // withRetry calls fn up to 1+len(trackRetryDelays) times, sleeping between
