@@ -63,6 +63,24 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
+	// Web Share Target: the manifest sends shared content as GET /?url=…&text=…
+	// When any share params are present, enqueue the URI and redirect to clean
+	// URL so a page refresh doesn't re-enqueue.
+	if uri := shareTargetURI(r); uri != "" {
+		jobs, trimmedIDs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: h.defaultFallbackQuality}, uri)
+		if err != nil && !errors.Is(err, queue.ErrQueueFull) {
+			slog.Error("share-target enqueue error", "err", err)
+		}
+		if err == nil {
+			h.progress.Remove(trimmedIDs...)
+			for _, j := range jobs {
+				h.progress.UpsertSubmitted(j.ID, j.SpotifyURI)
+			}
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
 	collections := h.progress.Snapshot()
 	data := struct {
 		Collections []progress.CollectionView
@@ -72,6 +90,20 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if err := h.tmpl.ExecuteTemplate(w, "index", data); err != nil {
 		slog.Error("template error", "err", err)
 	}
+}
+
+// shareTargetURI extracts a Spotify URI/URL from Web Share Target query
+// parameters (?url=, ?text=, ?title=). Returns empty string if no share
+// params are present.
+func shareTargetURI(r *http.Request) string {
+	// Prefer the explicit url param; Spotify puts the https link there.
+	// Fall back to text, which some platforms use instead.
+	for _, param := range []string{"url", "text", "title"} {
+		if v := strings.TrimSpace(r.URL.Query().Get(param)); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
