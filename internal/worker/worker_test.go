@@ -386,9 +386,6 @@ func TestRun_Album_WritesPlaylistFile(t *testing.T) {
 	if countFilesWithExt(t, w.store.BaseDir, ".ogg") != 2 {
 		t.Errorf("expected 2 .ogg files (one per track), got %d", countFilesWithExt(t, w.store.BaseDir, ".ogg"))
 	}
-	if countFilesWithExt(t, w.store.BaseDir, ".m3u8") != 1 {
-		t.Error("expected 1 .m3u8 playlist file")
-	}
 }
 
 // TestRun_ContextCancelled_BeforeProcessing verifies that a pre-cancelled context

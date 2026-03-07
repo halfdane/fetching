@@ -84,10 +84,10 @@ func TestWriteM3U8Metadata(t *testing.T) {
 	data, _ := os.ReadFile(dest)
 	content := string(data)
 
-	if !strings.Contains(content, "#PLAYLIST:upc=602577904004") {
+	if !strings.Contains(content, "# upc=602577904004") {
 		t.Errorf("missing UPC metadata:\n%s", content)
 	}
-	if !strings.Contains(content, "#PLAYLIST:spotify_uri=spotify:album:abc") {
+	if !strings.Contains(content, "# spotify_uri=spotify:album:abc") {
 		t.Errorf("missing spotify_uri metadata:\n%s", content)
 	}
 	if strings.Contains(content, "empty_key") {
