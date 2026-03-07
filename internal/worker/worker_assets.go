@@ -34,33 +34,11 @@ func (w *Worker) generateAlbumAssets(album *spotify.Album, results []fetchResult
 		return
 	}
 
-	artist := "Unknown Artist"
-	if len(album.Artists) > 0 {
-		artist = album.Artists[0].Name
-	}
 	// Derive the album dir from where the first track actually landed,
 	// so it's always consistent with the path template.
 	dir := filepath.Dir(results[0].Path)
-
-	// M3U8
-	entries := resultsToEntries(results)
-	m3u8Meta := playlist.Metadata{
-		"name":        album.Name,
-		"artist":      artist,
-		"date":        album.Date,
-		"label":       album.Label,
-		"spotify_uri": album.URI,
-	}
-	if upc := spotify.UPC(album.ExternalIDs); upc != "" {
-		m3u8Meta["upc"] = upc
-	}
-
-	dest := dir + "/" + storage.Sanitize(album.Name) + ".m3u8"
-	if err := playlist.WriteM3U8(dest, entries, m3u8Meta); err != nil {
-		slog.Warn("failed to write album M3U8", "err", err)
-	} else {
-		slog.Info("wrote album playlist", "path", dest)
-	}
+	
+	// don't store the M3U8 in the track dir: clients know how to read albums from a dir with a cover
 
 	// Cover (LARGE)
 	if err := cover.SaveAlbumCover(dir, album.Covers); err != nil {
