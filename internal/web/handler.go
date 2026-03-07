@@ -15,6 +15,7 @@ import (
 	"github.com/halfdane/fetching/internal/logstore"
 	"github.com/halfdane/fetching/internal/progress"
 	"github.com/halfdane/fetching/internal/queue"
+	"github.com/halfdane/fetching/internal/spotify"
 )
 
 //go:embed static
@@ -67,7 +68,8 @@ func (h *Handler) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// When any share params are present, enqueue the URI and redirect to clean
 	// URL so a page refresh doesn't re-enqueue.
 	if uri := shareTargetURI(r); uri != "" {
-		jobs, trimmedIDs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: h.defaultFallbackQuality}, uri)
+		clean := spotify.NormalizeURI(uri)
+		jobs, trimmedIDs, err := h.queue.Enqueue(queue.EnqueueOptions{FallbackQuality: h.defaultFallbackQuality}, clean)
 		if err != nil && !errors.Is(err, queue.ErrQueueFull) {
 			slog.Error("share-target enqueue error", "err", err)
 		}
@@ -123,7 +125,7 @@ func (h *Handler) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 	for _, line := range strings.Split(input, "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
-			uris = append(uris, line)
+			uris = append(uris, spotify.NormalizeURI(line))
 		}
 	}
 	if len(uris) != 1 {
