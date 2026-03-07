@@ -309,7 +309,7 @@ func (q *Queue) Enqueue(opts EnqueueOptions, uris ...string) (jobs []*Job, trimm
 // Failed jobs are intentionally kept so they remain visible for investigation.
 func (q *Queue) ClearDone() ([]int64, error) {
 	ctx := context.Background()
-	rows, err := q.db.QueryContext(ctx, `SELECT id FROM jobs WHERE status = 'done'`)
+	rows, err := q.db.QueryContext(ctx, `SELECT id FROM jobs WHERE status IN ('done', 'failed')`)
 	if err != nil {
 		return nil, fmt.Errorf("list done jobs: %w", err)
 	}
@@ -323,12 +323,12 @@ func (q *Queue) ClearDone() ([]int64, error) {
 		ids = append(ids, id)
 	}
 	rows.Close()
-	for _, id := range ids {
-		if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id); err != nil {
-			return nil, fmt.Errorf("delete done job %d: %w", id, err)
-		}
-	}
-	return ids, nil
+	       for _, id := range ids {
+		       if _, err := q.db.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id); err != nil {
+			       return nil, fmt.Errorf("delete terminal job %d: %w", id, err)
+		       }
+	       }
+	       return ids, nil
 }
 
 // Next claims and returns the next pending job, or nil if the queue is empty.
