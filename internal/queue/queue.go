@@ -33,18 +33,18 @@ const (
 
 // Job is a single download request with status information.
 type Job struct {
-	ID              int64           `json:"id"`
-	SpotifyURI      string          `json:"spotify_uri"`
-	Status          Status          `json:"status"`
-	Error           string          `json:"error,omitempty"`
-	RetryCount      int             `json:"retry_count"`
-	FallbackQuality bool            `json:"fallback_quality"`
-	CreatedAt       time.Time       `json:"created_at"`
-	StartedAt       *time.Time      `json:"started_at,omitempty"`
-	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
+	ID              int64      `json:"id"`
+	SpotifyURI      string     `json:"spotify_uri"`
+	Status          Status     `json:"status"`
+	Error           string     `json:"error,omitempty"`
+	RetryCount      int        `json:"retry_count"`
+	FallbackQuality bool       `json:"fallback_quality"`
+	CreatedAt       time.Time  `json:"created_at"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 	// Result holds the serialised CollectionView snapshot saved when the job
 	// completed successfully. Used to restore UI history after a restart.
-	Result          json.RawMessage `json:"result,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
 }
 
 // maxJobs is the maximum number of job rows kept in the database.
