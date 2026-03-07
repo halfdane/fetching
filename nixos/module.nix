@@ -125,8 +125,9 @@ in
           "--output" cfg.outputDir
           "--port" (toString cfg.port)
           "--concurrency" (toString cfg.concurrency)
-        ] ++ lib.optional (cfg.trackTemplate != "") ["--track-template" cfg.trackTemplate]
-          ++ lib.optional (cfg.episodeTemplate != "") ["--episode-template" cfg.episodeTemplate]);
+          lib.optionalString (cfg.trackTemplate != "") "--track-template ${cfg.trackTemplate}"
+          lib.optionalString (cfg.episodeTemplate != "") "--episode-template ${cfg.episodeTemplate}"
+        ]);
         Restart = "on-failure";
         RestartSec = "10s";
         StateDirectory = "fetching";
