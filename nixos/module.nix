@@ -21,6 +21,24 @@ in
       description = "Directory where fetched music files are stored.";
     };
 
+    trackTemplate = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = ''
+        Path template for tracks (default: "{artist}/{album}/{track_number}-{title}").
+        See CLI docs for available template tokens.
+      '';
+    };
+
+    episodeTemplate = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = ''
+        Path template for episodes (default: "{show}/{title}").
+        See CLI docs for available template tokens.
+      '';
+    };
+
     port = lib.mkOption {
       type = lib.types.port;
       default = 8080;
@@ -101,13 +119,14 @@ in
         Type = "simple";
         User = cfg.user;
         Group = cfg.group;
-        ExecStart = lib.concatStringsSep " " [
+        ExecStart = lib.concatStringsSep " " ([
           "${cfg.package}/bin/fetching"
           "serve"
           "--output" cfg.outputDir
           "--port" (toString cfg.port)
           "--concurrency" (toString cfg.concurrency)
-        ];
+        ] ++ lib.optional (cfg.trackTemplate != "") ["--track-template" cfg.trackTemplate]
+          ++ lib.optional (cfg.episodeTemplate != "") ["--episode-template" cfg.episodeTemplate]);
         Restart = "on-failure";
         RestartSec = "10s";
         StateDirectory = "fetching";
