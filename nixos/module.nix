@@ -108,6 +108,8 @@ in
     systemd.tmpfiles.rules = [
       # Create with SGID/world-rx/group-rwxs
       "d ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} - -"
+      "a+ ${cfg.outputDir} d:g:${cfg.group}:rwx"
+      "Z ${cfg.outputDir} g:${cfg.group}:rwx"
     ];
 
     systemd.services.fetching = {
@@ -131,7 +133,6 @@ in
         ]);
         ExecStartPost = ''
           ${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix ${cfg.outputDir}
-          ${pkgs.acl}/bin/setfacl -b -R ${cfg.outputDir}  # Remove all ACLs
           ${pkgs.acl}/bin/setfacl -d -m g:${cfg.group}:rwx ${cfg.outputDir}  # Optional: group write default
         '';
 
