@@ -107,6 +107,7 @@ in
 
     systemd.tmpfiles.rules = [
       "d ${cfg.outputDir} 0755 ${cfg.user} ${cfg.group} -"
+      "Z ${cfg.outputDir} ${cfg.user} ${cfg.group} 2775"
     ];
 
     systemd.services.fetching = {
@@ -128,6 +129,9 @@ in
           (lib.optionalString (cfg.trackTemplate != "") "--track-template ${cfg.trackTemplate}")
           (lib.optionalString (cfg.episodeTemplate != "") "--episode-template ${cfg.episodeTemplate}")
         ]);
+        postStart = ''
+          ${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix ${cfg.outputDir}
+        '';
         Restart = "on-failure";
         RestartSec = "10s";
         StateDirectory = "fetching";
