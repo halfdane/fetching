@@ -15,7 +15,7 @@
       in
       {
         packages.default =
-          let fetchingVersion = "0.1.12"; in
+          let fetchingVersion = "0.1.13"; in
           pkgs.buildGoModule {
             pname = "fetching";
             version = fetchingVersion;
