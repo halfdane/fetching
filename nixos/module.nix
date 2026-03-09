@@ -106,10 +106,10 @@ in
     users.groups.${cfg.group} = { };
 
     systemd.tmpfiles.rules = [
-      # Create with SGID/world-rx/group-rwxs
       "d ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} - -"
-      "a+ ${cfg.outputDir} d:g:${cfg.group}:rwx"
-      "Z ${cfg.outputDir} g:${cfg.group}:rwx"
+      "a+ ${cfg.outputDir} g:${cfg.group}:rwx"  # Current ACL append
+      "a+ ${cfg.outputDir} d:g:${cfg.group}:rwx"  # Default for new
+      "Z ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} - -"  # If recursive chmod needed
     ];
 
     systemd.services.fetching = {
@@ -133,7 +133,7 @@ in
         ]);
         ExecStartPost = ''
           ${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix ${cfg.outputDir}
-          ${pkgs.acl}/bin/setfacl -d -m g:${cfg.group}:rwx ${cfg.outputDir}  # Optional: group write default
+          ${pkgs.acl}/bin/setfacl -d -m g:${cfg.group}:rwx ${cfg.outputDir}
         '';
 
         Restart = "on-failure";
