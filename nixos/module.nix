@@ -108,12 +108,6 @@ in
     systemd.tmpfiles.rules = [
       # Create with SGID/world-rx/group-rwxs
       "d ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} - -"
-      # Recursive adjust (optional, but ensures)
-      "Z ${cfg.outputDir} ${cfg.user} ${cfg.group} 2775"
-      # Default ACL: group rwx inherits to new files/dirs
-      "a ${cfg.outputDir} - - - group:${cfg.group}:rwx"
-      # Access ACL recursive: group rwx
-      "A ${cfg.outputDir} - - - group:${cfg.group}:rwx"
     ];
 
     systemd.services.fetching = {
