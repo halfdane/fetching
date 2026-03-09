@@ -107,11 +107,7 @@ in
 
     systemd.tmpfiles.rules = [
       "d ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} - -"
-      "a+ ${cfg.outputDir} g:${cfg.group}:rwx"  # Current ACL append
-      "a+ ${cfg.outputDir} d:g:${cfg.group}:rwx"  # Default for new
-      "Z ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} - -"  # If recursive chmod needed
     ];
-
     systemd.services.fetching = {
       description = "fetching Spotify music fetcher";
       wantedBy = [ "multi-user.target" ];
@@ -133,9 +129,9 @@ in
         ]);
         ExecStartPost = ''
           ${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix ${cfg.outputDir}
-          ${pkgs.acl}/bin/setfacl -d -m g:${cfg.group}:rwx ${cfg.outputDir}
+          ${pkgs.acl}/bin/setfacl -R -m g:${cfg.group}:rwx ${cfg.outputDir}
+          ${pkgs.acl}/bin/setfacl -R -m d:g:${cfg.group}:rwx ${cfg.outputDir}
         '';
-
         Restart = "on-failure";
         RestartSec = "10s";
         StateDirectory = "fetching";
