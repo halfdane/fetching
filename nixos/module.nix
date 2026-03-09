@@ -103,7 +103,7 @@ in
       createHome = true;
     };
 
-    users.groups.${cfg.group} = lib.mkIf (cfg.group == "fetching") { };
+    users.groups.${cfg.group} = { };
 
     systemd.tmpfiles.rules = [
       "d ${cfg.outputDir} 0755 ${cfg.user} ${cfg.group} -"
