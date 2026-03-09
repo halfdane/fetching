@@ -106,12 +106,14 @@ in
     users.groups.${cfg.group} = { };
 
     systemd.tmpfiles.rules = [
-      # Create directory with group-write and setgid (g+rws = 2775)
-      "d ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} -"
-      # Set default ACL for group rwx
+      # Create with SGID/world-rx/group-rwxs
+      "d ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} - -"
+      # Recursive adjust (optional, but ensures)
       "Z ${cfg.outputDir} ${cfg.user} ${cfg.group} 2775"
-      "a ${cfg.outputDir} - - - g:${cfg.group}:rwx"
-      "A ${cfg.outputDir} - - - d:g:${cfg.group}:rwx"
+      # Default ACL: group rwx inherits to new files/dirs
+      "a ${cfg.outputDir} - - - group:${cfg.group}:rwx"
+      # Access ACL recursive: group rwx
+      "A ${cfg.outputDir} - - - group:${cfg.group}:rwx"
     ];
 
     systemd.services.fetching = {
@@ -133,7 +135,7 @@ in
           (lib.optionalString (cfg.trackTemplate != "") "--track-template ${cfg.trackTemplate}")
           (lib.optionalString (cfg.episodeTemplate != "") "--episode-template ${cfg.episodeTemplate}")
         ]);
-        postStart = ''
+        ExecStartPost = ''
           ${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix ${cfg.outputDir}
           ${pkgs.acl}/bin/setfacl -b -R ${cfg.outputDir}  # Remove all ACLs
           ${pkgs.acl}/bin/setfacl -d -m g:${cfg.group}:rwx ${cfg.outputDir}  # Optional: group write default
