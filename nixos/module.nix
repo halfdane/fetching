@@ -127,11 +127,6 @@ in
           (lib.optionalString (cfg.trackTemplate != "") "--track-template ${cfg.trackTemplate}")
           (lib.optionalString (cfg.episodeTemplate != "") "--episode-template ${cfg.episodeTemplate}")
         ]);
-        ExecStartPost = [
-          "${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix ${cfg.outputDir}"
-          "${pkgs.acl}/bin/setfacl -R -m g:${cfg.group}:rwx ${cfg.outputDir}"
-          "${pkgs.acl}/bin/setfacl -R -m d:g:${cfg.group}:rwx ${cfg.outputDir}"
-        ];
         Restart = "on-failure";
         RestartSec = "10s";
         StateDirectory = "fetching";
