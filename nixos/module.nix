@@ -131,7 +131,10 @@ in
         ]);
         postStart = ''
           ${pkgs.systemd}/bin/systemd-tmpfiles --create --prefix ${cfg.outputDir}
+          ${pkgs.acl}/bin/setfacl -b -R ${cfg.outputDir}  # Remove all ACLs
+          ${pkgs.acl}/bin/setfacl -d -m g:${cfg.group}:rwx ${cfg.outputDir}  # Optional: group write default
         '';
+
         Restart = "on-failure";
         RestartSec = "10s";
         StateDirectory = "fetching";
