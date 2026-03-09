@@ -106,8 +106,12 @@ in
     users.groups.${cfg.group} = { };
 
     systemd.tmpfiles.rules = [
-      "d ${cfg.outputDir} 0755 ${cfg.user} ${cfg.group} -"
+      # Create directory with group-write and setgid (g+rws = 2775)
+      "d ${cfg.outputDir} 2775 ${cfg.user} ${cfg.group} -"
+      # Set default ACL for group rwx
       "Z ${cfg.outputDir} ${cfg.user} ${cfg.group} 2775"
+      "a ${cfg.outputDir} - - - g:${cfg.group}:rwx"
+      "A ${cfg.outputDir} - - - d:g:${cfg.group}:rwx"
     ];
 
     systemd.services.fetching = {
